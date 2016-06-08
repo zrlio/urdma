@@ -1,0 +1,105 @@
+This works for the i40e driver.
+
+The whole filtering interface in DPDK is inspired by ioctl(2) (the poster child
+of how not to design an API), which makes figuring out how to use Flow Director
+even harder than it already is.  However, once you actually figure out what the
+driver is actually doing, then it becomes easier to figure out.
+
+There are three steps to successfully enabling Flow Director and adding rules:
+
+1. Enable perfect match mode in the eth_conf when you call
+   rte_eth_dev_configure().
+
+2. For every flow type you want to create rules for, set the fields to match
+   against (this set must be the same for every rule).
+
+3. Add the rules.
+
+
+[1] ENABLE PERFECT MATCH MODE
+
+The first step is easy.  You just have to set the following two fields in the
+rte_eth_conf structure:
+
+	eth_conf.fdir_conf.mode = RTE_FDIR_MODE_PERFECT;
+	eth_conf.fdir_conf.pballoc = RTE_FDIR_PBALLOC_64K;
+
+The pballoc field seems to not be used by the i40e driver, but I left it in
+since older hardware needs to reserve a specific amount of NIC memory for the
+rule table.
+
+The fdir_conf structure also contains a mask field that lets you set masks.  As
+far as I can tell, the i40e driver completely ignores the mask field (even if
+you set fields here, if you then query it, it shows up as all zeros).  I think
+older hardware may require this (and not use the below mechanism) but I haven't
+tested it due to lack of hardware.
+
+Everything else that you do with fdir is done using the ioctl(2)-like call,
+rte_eth_dev_filter_ctrl().  It has a number of subcommands below but you really
+only need to use 2 of them, described below in order:
+
+[2] SELECT FIELDS
+
+For every type of flow that you want to create a rule for, you need to tell it
+what fields to select:
+
+	struct rte_eth_fdir_filter_info filter_info;
+	memset(&filter_info, 0, sizeof(filter_info));
+	filter_info.info_type = RTE_ETH_FDIR_FILTER_INPUT_SET_SELECT;
+	filter_info.info.input_set_conf.flow_type = RTE_ETH_FLOW_NONFRAG_IPV4_UDP;
+	filter_info.info.input_set_conf.inset_size = 2;
+	filter_info.info.input_set_conf.field[0]
+				= RTE_ETH_INPUT_SET_L3_DST_IP4;
+	filter_info.info.input_set_conf.field[1]
+				= RTE_ETH_INPUT_SET_L4_UDP_DST_PORT;
+	filter_info.info.input_set_conf.op = RTE_ETH_INPUT_SET_SELECT;
+	retval = rte_eth_dev_filter_ctrl(portid, RTE_ETH_FILTER_FDIR,
+			RTE_ETH_FILTER_SET, &filter_info);
+	if (retval != 0) {
+		rte_exit(EXIT_FAILURE, "Could not set fdir info: %s\n",
+				strerror(-retval));
+	}
+
+This will make all UDP/IPv4 rules match the destination IPv4 address and
+destination port number.
+
+The inset_size is the size of the field array.  The field array consists of
+enum values each of which specifies a field in the packet (which has to
+correspond to the flow_type).  And the op in most cases should be
+RTE_ETH_INPUT_SET_SELECT.  There is also RTE_ETH_INPUT_SET_ADD, but I have not
+tested it and don't really see a use case for it.
+
+[3] ADD RULES
+
+Finally, adding rules:
+
+	memset(&fdirf, 0, sizeof(fdirf));
+	fdirf.soft_id = 1;
+	fdirf.input.flow_type = RTE_ETH_FLOW_NONFRAG_IPV4_UDP;
+	fdirf.input.flow.udp4_flow.dst_port = rte_cpu_to_be_16(10000);
+	fdirf.input.flow.udp4_flow.ip.dst_ip = IPv4(10, 0, 0, 1);
+	fdirf.action.rx_queue = 2;
+	fdirf.action.behavior = RTE_ETH_FDIR_ACCEPT;
+	fdirf.action.report_status = RTE_ETH_FDIR_NO_REPORT_STATUS;
+	retval = rte_eth_dev_filter_ctrl(iface->portid, RTE_ETH_FILTER_FDIR,
+			RTE_ETH_FILTER_ADD, &fdirf);
+	if (retval != 0) {
+		rte_exit(EXIT_FAILURE, "Could not add fdir UDP filter: %s\n",
+				strerror(-retval));
+	}
+
+This adds a rule which assigns inbound packets destined for 10.0.0.1:10000 to
+receive queue 2.  The soft_id must be unique for every rule that you add (I
+believe you can use it in a RTE_ETH_FILTER_UPDATE operation to update the rule
+later, but haven't tested that).  The behavior can be RTE_ETH_FDIR_ACCEPT or
+even RTE_ETH_FDIR_DROP if you know you don't want to receive certain flows.
+The report_status field is not important for what we want to do at the moment;
+I think it is more relevant if you have rules based on arbitrary offsets in the
+packet (called "flexible" in Flow Director terms).
+
+Rules can be deleted with the analogous RTE_ETH_FILTER_DELETE operation.
+
+You can use the RTE_ETH_FILTER_INFO operation to query the status of the flow
+director.  It returns back a "struct rte_eth_fdir_info" (not to be confused
+with the similarly named "struct rte_eth_fdir_filter_info" that you used
+above). In particular, you can find out the maximum number of rules you can add.

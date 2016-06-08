@@ -1,0 +1,52 @@
+DPDK support computing or offloading checksum computation for TCP, UDP, SCTP,
+and IP.
+
+To enable checksum offloading:
+
+(1) Ensure that the TX queue has offload support enabled.  This requires
+explicitly passing the rte_eth_txconf structure to rte_eth_tx_queue_setup()
+(rather than setting it to NULL and allowing the driver to pick default
+parameters).  What I do is call rte_eth_dev_info_get(), which returns the
+defaults as part of the info structure, and then modify that.
+
+To have UDP checksum offloading work, the ETH_TXQ_FLAGS_NOXSUMUDP flag MUST NOT
+be set in txconf->txq_flags.  The Programmer's Guide does *not* document this
+and led me on a wild goose chase for several hours trying to figure out
+why this wasn't working.  The issue is that the i40e driver will set this flag
+by default, to allow it to use a more efficient transmit path.
+
+I presume you could have checksum offload support enabled on some TX queues but
+not others on the same port, but I have not (yet) tested this.
+
+(2) As documented in the Programmer's Guide, you must set up some metadata in
+the rte_mbuf structure, *and* seed the checksum field with a specific value:
+
+  (a) For IPv4 checksum offload:
+
+	mbuf->l2_len = sizeof(struct ether_hdr);
+	mbuf->l3_len = sizeof(struct ipv4_hdr);
+	mbuf->ol_flags |= PKT_TX_IPV4|PKT_TX_IP_CKSUM;
+	ip->hdr_checksum = 0;
+
+      Here we just seed the checksum field with 0 (which is natural since I
+      believe a 0 byte does not change the checksum).
+
+
+  (b) For UDP checksum offload:
+	mbuf->l2_len = sizeof(struct ether_hdr);
+	mbuf->l3_len = sizeof(struct ipv4_hdr);
+	mbuf->ol_flags |= PKT_TX_IPV4|PKT_TX_UDP_CKSUM;
+	udp->dgram_cksum = rte_ipv4_phdr_cksum(ip, mbuf->ol_flags);
+
+      Here we must pre-compute the IP psuedo-header checksum that is part of
+      the UDP checksum (which is a minor requirement compared to checksumming
+      the entire packet, but I imagine is a bit harder to do in hardware, since
+      it's not just a linear scan).
+
+  The other important thing to note is the l2_len and l3_len fields, which are
+  used by the hardware to locate the region of the packet to compute the
+  checksum for (this allows, e.g., hardware offloading of checksums in
+  tunnelled packets by adjusting these values).  Although they must be 2 byte
+  and 4 byte aligned, respectively (a requirement I noticed by browsing the
+  i40e driver source code while trying to figure out why the offload wasn't
+  working).

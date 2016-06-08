@@ -1,0 +1,51 @@
+This repository contains the DPDK verbs source along with some demo
+applications.
+
+Requirements
+------------
+
+ - Linux kernel >= 3.17.8
+ - libibverbs >= 1.2.0 (versions less than 1.1.8 do not support verbs extensions
+   and version 1.1.8 has a broken extensions ABI)
+ - librdmacm >= 1.0.21
+ - DPDK >= 2.2.0 built as shared libraries (CONFIG_RTE_BUILD_SHARED_LIB=y)
+ - libnl-3 and libnl-route-3
+ - json-c
+
+Setup instructions
+------------------
+
+I am assuming a default installation of CentOS 7.
+
+To build this package, RTE_SDK and RTE_TARGET need to be exported into the environment:
+
+$ export RTE_SDK=${prefix}/share/dpdk
+$ export RTE_TARGET=x86_64-native-linuxapp-gcc
+
+To run an application with this driver, the KNI and usiw modules must be loaded:
+
+$ sudo modprobe rte_kni
+$ sudo modprobe usiw device_count=2
+
+The device count is the number of devices that should be accessible via DPDK.
+These verbs devices are pre-created so libibverbs will call our userspace
+driver to initialize them.
+
+Known Issues
+------------
+
+ - There is a potential race condition with completion channels, where a
+   completion event can get lost, and thus a thread waiting on
+   ibv_get_cq_event() will never wake up, leading to a deadlock.  A cause has
+   not been identified, but the issue has not been reproduced with the "extra"
+   lock added around the rte_ring operations in do_poll_cq() and
+   finish_post_cqe().
+
+ - There is the possibility of a hang in the kernel module if the user process
+   is killed while between the read() and write() calls on event_fd in
+   poll_conn_state().  This is because rdma_destroy_id() in the kernel will
+   block until the connection attempt completes, but itself prevents our
+   event_fd from being closed which would unblock it.
+
+ - The progress thread will use 100% CPU since it must busy-poll on the KNI
+   interfaces (there is no way to sleep until the process gets an event).

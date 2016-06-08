@@ -1,0 +1,12 @@
+libusiw
+  - Choose rte_mempool sizes dynamically, and choose maximum number of queue
+    pairs and tx/rx ring size according to the rte_mempool size
+  - Add static inlines to wrap all container_of()'s
+  - Update flow director rules to match source *and* destination addresses
+  - fclose(conf_file) in parse_config() error cleanup
+  - Sleep on KNI interfaces until we actually get a packet
+  - Always tell kernel about qp_state transitions
+
+kmod
+  - Dynamically register/unregister interfaces instead of using a static list
+  - Clean up socket callbacks

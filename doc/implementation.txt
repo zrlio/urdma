@@ -1,0 +1,103 @@
+Queue Pairs and Completion Queues
+---------------------------------
+
+The queue consists of a ring, a hash table, and a linked list.  The ring
+contains all queued but inactive operations, while the hash table contains all
+active operations.  The list contains all elements inserted into the hash table
+for quick iteration.  Note that a tree structure would be more memory-efficient
+but DPDK doesn't provide one, so we would have to write our own.
+
+The storage for all queue entries is kept in an array at the tail of the data
+structure.  Attached to it is a bitmask.  The bits are 0 if the queue entry is
+currently in use (in the ring or in the hash table), or 1 if the queue entry is
+free.  We use our own bitmap implementation instead of the one provided by DPDK
+since ours is more optimized for smaller queue sizes, as it does not do an
+indirect lookup (which DPDK's does for cache efficiency).
+
+Completion Queues
+-----------------
+
+comp_vector currently has one entry for each socket on the system and is
+(ab)used to allocate the CQEs on the closest memory bank for NUMA purposes.
+
+Verbs/Kernel Interaction
+------------------------
+
+Our verbs kernel driver creates a fixed number of uverbs devices which are
+initially not associated with any net device and have a random GUID.  This
+is for two reasons:
+
+ (1) The uverbs device must exist before any verbs function is called, or verbs
+ will not ever call our driver initialization function.
+
+ (2) DPDK functions, including rte_eal_init(), may not be called before main()
+ is called, because they rely on their gcc constructors having been called
+ first.  There is no guaranteed ordering here, so we must defer any
+ initialization that we do until after main() is called.
+
+Our driver initialization function configures and starts all DPDK ports, and
+configures and starts a KNI interface per DPDK port.  When the kernel driver is
+notified of the netdev registration event for an interface named "kni<N>", it
+will associate the interface with the corresponding verbs device, and change
+its GUID to match the MAC address of the corresponding NIC.  This ensures that
+by the time that any user verbs code is run, traffic may be passed on these
+interfaces and will reach the kernel, which is needed for ARP and connection
+management to work.
+
+Connection management is done in the kernel driver, since the rdma_cm is in the
+kernel.  Once a connection is established, the flow director rule will be set
+up so the kernel will no longer have any visibility into the traffic for that
+connection and normal traffic on that queue pair will be entirely managed in
+user space.  The only other thing that the kernel driver will be responsible
+for is handling the disconnect event from rdma_cm, which userspace is notified
+of via the RTS->SQD state transition.
+
+Event File
+----------
+
+The completion channel in verbs cannot be signaled from userspace.  To get
+around this limitation, the kernel verbs driver creates an event file which is
+used by the userspace verbs library to communicate when the completion channel
+must be notified of a completion event.  This is returned in the 'event_fd'
+field of the alloc_ucontext() udata response.
+
+This fd is opened in non-blocking mode so that it can be used by the progress
+thread, but there should be no reason why the file could not also be used in
+blocking mode.
+
+There are currently 2 events passed from userspace to kernel space and 1 event
+passed from kernel space to userspace over this file:
+
+ - SIW_EVENT_COMP_POSTED: supplied via a write() from userspace.  Indicates
+   that the kernel should signal the completion channel associated with the
+   given completion queue
+
+ - SIW_EVENT_QP_CONNECTED: supplied by the kernel and picked up via a read()
+   from userspace.  Givves the source and destination addresses as well as
+   other connection parameters, such as the negotiated ORD/IRD values used to
+   determine the maximum number of simultaneous RDMA READ operations.
+
+ - SIW_EVENT_QP_RTR: supplied via a write() from userspace once it has
+   processed the information in the SIW_EVENT_QP_CONNECTED event and is ready
+   to receive data on the connection.  The ESTABLISHED CM event must not be
+   delivered by the kernel CM until the kernel has received this event.
+
+Incoming Messages
+-----------------
+
+We use flow director to direct each incoming message to the appropriate queue
+pair based on its destination UDP port.
+
+For tagged messages, we immediately place the data based on its tag
+information.  For RDMA READ Response messages, we then associate the message
+with the RDMA READ operation to update the progress and notify the user when
+the READ has completed.
+
+For untagged SEND messages, we must associate the incoming message with a
+receive immediately, which we do using the receive queue hash table and the
+message sequence number.  Because we are built on top of UDP, which is
+unreliable, we must keep track of any messages which we did not receive.  To do
+this, we keep a small array of ranges which indicates which byte ranges of the
+message we have received.  We automatically collapse ranges when they become
+contiguous (due to receiving the intervening message).  This allows us to deal
+with a small random distribution of missing messages reasonably efficiently.

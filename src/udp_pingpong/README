@@ -1,0 +1,87 @@
+udp_pingpong
+============
+
+The udp_pingpong microbenchmark sends bursts of messages back and forth using
+UDP over IPv4.  Neither IPv6 nor VLANs are supported (yet).
+
+At least *two* logical cores (lcores) are required.  The master lcore is
+reserved for control operations.  It will sleep as often as possible, waking up
+at least once every second to respond to ARP requests and notice that the
+worker lcores have finished.  (NOTE: currently not used due to lack of
+available cores on my test systems)
+
+Command-line options:
+
+> --packet-count=COUNT / -c COUNT
+
+The total number of messages to send in each direction.
+
+> --packet-size=SIZE / -s SIZE
+
+The size of each message.  The size must be at least large enough to hold the
+UDP, IPv4, and Ethernet headers (42 bytes), and must be no larger than a single
+MTU.
+
+> --burst-size=COUNT / -b COUNT
+
+The number of messages in each burst.  The application will send and retrieve
+up to this many messages to/from the NIC at once.
+
+> --output=FILE / -o FILE
+
+Outputs the performance results, as a single object in JSON format, to the
+specified file.
+
+Additionally, for each configured Ethernet port a command line argument is
+expected giving the IP address and prefix to bind on that port, i.e.,
+"10.0.0.1/24".
+
+Finally, to start in client mode, a final command line argument is needed to
+specify the IP address of a running server instance.  The client will initiate
+an ARP to that IP address, and begin the pingpong once it receives an ARP
+reply.
+
+The JSON performance output looks like:
+
+{
+  "requested_packet_count": 1000000,
+  "packet_size": 512,
+  "burst_size": 64,
+  "slave_lcore_count": 2,
+  "packet_count": 2000000,
+  "physical_time": 0.556628099,
+  "cpu_time": 1.112983712,
+  "recv_poll_time": 0.900035843,
+  "max_recv_poll_time": 0.000002229,
+  "message_rate": 3593063.311945,
+  "throughput": 14717.187326,
+  "throughput_unit": "Mbps",
+  "latency": 1.456789,
+  "latency_unit": "microsecond",
+  "recv_count_per_burst_histo": [0, 330715, 364485, 238409, 51517, 3139, 316, 55, 33, 21, 12, 8, 10, 5, 3, 3, 2, 0, 2, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+}
+
+requested_packet_count, packet_size, burst_size are the input parameters above.
+
+slave_lcore_count is the number of lcores that participated in the pingpong.
+
+physical_time is the amount of real time during which data transfer was taking
+place (time the first thread started sending to the time that the last thread
+finished).
+
+cpu_time is the total amount of time that all threads spent in the data
+transfer phase.
+
+recv_poll_time is the amount of time that all threads spent polling for
+receives.  cpu_time - recv_poll_time is the amount of time that all threads
+spent processing the transfers.
+
+max_recv_poll_time is the maximum number of times that it took to poll for the
+next burst of received messages, across all worker threads.
+
+message_rate is the number of messages sent per second.
+
+throughput and throughput_unit are the number of bytes sent per second.
+
+recv_count_per_burst_histo is an array describing the histogram of the number
+of messages received in each burst.

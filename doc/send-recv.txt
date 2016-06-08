@@ -1,0 +1,54 @@
+DPDK Receive Path
+-----------------
+
+The DPDK receive path attempts to optimize the message rate and support
+placement into userspace memory, but does not provide the user with direct
+control over the placement of received data.  Rather, messages are received
+into packet memory buffer pools (struct mbuf_pool) which are managed by the
+DPDK libraries.  This allows DPDK to work with NICs that do not have built-in
+MMU hardware to support RDMA-style direct data placement.
+
+When an interface port is initialized, the receive queues are each initialized
+with a memory buffer and a specified number of receive descriptors.  Each
+active receive descriptor consumes a memory buffer from the memory pool.  If a
+message arrives to the queue but all descriptors are consumed, the message is
+silently dropped (an interface counter will be incremented).
+
+Note that messages are generally received in one contiguous buffer, unless the
+port has been configured in advance to segment received packets (note that I
+have not tested this behavior).
+
+To retrieve a message, use the dpdk_eth_recv_burst() function:
+
+    int dpdk_eth_rx_burst(uint8_t port, uint16_t queue,
+                          struct dpdk_mbuf **mbuf, const uint16_t count);
+
+This function returns the number of packets retrieved from the queue.  It is
+intended to be used in burst mode to decrease the amount of I/O between the
+application and the NIC.
+
+Verbs Receive Path
+------------------
+
+Verbs has two types of data transfer operations: send/receive channel
+semantics, and RDMA READ/RDMA WRITE memory semantics.  Verbs gives the user
+much more control over where data is placed than DPDK.  However, with most
+verbs providers, the application is expected to register in advance all memory
+to be used in data transfers, which populates the corresponding physical
+addresses in the HCA's onboard MMU.
+
+A verbs queue pair is initialized with a send and receive queue size.  No
+memory is allocated for receives automatically.  Instead, the user must in
+advance post receive requests using the aptly named ibv_post_recv() verb,
+which defines the memory area in which the next message(s) should be received.
+The verbs interface also allows a scatter-gather list to be specified so that
+the received packet may be scattered to multiple memory areas; for example,
+to separate a header from the corresponding data.  However, the HCA will
+completely fill each scatter-gather element in order until the message has been
+fully placed or the message is larger than the total space allocated for it.
+
+In InfiniBand, if a message arrives to an empty receive queue, or a message is
+too large, the HCA responds with a Receive Not Ready NAK, with no notice given
+to the receiving application.  The sender can retransmit for a given number of
+times, and if the receive queue is still empty, the queue pair transitions to
+the error state and is then unusable.

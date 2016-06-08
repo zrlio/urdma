@@ -1,0 +1,62 @@
+This provides an iWARP implementation over UDP, with the following differences
+from RFC 5040, RFC 5041:
+
+ - UDP preserves message boundaries, we intentionally fit one RDMAP segment
+   per UDP datagram, and we do not produce packets larger than 1 MTU.  As a
+   result, we do not run over MPA.
+
+ - We use our own thin shim protocol between UDP and DDP called TRP (trivial
+   reliability protocol), with the following packet format:
+
+     0                   1                   2                   3
+     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                   Packet Sequence Number (PSN)                |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                       Acknowledgement PSN                     |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |I|A|F|R|       Credits         |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+   Every packet is assigned a monotonically increasing packet sequence number
+   by its sender, which is reflected when the packet is acknowledged.
+
+   Credits is the number of packets beyond the acknowledgement PSN that the
+   receiver is allowed to send.  Put another way, the maximum PSN that the
+   receiver may send is ACK PSN + Credits.
+
+   There are four flag bits, documented in the source code:
+
+    * I (Init)
+    * A (Ack/Sack)
+    * F (FIN)
+    * R (reserved for future use)
+
+ - Terminate messages can be divided into two broad categories: fatal and
+   non-fatal.  Non-fatal Terminate messages are those that correspond to a
+   single request and are due to user error, e.g., making an RDMA READ or RDMA
+   WRITE request using an invalid stag.  Fatal Terminate messages are due to
+   protocol errors; these will not be delivered to the user but will terminate
+   the end-to-end context.
+
+ - Fatal Terminate messages will behave as follows: the bottom 13 reserved bits
+   will contain a timeout in milliseconds.  The sender will ignore all packets
+   from the recipient for that duration, and will not send any further messages
+   to the sender for the duration.  A Terminate message is sent only once.  The
+   only exception to silent ignoring is that any received Terminate messages
+   will refresh the duration.
+
+   Because Terminate messages can be lost, a sender may wish to delay sending
+   packets even after the duration runs out.
+
+   The intent is to flush out any messages from the erroneous operation, and
+   then allow further operations.
+
+   When irrecoverable packet loss occurs, a best-effort Terminate message will
+   be sent.
+
+   Any time a Terminate message is sent or received, a marker will be inserted
+   into the send queue.  Any operations targeted at the "terminated" endpoint
+   prior to the marker will be rejected with an appropriate error code.  This
+   ensures that any operations that were causally dependent on the terminated
+   operation are not started (e.g., SEND after WRITE to signal completion).

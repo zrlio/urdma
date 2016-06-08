@@ -1,0 +1,32 @@
+{
+  "server": {
+    "app": "udp_pingpong",
+    "node": "bobbio",
+    "dpdk_interfaces": [
+      { "port": "01:00.0", "ipv4_address": "10.0.0.2/24" }
+    ],
+    "lcore_layout": "0,1"
+  },
+  "client": {
+    "app": "udp_pingpong",
+    "node": "este",
+    "dpdk_interfaces": [
+      { "port": "01:00.0", "ipv4_address": "10.0.0.1/24" }
+    ],
+    "lcore_layout": "0,1",
+    "server_ip_address": "10.0.0.2"
+  },
+  "common": {
+    "top_srcdir": "~/src/usiw",
+    "deploy_dir": "src/usiw",
+    "app_args": ["-b", "16", "-c", "2500000"],
+    "eal_log_level": 7
+  },
+  "experiment": {
+    "run_count": 3,
+    "parameters": {
+      "packet_size": [64, 128, 192, 256, 384, 512, 640, 768, 896, 1024, 1152, 1280, 1408, 1514],
+      "checksum_offload": [true, false]
+    }
+  }
+}
