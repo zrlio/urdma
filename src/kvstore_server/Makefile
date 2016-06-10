@@ -57,6 +57,7 @@ LDLIBS += -L$(BASE_OUTPUT)/src/libusiw/$(RTE_TARGET)/lib -lusiw-rdmav2
 LDLIBS += --no-whole-archive
 LDLIBS += -lrdmacm -libverbs
 LDLIBS += $(shell pkg-config --libs libnl-route-3.0 libnl-3.0 json-c)
+LDLIBS += -lm
 
 include $(RTE_SDK)/mk/rte.extapp.mk
 include $(BASE_SRCDIR)/config/distfiles.mk
