@@ -67,7 +67,6 @@ KMOD_DIRS-y := src/kmod
 DIRS-y := src/libusiw \
 	src/kvstore_server src/kvstore_client \
 	src/udp_pingpong src/verbs_pingpong src/mkkvstore \
-	src/kni_nl_test \
 	$(KMOD_DIRS-y) $(PRIVATE_DIRS)
 
 NODIST_DIRS := doc/report
