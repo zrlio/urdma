@@ -50,6 +50,7 @@ SRCS-y := main.c
 CFLAGS += -std=gnu11 -O2
 CFLAGS += $(DEBUG_FLAGS) $(WERROR_FLAGS)
 CFLAGS += -I$(BASE_SRCDIR)/include -I$(RTE_SRCDIR)
+LDLIBS += -lm
 
 include $(RTE_SDK)/mk/rte.extapp.mk
 include $(BASE_SRCDIR)/config/distfiles.mk
