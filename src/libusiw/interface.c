@@ -190,6 +190,7 @@ usiw_send_wqe_queue_destroy(struct usiw_send_wqe_queue *q)
 static void
 fill_usiw_send_wqe_key(struct usiw_send_wqe *wqe, struct usiw_send_wqe_key *key)
 {
+	memset(key, 0, sizeof(*key));
 	key->src_addr = wqe->remote_ep->ah.ipv4_addr;
 	key->src_port = wqe->remote_ep->ah.udp_port;
 	key->wr_opcode = wqe->opcode;
@@ -247,12 +248,12 @@ usiw_send_wqe_queue_lookup(struct usiw_send_wqe_queue *q,
 		struct ee_state *ee, uint16_t wr_opcode,
 		uint32_t wr_key_data, struct usiw_send_wqe **wqe)
 {
-	struct usiw_send_wqe_key key = {
-		.src_addr = ee->ah.ipv4_addr,
-		.src_port = ee->ah.udp_port,
-		.wr_opcode = wr_opcode,
-		.wr_key_data = wr_key_data,
-	};
+	struct usiw_send_wqe_key key;
+	memset(&key, 0, sizeof(key));
+	key.src_addr = ee->ah.ipv4_addr;
+	key.src_port = ee->ah.udp_port;
+	key.wr_opcode = wr_opcode;
+	key.wr_key_data = wr_key_data;
 	RTE_LOG(DEBUG, USER1, "LOOKUP active send WQE ipv4_addr=%" PRIx32 " udp_port=%" PRIu16 " opcode=%" PRIu8 " key_data=%" PRIu32 "\n",
 			rte_be_to_cpu_32(key.src_addr),
 			rte_be_to_cpu_16(key.src_port),
