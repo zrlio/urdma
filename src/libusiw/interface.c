@@ -78,16 +78,12 @@ struct ether_addr ether_bcast = {
 };
 
 struct usiw_send_wqe_key {
-	uint32_t src_addr;
-	uint16_t src_port;
 	uint16_t wr_opcode;
 	uint32_t wr_key_data;
 };
 
 struct usiw_recv_wqe_key {
-	uint32_t src_addr;
 	uint32_t msn;
-	uint16_t src_port;
 };
 
 /** Compares two 32-bit unsigned integers using the rules in RFC 1982 with
@@ -191,8 +187,6 @@ static void
 fill_usiw_send_wqe_key(struct usiw_send_wqe *wqe, struct usiw_send_wqe_key *key)
 {
 	memset(key, 0, sizeof(*key));
-	key->src_addr = wqe->remote_ep->ah.ipv4_addr;
-	key->src_port = wqe->remote_ep->ah.udp_port;
 	key->wr_opcode = wqe->opcode;
 	switch (wqe->opcode) {
 	case usiw_wr_send:
@@ -214,9 +208,7 @@ usiw_send_wqe_queue_add_active(struct usiw_send_wqe_queue *q,
 	struct usiw_send_wqe_key key;
 	int32_t ret;
 	fill_usiw_send_wqe_key(wqe, &key);
-	RTE_LOG(DEBUG, USER1, "ADD active send WQE ipv4_addr=%" PRIx32 " udp_port=%" PRIu16 " opcode=%" PRIu8 " key_data=%" PRIu32 "\n",
-			rte_be_to_cpu_32(key.src_addr),
-			rte_be_to_cpu_16(key.src_port),
+	RTE_LOG(DEBUG, USER1, "ADD active send WQE opcode=%" PRIu8 " key_data=%" PRIu32 "\n",
 			key.wr_opcode, key.wr_key_data);
 	ret = rte_hash_add_key_data(q->active, &key, wqe);
 	if (ret >= 0) {
@@ -232,9 +224,7 @@ usiw_send_wqe_queue_del_active(struct usiw_send_wqe_queue *q,
 	struct usiw_send_wqe_key key;
 	int32_t ret;
 	fill_usiw_send_wqe_key(wqe, &key);
-	RTE_LOG(DEBUG, USER1, "DEL active send WQE ipv4_addr=%" PRIx32 " udp_port=%" PRIu16 " opcode=%" PRIu8 " key_data=%" PRIu32 "\n",
-			rte_be_to_cpu_32(key.src_addr),
-			rte_be_to_cpu_16(key.src_port),
+	RTE_LOG(DEBUG, USER1, "DEL active send WQE opcode=%" PRIu8 " key_data=%" PRIu32 "\n",
 			key.wr_opcode, key.wr_key_data);
 	ret = rte_hash_del_key(q->active, &key);
 	if (ret >= 0) {
@@ -245,18 +235,14 @@ usiw_send_wqe_queue_del_active(struct usiw_send_wqe_queue *q,
 
 static int
 usiw_send_wqe_queue_lookup(struct usiw_send_wqe_queue *q,
-		struct ee_state *ee, uint16_t wr_opcode,
-		uint32_t wr_key_data, struct usiw_send_wqe **wqe)
+		uint16_t wr_opcode, uint32_t wr_key_data,
+		struct usiw_send_wqe **wqe)
 {
 	struct usiw_send_wqe_key key;
 	memset(&key, 0, sizeof(key));
-	key.src_addr = ee->ah.ipv4_addr;
-	key.src_port = ee->ah.udp_port;
 	key.wr_opcode = wr_opcode;
 	key.wr_key_data = wr_key_data;
-	RTE_LOG(DEBUG, USER1, "LOOKUP active send WQE ipv4_addr=%" PRIx32 " udp_port=%" PRIu16 " opcode=%" PRIu8 " key_data=%" PRIu32 "\n",
-			rte_be_to_cpu_32(key.src_addr),
-			rte_be_to_cpu_16(key.src_port),
+	RTE_LOG(DEBUG, USER1, "LOOKUP active send WQE opcode=%" PRIu8 " key_data=%" PRIu32 "\n",
 			key.wr_opcode, key.wr_key_data);
 	return rte_hash_lookup_data(q->active, &key, (void **)wqe);
 } /* usiw_send_wqe_queue_lookup */
@@ -274,7 +260,7 @@ usiw_recv_wqe_queue_init(uint32_t qpn, struct usiw_recv_wqe_queue *q,
 		return -rte_errno;
 
 	q->active = queue_hash_new(name, 2 * (max_recv_wr + 1),
-			10, SOCKET_ID_ANY);
+			sizeof(struct usiw_recv_wqe_key), SOCKET_ID_ANY);
 	if (!q->active)
 		return -rte_errno;
 	q->storage = calloc(max_recv_wr + 1, sizeof(struct usiw_recv_wqe)
@@ -306,14 +292,8 @@ usiw_recv_wqe_queue_add_active(struct usiw_recv_wqe_queue *q,
 	struct usiw_recv_wqe_key key;
 	int32_t ret;
 	memset(&key, 0, sizeof(key));
-	if (wqe->remote_ep) {
-		key.src_addr = wqe->remote_ep->ah.ipv4_addr;
-		key.src_port = wqe->remote_ep->ah.udp_port;
-	}
 	key.msn = wqe->msn;
-	RTE_LOG(DEBUG, USER1, "ADD active recv WQE ipv4_addr=%" PRIx32 " udp_port=%" PRIu16 " msn=%" PRIu32 "\n",
-			rte_be_to_cpu_32(key.src_addr),
-			rte_be_to_cpu_16(key.src_port),
+	RTE_LOG(DEBUG, USER1, "ADD active recv WQE msn=%" PRIu32 "\n",
 			key.msn);
 	ret = rte_hash_add_key_data(q->active, &key, wqe);
 	if (ret >= 0) {
@@ -329,12 +309,8 @@ usiw_recv_wqe_queue_del_active(struct usiw_recv_wqe_queue *q,
 	struct usiw_recv_wqe_key key;
 	int32_t ret;
 	memset(&key, 0, sizeof(key));
-	key.src_addr = wqe->remote_ep->ah.ipv4_addr;
-	key.src_port = wqe->remote_ep->ah.udp_port;
 	key.msn = wqe->msn;
-	RTE_LOG(DEBUG, USER1, "DEL active recv WQE ipv4_addr=%" PRIx32 " udp_port=%" PRIu16 " msn=%" PRIu32 "\n",
-			rte_be_to_cpu_32(key.src_addr),
-			rte_be_to_cpu_16(key.src_port),
+	RTE_LOG(DEBUG, USER1, "DEL active recv WQE msn=%" PRIu32 "\n",
 			key.msn);
 	ret = rte_hash_del_key(q->active, &key);
 	if (ret >= 0) {
@@ -345,17 +321,12 @@ usiw_recv_wqe_queue_del_active(struct usiw_recv_wqe_queue *q,
 
 static int
 usiw_recv_wqe_queue_lookup(struct usiw_recv_wqe_queue *q,
-		struct ee_state *ee, uint32_t msn,
-		struct usiw_recv_wqe **wqe)
+		uint32_t msn, struct usiw_recv_wqe **wqe)
 {
 	struct usiw_recv_wqe_key key;
 	memset(&key, 0, sizeof(key));
-	key.src_addr = ee->ah.ipv4_addr;
-	key.src_port = ee->ah.udp_port;
 	key.msn = msn;
-	RTE_LOG(DEBUG, USER1, "LOOKUP active recv WQE ipv4_addr=%" PRIx32 " udp_port=%" PRIu16 " msn=%" PRIu32 "\n",
-			rte_be_to_cpu_32(key.src_addr),
-			rte_be_to_cpu_16(key.src_port),
+	RTE_LOG(DEBUG, USER1, "LOOKUP active recv WQE msn=%" PRIu32 "\n",
 			key.msn);
 	return rte_hash_lookup_data(q->active, &key, (void **)wqe);
 } /* usiw_recv_wqe_queue_lookup */
@@ -1210,7 +1181,7 @@ process_send(struct usiw_qp *qp, struct packet_context *orig)
 	size_t payload_length;
 	int ret;
 
-	ret = usiw_recv_wqe_queue_lookup(&qp->rq0, ee,
+	ret = usiw_recv_wqe_queue_lookup(&qp->rq0,
 			rte_be_to_cpu_32(rdmap->msn), &wqe);
 	assert(ret != -EINVAL);
 	if (ret < 0) {
@@ -1404,7 +1375,7 @@ process_rdma_read_response(struct usiw_qp *qp, struct packet_context *orig)
 
 	rdmap = (struct rdmap_tagged_packet *)orig->rdmap;
 	/* FIXME: stag != msn; need to disambiguate */
-	ret = usiw_send_wqe_queue_lookup(&qp->sq, orig->src_ep,
+	ret = usiw_send_wqe_queue_lookup(&qp->sq,
 			usiw_wr_read, rte_be_to_cpu_32(rdmap->head.sink_stag),
 			&read_wqe);
 
@@ -1491,8 +1462,7 @@ process_terminate(struct usiw_qp *qp, struct packet_context *orig)
 	case 0x0100:
 		/* RDMA Read Request Error */
 		rreq = (struct rdmap_readreq_packet *)(rdmap + 1);
-		ret = usiw_send_wqe_queue_lookup(&qp->sq, orig->src_ep,
-				usiw_wr_read,
+		ret = usiw_send_wqe_queue_lookup(&qp->sq, usiw_wr_read,
 				rte_be_to_cpu_32(rreq->untagged.head.sink_stag),
 				&wqe);
 		if (ret < 0 || !wqe || wqe->opcode != usiw_wr_read) {
@@ -1512,7 +1482,7 @@ process_terminate(struct usiw_qp *qp, struct packet_context *orig)
 		wc_status = IBV_WC_REM_ACCESS_ERR;
 		switch (RDMAP_GET_OPCODE(t->head.rdmap_info)) {
 		case rdmap_opcode_rdma_write:
-			ret = usiw_send_wqe_queue_lookup(&qp->sq, orig->src_ep,
+			ret = usiw_send_wqe_queue_lookup(&qp->sq,
 					usiw_wr_write,
 					rte_be_to_cpu_32(t->head.sink_stag),
 					&wqe);
