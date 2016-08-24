@@ -2072,14 +2072,14 @@ static struct usiw_qp *
 lookup_qp_id(struct usiw_context *ctx, uint32_t qp_id)
 {
 	struct usiw_qp *qp;
-	void *ptr;
-	int32_t ret;
 
 	rte_spinlock_lock(&ctx->qp_lock);
-	ret = rte_hash_lookup_data(ctx->qp, &qp_id, &ptr);
+	if (ctx->qp) {
+		fprintf(stderr, "%p\n", &ctx->qp->hh);
+	}
+	HASH_FIND(hh, ctx->qp, &qp_id, sizeof(qp_id), qp);
 	rte_spinlock_unlock(&ctx->qp_lock);
-	if (ret >= 0) {
-		qp = ptr;
+	if (qp) {
 		rte_atomic32_inc(&qp->refcnt);
 		return qp;
 	}

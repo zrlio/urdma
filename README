@@ -14,6 +14,8 @@ Requirements
      linker script called libdpdk.so
  - libnl-3 and libnl-route-3
  - json-c
+ - uthash (included in Fedora, Ubuntu, openSUSE, and EPEL for RHEL
+   repositories)
 
 Setup instructions
 ------------------

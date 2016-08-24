@@ -756,7 +756,6 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 	} resp;
 	struct usiw_context *ctx;
 	struct usiw_qp *qp;
-	int32_t hres;
 	int retval;
 
 	if ((qp_init_attr->qp_type != IBV_QPT_UD
@@ -875,12 +874,9 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 
 	rte_spinlock_lock(&ctx->qp_lock);
 	rte_atomic32_inc(&ctx->qp_init_count);
-	hres = rte_hash_add_key_data(ctx->qp, &qp->ib_qp.qp_num, qp);
+	HASH_ADD(hh, ctx->qp, ib_qp.qp_num,
+			sizeof(qp->ib_qp.qp_num), qp);
 	rte_spinlock_unlock(&ctx->qp_lock);
-	if (hres < 0) {
-		errno = -hres;
-		goto free_kernel_qp;
-	}
 
 	return &qp->ib_qp;
 
@@ -991,7 +987,6 @@ usiw_destroy_qp(struct ibv_qp *ib_qp)
 {
 	struct usiw_qp *qp;
 	struct usiw_context *ctx;
-	NDEBUG_UNUSED int32_t hret;
 	int ret;
 
 	ret = ibv_cmd_destroy_qp(ib_qp);
@@ -1009,9 +1004,8 @@ usiw_destroy_qp(struct ibv_qp *ib_qp)
 	rte_atomic16_set(&qp->conn_state, usiw_qp_error);
 
 	rte_spinlock_lock(&ctx->qp_lock);
-	hret = rte_hash_del_key(ctx->qp, &qp->ib_qp.qp_num);
+	HASH_DEL(ctx->qp, qp);
 	rte_spinlock_unlock(&ctx->qp_lock);
-	assert(hret >= 0);
 
 	if (rte_atomic32_sub_return(&qp->refcnt, 1) == 0) {
 		usiw_do_destroy_qp(qp);
@@ -1401,8 +1395,6 @@ usiw_init_context(struct verbs_device *device, struct ibv_context *context,
 	} resp;
 	struct usiw_context *ctx;
 	struct usiw_device *dev;
-	struct rte_hash_parameters hp;
-	char hname[RTE_HASH_NAMESIZE];
 	int ret;
 
 	context->cmd_fd = cmd_fd;
@@ -1437,15 +1429,7 @@ usiw_init_context(struct verbs_device *device, struct ibv_context *context,
 	rte_atomic32_init(&ctx->qp_init_count);
 	LIST_INIT(&ctx->qp_active);
 
-	snprintf(hname, RTE_HASH_NAMESIZE, "ctx%p_qp", (void *)context);
-	memset(&hp, 0, sizeof(hp));
-	hp.name = hname;
-	hp.entries = 2 * DPDKV_MAX_QP;
-	hp.key_len = sizeof(uint32_t);
-	hp.hash_func = rte_jhash;
-	hp.hash_func_init_val = 0;
-	hp.socket_id = SOCKET_ID_ANY;
-	ctx->qp = rte_hash_create(&hp);
+	ctx->qp = NULL;
 	rte_spinlock_init(&ctx->qp_lock);
 
 	return 0;
@@ -1456,6 +1440,4 @@ void
 usiw_uninit_context(__attribute__((unused)) struct verbs_device *device,
 		__attribute__((unused)) struct ibv_context *ib_ctx)
 {
-	struct usiw_context *ctx = usiw_get_context(ib_ctx);
-	rte_hash_free(ctx->qp);
 } /* usiw_uninit_context */

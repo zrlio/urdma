@@ -46,9 +46,10 @@
 
 #include <infiniband/driver.h>
 
+#include <uthash.h>
+
 #include <rte_ethdev.h>
 #include <rte_ether.h>
-#include <rte_hash.h>
 #include <rte_kni.h>
 #include <rte_mbuf.h>
 #include <rte_mempool.h>
@@ -271,6 +272,7 @@ struct usiw_qp {
 	sem_t conn_event_sem;
 
 	LIST_ENTRY(usiw_qp) ctx_entry;
+	UT_hash_handle hh;
 	struct usiw_context *ctx;
 	struct usiw_port *port;
 	struct usiw_cq *send_cq;
@@ -354,7 +356,7 @@ struct usiw_context {
 	LIST_HEAD(usiw_qp_head, usiw_qp) qp_active;
 	rte_atomic32_t qp_init_count;
 		/**< The number of queue pairs in the INIT state. */
-	struct rte_hash *qp;
+	struct usiw_qp *qp;
 		/**< Hash table of all non-destroyed queue pairs in any
 		 * state.  Guarded by qp_lock. */
 	rte_spinlock_t qp_lock;
