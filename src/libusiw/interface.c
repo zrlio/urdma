@@ -130,21 +130,6 @@ usiw_dereg_mr_real(__attribute__((unused)) struct usiw_mr_table *tbl,
 	free(free_mr);
 } /* usiw_dereg_mr_real */
 
-
-static struct rte_hash *
-queue_hash_new(const char *name, size_t entries, size_t key_len, int socket_id)
-{
-	struct rte_hash_parameters hparam;
-
-	memset(&hparam, 0, sizeof(hparam));
-	hparam.name = name;
-	hparam.entries = entries;
-	hparam.key_len = key_len;
-	hparam.hash_func = rte_jhash;
-	hparam.socket_id = socket_id;
-	return rte_hash_create(&hparam);
-} /* queue_hash_new */
-
 int
 usiw_send_wqe_queue_init(uint32_t qpn, struct usiw_send_wqe_queue *q,
 		uint32_t max_send_wr, uint32_t max_send_sge)
@@ -157,10 +142,6 @@ usiw_send_wqe_queue_init(uint32_t qpn, struct usiw_send_wqe_queue *q,
 	if (!q->ring)
 		return -rte_errno;
 
-	q->active = queue_hash_new(name, 2 * (max_send_wr + 1),
-			sizeof(struct usiw_send_wqe_key), SOCKET_ID_ANY);
-	if (!q->active)
-		return -rte_errno;
 	q->storage = calloc(max_send_wr + 1, sizeof(struct usiw_send_wqe)
 			+ max_send_sge * sizeof(struct iovec));
 	q->bitmask = malloc((max_send_wr + 1) / 8);
@@ -179,58 +160,21 @@ void
 usiw_send_wqe_queue_destroy(struct usiw_send_wqe_queue *q)
 {
 	free(q->bitmask);
-	rte_hash_free(q->active);
 	rte_ring_free(q->ring);
 } /* usiw_send_wqe_queue_destroy */
 
 static void
-fill_usiw_send_wqe_key(struct usiw_send_wqe *wqe, struct usiw_send_wqe_key *key)
-{
-	memset(key, 0, sizeof(*key));
-	key->wr_opcode = wqe->opcode;
-	switch (wqe->opcode) {
-	case usiw_wr_send:
-		key->wr_key_data = wqe->msn;
-		break;
-	case usiw_wr_write:
-		key->wr_key_data = wqe->rkey;
-		break;
-	case usiw_wr_read:
-		key->wr_key_data = STAG_RDMA_READ(wqe->msn);
-		break;
-	}
-} /* fill_usiw_send_wqe_key */
-
-static int
 usiw_send_wqe_queue_add_active(struct usiw_send_wqe_queue *q,
 		struct usiw_send_wqe *wqe)
 {
-	struct usiw_send_wqe_key key;
-	int32_t ret;
-	fill_usiw_send_wqe_key(wqe, &key);
-	RTE_LOG(DEBUG, USER1, "ADD active send WQE opcode=%" PRIu8 " key_data=%" PRIu32 "\n",
-			key.wr_opcode, key.wr_key_data);
-	ret = rte_hash_add_key_data(q->active, &key, wqe);
-	if (ret >= 0) {
-		TAILQ_INSERT_TAIL(&q->active_head, wqe, active);
-	}
-	return ret;
+	TAILQ_INSERT_TAIL(&q->active_head, wqe, active);
 } /* usiw_send_wqe_queue_add_active */
 
-static int
+static void
 usiw_send_wqe_queue_del_active(struct usiw_send_wqe_queue *q,
 		struct usiw_send_wqe *wqe)
 {
-	struct usiw_send_wqe_key key;
-	int32_t ret;
-	fill_usiw_send_wqe_key(wqe, &key);
-	RTE_LOG(DEBUG, USER1, "DEL active send WQE opcode=%" PRIu8 " key_data=%" PRIu32 "\n",
-			key.wr_opcode, key.wr_key_data);
-	ret = rte_hash_del_key(q->active, &key);
-	if (ret >= 0) {
-		TAILQ_REMOVE(&q->active_head, wqe, active);
-	}
-	return ret;
+	TAILQ_REMOVE(&q->active_head, wqe, active);
 } /* usiw_send_wqe_queue_del_active */
 
 static int
@@ -238,13 +182,35 @@ usiw_send_wqe_queue_lookup(struct usiw_send_wqe_queue *q,
 		uint16_t wr_opcode, uint32_t wr_key_data,
 		struct usiw_send_wqe **wqe)
 {
-	struct usiw_send_wqe_key key;
-	memset(&key, 0, sizeof(key));
-	key.wr_opcode = wr_opcode;
-	key.wr_key_data = wr_key_data;
+	struct usiw_send_wqe *lptr, **prev;
 	RTE_LOG(DEBUG, USER1, "LOOKUP active send WQE opcode=%" PRIu8 " key_data=%" PRIu32 "\n",
-			key.wr_opcode, key.wr_key_data);
-	return rte_hash_lookup_data(q->active, &key, (void **)wqe);
+			wr_opcode, wr_key_data);
+	TAILQ_FOR_EACH(lptr, &q->active_head, active, prev) {
+		if (lptr->opcode != wr_opcode) {
+			continue;
+		}
+		switch (lptr->opcode) {
+		case usiw_wr_send:
+			if (wr_key_data == lptr->msn) {
+				*wqe = lptr;
+				return 0;
+			}
+			break;
+		case usiw_wr_write:
+			if (wr_key_data == lptr->rkey) {
+				*wqe = lptr;
+				return 0;
+			}
+			break;
+		case usiw_wr_read:
+			if (wr_key_data == STAG_RDMA_READ(lptr->msn)) {
+				*wqe = lptr;
+				return 0;
+			}
+			break;
+		}
+	}
+	return -ENOENT;
 } /* usiw_send_wqe_queue_lookup */
 
 int
@@ -259,10 +225,6 @@ usiw_recv_wqe_queue_init(uint32_t qpn, struct usiw_recv_wqe_queue *q,
 	if (!q->ring)
 		return -rte_errno;
 
-	q->active = queue_hash_new(name, 2 * (max_recv_wr + 1),
-			sizeof(struct usiw_recv_wqe_key), SOCKET_ID_ANY);
-	if (!q->active)
-		return -rte_errno;
 	q->storage = calloc(max_recv_wr + 1, sizeof(struct usiw_recv_wqe)
 			+ max_recv_sge * sizeof(struct iovec));
 	q->bitmask = malloc((max_recv_wr + 1) / 8);
@@ -281,54 +243,41 @@ void
 usiw_recv_wqe_queue_destroy(struct usiw_recv_wqe_queue *q)
 {
 	free(q->bitmask);
-	rte_hash_free(q->active);
 	rte_ring_free(q->ring);
 } /* usiw_recv_wqe_queue_destroy */
 
-static int
+static void
 usiw_recv_wqe_queue_add_active(struct usiw_recv_wqe_queue *q,
 		struct usiw_recv_wqe *wqe)
 {
-	struct usiw_recv_wqe_key key;
-	int32_t ret;
-	memset(&key, 0, sizeof(key));
-	key.msn = wqe->msn;
 	RTE_LOG(DEBUG, USER1, "ADD active recv WQE msn=%" PRIu32 "\n",
-			key.msn);
-	ret = rte_hash_add_key_data(q->active, &key, wqe);
-	if (ret >= 0) {
-		TAILQ_INSERT_TAIL(&q->active_head, wqe, active);
-	}
-	return ret;
+			wqe->msn);
+	TAILQ_INSERT_TAIL(&q->active_head, wqe, active);
 } /* usiw_recv_wqe_queue_add_active */
 
-static int
+static void
 usiw_recv_wqe_queue_del_active(struct usiw_recv_wqe_queue *q,
 		struct usiw_recv_wqe *wqe)
 {
-	struct usiw_recv_wqe_key key;
-	int32_t ret;
-	memset(&key, 0, sizeof(key));
-	key.msn = wqe->msn;
 	RTE_LOG(DEBUG, USER1, "DEL active recv WQE msn=%" PRIu32 "\n",
-			key.msn);
-	ret = rte_hash_del_key(q->active, &key);
-	if (ret >= 0) {
-		TAILQ_REMOVE(&q->active_head, wqe, active);
-	}
-	return ret;
+			wqe->msn);
+	TAILQ_REMOVE(&q->active_head, wqe, active);
 } /* usiw_recv_wqe_queue_del_active */
 
 static int
 usiw_recv_wqe_queue_lookup(struct usiw_recv_wqe_queue *q,
 		uint32_t msn, struct usiw_recv_wqe **wqe)
 {
-	struct usiw_recv_wqe_key key;
-	memset(&key, 0, sizeof(key));
-	key.msn = msn;
+	struct usiw_recv_wqe *lptr, **prev;
 	RTE_LOG(DEBUG, USER1, "LOOKUP active recv WQE msn=%" PRIu32 "\n",
-			key.msn);
-	return rte_hash_lookup_data(q->active, &key, (void **)wqe);
+			msn);
+	TAILQ_FOR_EACH(lptr, &q->active_head, active, prev) {
+		if (lptr->msn == msn) {
+			*wqe = lptr;
+			return 0;
+		}
+	}
+	return -ENOENT;
 } /* usiw_recv_wqe_queue_lookup */
 
 
@@ -627,17 +576,14 @@ send_trp_ack(struct usiw_qp *qp, struct ee_state *ep)
 	} while (0)
 
 /** Returns the given send WQE back to the free pool.  It is removed from the
- * active set if still_in_hash is true.  The sq lock MUST be locked when
+ * active set if still_active is true.  The sq lock MUST be locked when
  * calling this function. */
 void
 qp_free_send_wqe(struct usiw_qp *qp, struct usiw_send_wqe *wqe,
-		bool still_in_hash)
+		bool still_active)
 {
-	NDEBUG_UNUSED int x;
-
-	if (still_in_hash) {
-		x = usiw_send_wqe_queue_del_active(&qp->sq, wqe);
-		assert(x >= 0);
+	if (still_active) {
+		usiw_send_wqe_queue_del_active(&qp->sq, wqe);
 	}
 	FREE_WQE_BODY(sq);
 } /* qp_free_send_wqe */
@@ -648,8 +594,7 @@ qp_free_send_wqe(struct usiw_qp *qp, struct usiw_send_wqe *wqe,
 static void
 qp_free_recv_wqe(struct usiw_qp *qp, struct usiw_recv_wqe *wqe)
 {
-	NDEBUG_UNUSED int ret = usiw_recv_wqe_queue_del_active(&qp->rq0, wqe);
-	assert(ret >= 0);
+	usiw_recv_wqe_queue_del_active(&qp->rq0, wqe);
 	FREE_WQE_BODY(rq0);
 } /* qp_free_recv_wqe */
 
@@ -834,13 +779,11 @@ static void
 rq_flush(struct usiw_qp *qp)
 {
 	struct usiw_recv_wqe *wqe, **prev;
-	NDEBUG_UNUSED int ret;
 
 	rte_spinlock_lock(&qp->rq0.lock);
 	while (rte_ring_dequeue(qp->rq0.ring, (void **)&wqe) == 0) {
 		wqe->msn = qp->ep_default->expected_recv_msn++;
-		ret = usiw_recv_wqe_queue_add_active(&qp->rq0, wqe);
-		assert(ret >= 0);
+		usiw_recv_wqe_queue_add_active(&qp->rq0, wqe);
 	}
 	TAILQ_FOR_EACH(wqe, &qp->rq0.active_head, active, prev) {
 		post_recv_cqe(qp, wqe, IBV_WC_WR_FLUSH_ERR);
@@ -1213,8 +1156,7 @@ process_send(struct usiw_qp *qp, struct packet_context *orig)
 		wqe->remote_ep = ee;
 		wqe->msn = msn;
 
-		ret = usiw_recv_wqe_queue_add_active(&qp->rq0, wqe);
-		assert(ret == 0);
+		usiw_recv_wqe_queue_add_active(&qp->rq0, wqe);
 	}
 
 	offset = rte_be_to_cpu_32(rdmap->mo);
@@ -2031,9 +1973,7 @@ progress_qp(struct usiw_qp *qp)
 				case usiw_wr_write:
 					break;
 			}
-			ret = usiw_send_wqe_queue_add_active(
-					&qp->sq, send_wqe);
-			assert(ret >= 0);
+			usiw_send_wqe_queue_add_active(&qp->sq, send_wqe);
 			progress_send_wqe(qp, send_wqe);
 			scount = 1;
 		}

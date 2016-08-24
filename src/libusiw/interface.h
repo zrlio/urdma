@@ -175,7 +175,6 @@ struct usiw_mr_table {
 };
 
 struct usiw_send_wqe_queue {
-	struct rte_hash *active;
 	struct rte_ring *ring;
 	TAILQ_HEAD(usiw_send_wqe_active_head, usiw_send_wqe) active_head;
 	uint64_t *bitmask;
@@ -187,7 +186,6 @@ struct usiw_send_wqe_queue {
 };
 
 struct usiw_recv_wqe_queue {
-	struct rte_hash *active;
 	struct rte_ring *ring;
 	TAILQ_HEAD(usiw_recv_wqe_active_head, usiw_recv_wqe) active_head;
 	uint64_t *bitmask;
