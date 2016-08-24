@@ -62,7 +62,6 @@
 #define RX_BURST_SIZE 32
 #define DPDKV_MAX_QP 64
 #define MAX_ARP_ENTRIES 32
-#define MAX_REMOTE_ENDPOINTS 32
 #define MAX_RECV_WR 1023
 #define MAX_SEND_WR 1023
 #define DPDK_VERBS_IOV_LEN_MAX 32
@@ -253,11 +252,6 @@ enum usiw_qp_state {
 	usiw_qp_error = 3,
 };
 
-enum usiw_qp_type {
-	usiw_qp_rd = 0,
-	usiw_qp_rc = 1,
-};
-
 enum {
 	usiw_qp_sig_all = 0x1,
 };
@@ -269,7 +263,6 @@ DECLARE_TAILQ_HEAD(read_response_state);
  * queue pairs and the libibverbs interface. */
 struct usiw_qp {
 	rte_atomic32_t refcnt;
-	uint16_t qp_type;
 	uint16_t udp_port;
 	uint16_t rx_queue;
 	uint16_t tx_queue;
@@ -309,11 +302,7 @@ struct usiw_qp {
 	struct usiw_cq *recv_cq;
 	struct usiw_mr_table *pd;
 
-	struct ee_state *(*get_ee_context)(struct usiw_qp *qp,
-						struct usiw_ah *ah);
 	struct ee_state *ep_default;
-	struct rte_hash *ee_state_table;
-	struct ee_state ee_state_entries[MAX_REMOTE_ENDPOINTS];
 
 	struct ibv_qp ib_qp;
 };
@@ -440,10 +429,7 @@ void
 usiw_recv_wqe_queue_destroy(struct usiw_recv_wqe_queue *q);
 
 struct ee_state *
-usiw_get_ee_context_rc(struct usiw_qp *qp, struct usiw_ah *ah);
-
-struct ee_state *
-usiw_get_ee_context_rd(struct usiw_qp *qp, struct usiw_ah *ah);
+usiw_get_ee_context(struct usiw_qp *qp, struct usiw_ah *ah);
 
 void
 usiw_do_destroy_qp(struct usiw_qp *qp);

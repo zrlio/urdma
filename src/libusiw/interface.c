@@ -1445,9 +1445,7 @@ qp_shutdown(struct usiw_qp *qp)
 	struct ibv_modify_qp cmd;
 	int ret;
 
-	if (qp->qp_type == usiw_qp_rc) {
-		send_trp_fin(qp, qp->ep_default);
-	}
+	send_trp_fin(qp, qp->ep_default);
 
 	rte_atomic16_set(&qp->conn_state, usiw_qp_error);
 	memset(&qp_attr, 0, sizeof(qp_attr));
@@ -1737,7 +1735,7 @@ ddp_place_tagged_data(struct usiw_qp *qp, struct packet_context *orig)
 
 
 struct ee_state *
-usiw_get_ee_context_rc(struct usiw_qp *qp, struct usiw_ah *ah)
+usiw_get_ee_context(struct usiw_qp *qp, struct usiw_ah *ah)
 {
 	struct ee_state *ee = qp->ep_default;
 	if (!ee) {
@@ -1749,37 +1747,7 @@ usiw_get_ee_context_rc(struct usiw_qp *qp, struct usiw_ah *ah)
 	return (is_same_ether_addr(&ah->ether_addr, &ee->ah.ether_addr)
 			&& ah->ipv4_addr == ee->ah.ipv4_addr
 			&& ah->udp_port == ee->ah.udp_port) ? ee : NULL;
-} /* get_ee_context_rc */
-
-
-struct ee_state *
-usiw_get_ee_context_rd(struct usiw_qp *qp, struct usiw_ah *ah)
-{
-	struct ee_state *ee;
-	int32_t ret;
-
-	ret = rte_hash_lookup(qp->ee_state_table, &ah);
-	if (ret >= 0) {
-		assert(ret < MAX_REMOTE_ENDPOINTS);
-		ee = &qp->ee_state_entries[ret];
-	} else {
-		ret = rte_hash_add_key(qp->ee_state_table, &ah);
-		if (ret < 0) {
-			return NULL;
-		}
-		assert(ret >= 0 && ret < MAX_REMOTE_ENDPOINTS);
-		ee = &qp->ee_state_entries[ret];
-		memcpy(&ee->ah, &ah, sizeof(ah));
-		ee->expected_recv_msn = 1;
-		ee->expected_read_msn = 1;
-		ee->expected_ack_msn = 1;
-		ee->next_send_msn = 1;
-		ee->next_read_msn = 1;
-		ee->next_ack_msn = 1;
-	}
-
-	return ee;
-} /* get_ee_context_rd */
+} /* usiw_get_ee_context */
 
 
 static void
@@ -1792,8 +1760,6 @@ process_data_packet(struct usiw_qp *qp, struct rte_mbuf *mbuf)
 	struct trp_hdr *trp_hdr;
 	struct usiw_ah ah;
 	uint16_t trp_opcode;
-
-	assert(qp->qp_type == usiw_qp_rd || qp->qp_type == usiw_qp_rc);
 
 #ifdef DEBUG_PACKET_HEADERS
 	RTE_LOG(DEBUG, USER1, "Begin processing received packet:\n");
@@ -1835,7 +1801,7 @@ process_data_packet(struct usiw_qp *qp, struct rte_mbuf *mbuf)
 	assert(udp_hdr->dst_port == qp->udp_port);
 	ah.udp_port = udp_hdr->src_port;
 
-	ctx.src_ep = qp->get_ee_context(qp, &ah);
+	ctx.src_ep = usiw_get_ee_context(qp, &ah);
 	if (!ctx.src_ep) {
 		/* Drop the packet; do not send TERMINATE */
 		return;
@@ -1998,18 +1964,12 @@ progress_send_wqe(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 
 	switch (wqe->opcode) {
 	case usiw_wr_send:
-		assert(qp->qp_type == usiw_qp_rd
-				|| qp->qp_type == usiw_qp_rc);
 		do_rdmap_send((struct usiw_qp *)qp, wqe);
 		break;
 	case usiw_wr_write:
-		assert(qp->qp_type == usiw_qp_rd
-				|| qp->qp_type == usiw_qp_rc);
 		do_rdmap_write((struct usiw_qp *)qp, wqe);
 		break;
 	case usiw_wr_read:
-		assert(qp->qp_type == usiw_qp_rd
-				|| qp->qp_type == usiw_qp_rc);
 		do_rdmap_read_request((struct usiw_qp *)qp, wqe);
 		break;
 	}
@@ -2066,13 +2026,11 @@ progress_qp(struct usiw_qp *qp)
 	uint64_t now;
 	int scount, ret;
 
+	/* Receive loop fills in now for us */
 	process_receive_queue(qp, qp->sq.active_head.tqh_first, &now);
 
-	/* Last receive loop filled in now for us */
-	if (qp->qp_type == usiw_qp_rc) {
-		/* Call any timers only once per millisecond */
-		sweep_unacked_packets(qp, qp->ep_default, now);
-	}
+	/* Call any timers only once per millisecond */
+	sweep_unacked_packets(qp, qp->ep_default, now);
 
 	scount = 0;
 	TAILQ_FOR_EACH(send_wqe, &qp->sq.active_head, active, prev) {
@@ -2113,8 +2071,7 @@ progress_qp(struct usiw_qp *qp)
 
 	scount += respond_rdma_read(qp);
 
-	if (qp->qp_type == usiw_qp_rc
-			&& (qp->ep_default->trp_flags & trp_ack_update)) {
+	if (qp->ep_default->trp_flags & trp_ack_update) {
 		if (unlikely(qp->ep_default->trp_flags & trp_recv_missing)) {
 			send_trp_sack(qp, qp->ep_default);
 		} else {
@@ -2163,14 +2120,7 @@ static int
 set_peer_addr(struct usiw_qp *qp, const uint8_t *ether_addr,
 		uint32_t addr, uint16_t port)
 {
-	struct ee_state *ee;
-
-	assert(qp->qp_type == usiw_qp_rc);
-
-	ee = qp->ep_default = calloc(1, sizeof(*ee));
-	if (!ee) {
-		return -ENOMEM;
-	}
+	struct ee_state *ee = &qp->remote_ep;
 
 	/* FIXME: Get this from the peer */
 	ee->send_max_psn = ee->tx_pending_size = qp->port->rx_desc_count / 2;
@@ -2202,17 +2152,7 @@ usiw_do_destroy_qp(struct usiw_qp *qp)
 	usiw_recv_wqe_queue_destroy(&qp->rq0);
 	usiw_send_wqe_queue_destroy(&qp->sq);
 	free(qp->readresp_store);
-	switch (qp->qp_type) {
-		case usiw_qp_rc:
-			free(qp->ep_default);
-			break;
-		case usiw_qp_rd:
-			rte_hash_free(qp->ee_state_table);
-			break;
-		default:
-			assert(0);
-			break;
-	}
+	free(qp->ep_default);
 
 	free(qp);
 } /* usiw_do_destroy_qp */
