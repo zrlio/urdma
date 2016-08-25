@@ -54,6 +54,7 @@
 #include <rte_ip.h>
 #include <rte_jhash.h>
 #include <rte_log.h>
+#include <rte_malloc.h>
 #include <rte_mbuf.h>
 #include <rte_udp.h>
 
@@ -135,12 +136,17 @@ usiw_send_wqe_queue_init(uint32_t qpn, struct usiw_send_wqe_queue *q,
 		uint32_t max_send_wr, uint32_t max_send_sge)
 {
 	char name[RTE_RING_NAMESIZE];
+	int ret;
 
 	snprintf(name, RTE_RING_NAMESIZE, "qpn%" PRIu32 "_send", qpn);
-	q->ring = rte_ring_create(name, max_send_wr + 1, SOCKET_ID_ANY,
-			RING_F_SP_ENQ|RING_F_SC_DEQ);
+	q->ring = rte_malloc(NULL, rte_ring_get_memsize(max_send_wr + 1),
+			RTE_CACHE_LINE_SIZE);
 	if (!q->ring)
 		return -rte_errno;
+	ret = rte_ring_init(q->ring, name, max_send_wr + 1,
+			RING_F_SP_ENQ|RING_F_SC_DEQ);
+	if (ret)
+		return ret;
 
 	q->storage = calloc(max_send_wr + 1, sizeof(struct usiw_send_wqe)
 			+ max_send_sge * sizeof(struct iovec));
@@ -160,7 +166,7 @@ void
 usiw_send_wqe_queue_destroy(struct usiw_send_wqe_queue *q)
 {
 	free(q->bitmask);
-	rte_ring_free(q->ring);
+	rte_free(q->ring);
 } /* usiw_send_wqe_queue_destroy */
 
 static void
@@ -218,12 +224,17 @@ usiw_recv_wqe_queue_init(uint32_t qpn, struct usiw_recv_wqe_queue *q,
 		uint32_t max_recv_wr, uint32_t max_recv_sge)
 {
 	char name[RTE_RING_NAMESIZE];
+	int ret;
 
 	snprintf(name, RTE_RING_NAMESIZE, "qpn%" PRIu32 "_recv", qpn);
-	q->ring = rte_ring_create(name, max_recv_wr + 1, SOCKET_ID_ANY,
-			RING_F_SP_ENQ|RING_F_SC_DEQ);
+	q->ring = rte_malloc(NULL, rte_ring_get_memsize(max_recv_wr + 1),
+			RTE_CACHE_LINE_SIZE);
 	if (!q->ring)
 		return -rte_errno;
+	ret = rte_ring_init(q->ring, name, max_recv_wr + 1,
+			RING_F_SP_ENQ|RING_F_SC_DEQ);
+	if (ret)
+		return ret;
 
 	q->storage = calloc(max_recv_wr + 1, sizeof(struct usiw_recv_wqe)
 			+ max_recv_sge * sizeof(struct iovec));
@@ -243,7 +254,7 @@ void
 usiw_recv_wqe_queue_destroy(struct usiw_recv_wqe_queue *q)
 {
 	free(q->bitmask);
-	rte_ring_free(q->ring);
+	rte_free(q->ring);
 } /* usiw_recv_wqe_queue_destroy */
 
 static void

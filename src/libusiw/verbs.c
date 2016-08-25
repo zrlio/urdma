@@ -48,6 +48,7 @@
 #include <rte_errno.h>
 #include <rte_ip.h>
 #include <rte_jhash.h>
+#include <rte_malloc.h>
 #include <rte_ring.h>
 
 #include "config_file.h"
@@ -535,19 +536,39 @@ usiw_create_cq(struct ibv_context *context, int size,
 
 	cq->cq_id = resp.priv.cq_id;
 	snprintf(name, RTE_RING_NAMESIZE, "cq%" PRIu32 "_ready_ring", cq->cq_id);
-	cq->cqe_ring = rte_ring_create(name, size + 1, socket_id,
-			RING_F_SP_ENQ|RING_F_SC_DEQ);
+	cq->cqe_ring = rte_malloc(NULL, rte_ring_get_memsize(size + 1),
+			socket_id);
 	if (!cq->cqe_ring) {
 		errno = rte_errno;
 		ibv_cmd_destroy_cq(&cq->ib_cq);
 		free(cq);
 		return NULL;
 	}
+	ret = rte_ring_init(cq->cqe_ring, name, size + 1,
+			RING_F_SP_ENQ|RING_F_SC_DEQ);
+	if (ret) {
+		errno = -ret;
+		rte_free(cq->cqe_ring);
+		ibv_cmd_destroy_cq(&cq->ib_cq);
+		free(cq);
+		return NULL;
+	}
 	snprintf(name, RTE_RING_NAMESIZE, "cq%" PRIu32 "_empty_ring", cq->cq_id);
-	cq->free_ring = rte_ring_create(name, size + 1, socket_id,
+	cq->free_ring = rte_malloc(NULL, rte_ring_get_memsize(size + 1),
+			socket_id);
+	if (!cq->cqe_ring) {
+		errno = rte_errno;
+		rte_free(cq->cqe_ring);
+		ibv_cmd_destroy_cq(&cq->ib_cq);
+		free(cq);
+		return NULL;
+	}
+	ret = rte_ring_init(cq->free_ring, name, size + 1,
 			RING_F_SP_ENQ|RING_F_SC_DEQ);
 	if (!cq->free_ring) {
-		errno = rte_errno;
+		errno = ret;
+		rte_free(cq->free_ring);
+		rte_free(cq->cqe_ring);
 		ibv_cmd_destroy_cq(&cq->ib_cq);
 		free(cq);
 		return NULL;
@@ -629,8 +650,8 @@ usiw_destroy_cq(struct ibv_cq *cq)
 		return -1;
 	}
 	ret = ibv_cmd_destroy_cq(cq);
-	rte_ring_free(ourcq->cqe_ring);
-	rte_ring_free(ourcq->free_ring);
+	rte_free(ourcq->cqe_ring);
+	rte_free(ourcq->free_ring);
 	free(ourcq);
 	return ret;
 } /* usiw_destroy_cq */
