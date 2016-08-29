@@ -46,7 +46,7 @@
 #include <linux/netdevice.h>
 #include <linux/module.h>
 
-#include <usiw_kabi.h>
+#include "usiw_kabi.h"
 #include "backports.h"
 #include "iwarp.h"
 

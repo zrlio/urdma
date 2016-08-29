@@ -40,9 +40,12 @@
 
 /* A very simple hashtable based key-value store */
 
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#endif
+
 #define _XOPEN_SOURCE 700
 #include <assert.h>
-#include <limits.h>
 #include <stdbool.h>
 #include <stdlib.h>
 

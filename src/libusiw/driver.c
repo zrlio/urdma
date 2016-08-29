@@ -38,6 +38,10 @@
  * SOFTWARE.
  */
 
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#endif
+
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -295,17 +299,17 @@ do_init_driver(void)
 	int portid, port_count;
 	int retval;
 
-	conf_file = fopen(usiw_confdir "/dpdkv.json", "r");
+	conf_file = fopen(urdma_confdir "/dpdkv.json", "r");
 	if (!conf_file) {
 		fprintf(stderr, "Could not read config file %s: %s\n",
-				usiw_confdir "/dpdkv.json",
+				urdma_confdir "/dpdkv.json",
 				strerror(errno));
 		return;
 	}
 	retval = parse_config(conf_file, &config);
 	if (retval < 0) {
 		fprintf(stderr, "Could not parse config file %s: %s\n",
-				usiw_confdir "/dpdkv.json",
+				urdma_confdir "/dpdkv.json",
 				strerror(errno));
 		return;
 	}
