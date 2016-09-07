@@ -445,18 +445,6 @@ usiw_reg_mr(struct ibv_pd *pd, void *addr, size_t len, int access)
 	return usiw_reg_mr_with_rkey(pd, addr, len, access, rkey);
 } /* usiw_reg_mr */
 
-static struct ibv_mr *
-usiw_rereg_mr(__attribute__((unused)) struct ibv_mr *mr,
-		__attribute__((unused)) int flags,
-		__attribute__((unused)) struct ibv_pd *pd,
-		__attribute__((unused)) void *addr,
-		__attribute__((unused)) size_t length,
-		__attribute__((unused)) int access)
-{
-	errno = ENOSYS;
-	return NULL;
-} /* usiw_rereg_mr */
-
 static int
 usiw_dereg_mr(struct ibv_mr *mr)
 {
@@ -1349,7 +1337,7 @@ static struct ibv_context_ops usiw_ops = {
 	.alloc_pd = usiw_alloc_pd,
 	.dealloc_pd = usiw_dealloc_pd,
 	.reg_mr = usiw_reg_mr,
-	.rereg_mr = usiw_rereg_mr,
+	.rereg_mr = NULL,
 	.dereg_mr = usiw_dereg_mr,
 	.alloc_mw = usiw_alloc_mw,
 	.bind_mw = usiw_bind_mw,
