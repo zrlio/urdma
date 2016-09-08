@@ -36,32 +36,23 @@
  * SOFTWARE.
  */
 
-#include <stdio.h>
+#ifndef IWARP_KNI_H
+#define IWARP_KNI_H
 
-enum { ipv4_addr_len_max = 20 };
+#include <rte_ethdev.h>
 
-struct json_object;
-
-struct usiw_port_config {
-	char ipv4_address[ipv4_addr_len_max];
-};
-
-struct usiw_config {
-	struct json_object *root;
-};
+struct usiw_driver;
+struct usiw_port_config;
+struct usiw_port;
 
 int
-urdma__config_file_get_ports(struct usiw_config *config,
-			     struct usiw_port_config **port_config);
+usiw_set_ipv4_addr(struct usiw_driver *driver, struct usiw_port *port,
+		struct usiw_port_config *config);
 
 int
-urdma__config_file_get_eal_args(struct usiw_config *config, char **argv);
-
-char *
-urdma__config_file_get_sock_name(struct usiw_config *config);
+usiw_port_setup_kni(struct usiw_port *port);
 
 int
-urdma__config_file_open(struct usiw_config *config);
+usiw_driver_setup_netlink(struct usiw_driver *driver);
 
-void
-urdma__config_file_close(struct usiw_config *config);
+#endif

@@ -245,6 +245,25 @@ free_args:
 } /* urdma__config_file_get_eal_args */
 
 
+char *
+urdma__config_file_get_sock_name(struct usiw_config *config)
+{
+	struct json_object *sock_name;
+
+	if (!json_object_object_get_ex(config->root, "socket", &sock_name)) {
+		fprintf(stderr, "Configuration error: JSON root object has no \"socket\" field\n");
+		return NULL;
+	}
+
+	if (!json_object_is_type(sock_name, json_type_string)) {
+		fprintf(stderr, "Configuration error: \"socket\" field not a string\n");
+		return NULL;
+	}
+
+	return strdup(json_object_get_string(sock_name));
+} /* urdma__config_file_get_sock_name */
+
+
 /** Parses the given JSON configuration file for the IPv4 addresses to assign
  * to each interface.  An example configuration file looks like:
  *

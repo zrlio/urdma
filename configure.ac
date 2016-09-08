@@ -157,6 +157,7 @@ LIBS="$old_LIBS"
 
 PKG_CHECK_MODULES([JSON_C], [json-c])
 
+AC_CHECK_HEADERS([uthash.h], [], AC_MSG_ERROR([urdma requires uthash]))
 AC_HEADER_ASSERT
 
 old_CFLAGS="${CFLAGS}"
