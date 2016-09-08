@@ -160,6 +160,11 @@ PKG_CHECK_MODULES([JSON_C], [json-c])
 AC_CHECK_HEADERS([uthash.h], [], AC_MSG_ERROR([urdma requires uthash]))
 AC_HEADER_ASSERT
 
+AC_CHECK_HEADERS([sys/socket.h], [],
+		 [AC_MSG_ERROR([urdma requires sys/socket.h])])
+AC_CHECK_DECLS([SOCK_CLOEXEC], [], [], [AC_INCLUDES_DEFAULT()]
+[[#include <sys/socket.h>]])
+
 old_CFLAGS="${CFLAGS}"
 old_CPPFLAGS="${CPPFLAGS}"
 old_LDFLAGS="${LDFLAGS}"

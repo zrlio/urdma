@@ -42,6 +42,8 @@
 #include <linux/netdevice.h>
 #include <linux/inetdevice.h>
 #include <net/net_namespace.h>
+#include <net/neighbour.h>
+#include <net/route.h>
 #include <linux/rtnetlink.h>
 #include <linux/if_arp.h>
 #include <linux/list.h>
@@ -94,6 +96,292 @@ static struct device usiw_generic_dma_device = {
 
 static struct bus_type usiw_bus = {
 	.name	= "urdma",
+};
+
+static int urdma_chardev_open(struct inode *inodep, struct file *filp)
+{
+	if (!try_module_get(THIS_MODULE)) {
+		return -ENXIO;
+	}
+
+	filp->private_data = dev_get_drvdata(&usiw_generic_dma_device);
+	return 0;
+}
+
+static int fetch_dest_hwaddr(struct net_device *netdev,
+		u32 src_ipv4_addr, u32 dst_ipv4_addr, void *dst_hw_addr)
+{
+	struct neighbour *n;
+	struct rtable *rt;
+	struct flowi4 fl4;
+	int rv = 0;
+
+	memset(&fl4, 0, sizeof(fl4));
+	fl4.saddr = src_ipv4_addr;
+	fl4.daddr = dst_ipv4_addr;
+	fl4.flowi4_oif = netdev->ifindex;
+	rt = ip_route_output_key(&init_net, &fl4);
+	if (IS_ERR(rt)) {
+		return PTR_ERR(rt);
+	}
+
+	rcu_read_lock();
+	n = dst_neigh_lookup(&rt->dst, &dst_ipv4_addr);
+	if (!n || !(n->nud_state & NUD_VALID)) {
+		rv = -ENODATA;
+		goto out;
+	}
+	memcpy(dst_hw_addr, n->ha, ETHER_ADDR_LEN);
+	rcu_read_unlock();
+
+	if (n)
+		neigh_release(n);
+
+out:
+	ip_rt_put(rt);
+	return rv;
+}
+
+static unsigned int urdma_chardev_poll(struct file *filp,
+		struct poll_table_struct *poll_table)
+{
+	struct urdma_chardev_data *file;
+	unsigned int rv = 0;
+
+	file = filp->private_data;
+	spin_lock_irq(&file->lock);
+	if (!file->dev) {
+		rv = -EINVAL;
+		goto out;
+	}
+	spin_unlock_irq(&file->lock);
+
+	poll_wait(filp, &file->wait_head, poll_table);
+
+	spin_lock_irq(&file->lock);
+	if (!file->dev) {
+		rv = -EINVAL;
+		goto out;
+	}
+	if (!list_empty(&file->established_list)
+			|| !list_empty(&file->disconnect_list)) {
+		rv = POLLIN | POLLRDNORM;
+	}
+
+out:
+	spin_unlock_irq(&file->lock);
+	return rv;
+}
+
+/* file->lock MUST be locked */
+static ssize_t do_read_disconnect_event(struct urdma_chardev_data *file,
+		struct siw_cep *cep, char *buf, size_t count)
+{
+	struct urdma_qp_disconnected_event event;
+
+	if (count < sizeof(event)) {
+		return -EINVAL;
+	}
+
+	memset(&event, 0, sizeof(event));
+	event.event_type = SIW_EVENT_QP_DISCONNECTED;
+	event.urdmad_dev_id = cep->urdmad_dev_id;
+	event.urdmad_qp_id = cep->urdmad_qp_id;
+	if (copy_to_user(buf, &event, sizeof(event))) {
+		return -EFAULT;
+	}
+
+	list_del(&cep->disconnect_entry);
+	siw_cep_put(cep);
+
+	return sizeof(event);
+} /* do_read_disconnect_event */
+
+/* file->lock MUST be locked */
+static ssize_t do_read_established_event(struct urdma_chardev_data *file,
+		struct siw_cep *cep, char *buf, size_t count)
+{
+	struct urdma_qp_connected_event event;
+	struct net_device *netdev;
+	ssize_t rv;
+
+	if (count < sizeof(event)) {
+		return -EINVAL;
+	}
+
+	memset(&event, 0, sizeof(event));
+	event.event_type = SIW_EVENT_QP_CONNECTED;
+	event.kmod_qp_id = cep->qp->ofa_qp.qp_num;
+	event.urdmad_dev_id = cep->qp->attrs.urdma_devid;
+	event.urdmad_qp_id = cep->qp->attrs.urdma_qp_id;
+	event.src_ipv4 = cep->llp.laddr.sin_addr.s_addr;
+	event.src_port = cep->llp.laddr.sin_port;
+	event.dst_ipv4 = cep->llp.raddr.sin_addr.s_addr;
+	event.dst_port = cep->llp.raddr.sin_port;
+	event.ord_max = cep->qp->attrs.orq_size;
+	event.ird_max = cep->qp->attrs.irq_size;
+	event.rxq = cep->qp->attrs.urdma_rxq;
+	event.txq = cep->qp->attrs.urdma_txq;
+
+	netdev = cep->sdev->netdev;
+	dev_hold(netdev);
+	spin_unlock_irq(&file->lock);
+
+	/* Must not have IRQs disabled when querying routing tables. */
+	/* FIXME: do something with rv */
+	rv = fetch_dest_hwaddr(netdev, event.src_ipv4, event.dst_ipv4,
+		&event.dst_ether);
+	if (copy_to_user(buf, &event, sizeof(event))) {
+		spin_lock_irq(&file->lock);
+		return -EFAULT;
+	}
+
+	spin_lock_irq(&file->lock);
+	dev_put(netdev);
+	list_del(&cep->established_entry);
+	list_add_tail(&cep->rtr_wait_entry, &file->rtr_wait_list);
+
+	return sizeof(event);
+} /* do_read_established_event */
+
+static ssize_t urdma_chardev_read(struct file *filp, char *buf,
+		size_t count, loff_t *offset)
+{
+	struct urdma_chardev_data *file;
+	struct siw_cep *cep;
+	ssize_t rv;
+
+	file = filp->private_data;
+	spin_lock_irq(&file->lock);
+	if (!file->dev) {
+		rv = -EINVAL;
+		goto out;
+	}
+
+	while (list_empty(&file->established_list)
+			&& list_empty(&file->disconnect_list)) {
+		if (filp->f_flags & O_NONBLOCK) {
+			rv = -EAGAIN;
+			goto out;
+		}
+		spin_unlock_irq(&file->lock);
+
+		rv = wait_event_interruptible(file->wait_head,
+				(!list_empty(&file->established_list)
+				 ||!list_empty(&file->disconnect_list)));
+		if (rv < 0) {
+			return rv;
+		}
+
+		spin_lock_irq(&file->lock);
+		if (!file->dev) {
+			rv = -EINVAL;
+			goto out;
+		}
+	}
+
+	if (!list_empty(&file->established_list)) {
+		cep = list_first_entry(&file->established_list,
+				struct siw_cep, established_entry);
+		rv = do_read_established_event(file, cep, buf, count);
+	} else {
+		cep = list_first_entry(&file->disconnect_list,
+				struct siw_cep, disconnect_entry);
+		rv = do_read_disconnect_event(file, cep, buf, count);
+	}
+
+out:
+	spin_unlock_irq(&file->lock);
+	return rv;
+}
+
+static ssize_t urdma_chardev_write(struct file *filp, const char *buf,
+		size_t count, loff_t *offset)
+{
+	struct urdma_chardev_data *file;
+	struct urdma_event_storage event;
+	struct urdma_qp_rtr_event *qp_rtr_event;
+	struct list_head *lptr;
+	struct siw_cep *cep;
+	struct siw_qp *qp;
+	ssize_t rv;
+
+	if (count > sizeof(event)) {
+		return -EINVAL;
+	}
+
+	if (copy_from_user(&event, buf, count)) {
+		return -EFAULT;
+	}
+
+	file = filp->private_data;
+	spin_lock_irq(&file->lock);
+	if (!file->dev) {
+		rv = -EINVAL;
+		goto out;
+	}
+
+	switch (event.event_type) {
+	case SIW_EVENT_QP_RTR:
+		if (count != sizeof(*qp_rtr_event)) {
+			rv = -EINVAL;
+			goto out;
+		}
+		qp_rtr_event = (struct urdma_qp_rtr_event *)&event;
+		qp = NULL;
+		list_for_each(lptr, &file->rtr_wait_list) {
+			cep = list_entry(lptr, struct siw_cep, rtr_wait_entry);
+			if (cep->qp->hdr.id == qp_rtr_event->kmod_qp_id) {
+				qp = cep->qp;
+				siw_qp_get(qp);
+				list_del(&qp->cep->rtr_wait_entry);
+				break;
+			}
+		}
+		spin_unlock_irq(&file->lock);
+		if (qp) {
+			rv = siw_qp_rtr(qp->cep);
+			siw_qp_put(qp);
+			return (rv < 0) ? rv : count;
+		} else {
+			return -EINVAL;
+		}
+	default:
+		pr_debug(" got invalid event type %u\n", event.event_type);
+		rv = -EINVAL;
+		goto out;
+	}
+
+	rv = count;
+
+out:
+	spin_unlock_irq(&file->lock);
+	return rv;
+}
+
+static int urdma_chardev_release(struct inode *inodep, struct file *filp)
+{
+	struct urdma_chardev_data *file = filp->private_data;
+	struct siw_cep *cep;
+	struct list_head *pos, *next;
+
+	spin_lock_irq(&file->lock);
+	list_for_each_safe(pos, next, &file->rtr_wait_list) {
+		cep = list_entry(pos, struct siw_cep, rtr_wait_entry);
+		list_del(pos);
+	}
+	spin_unlock_irq(&file->lock);
+	module_put(THIS_MODULE);
+	return 0;
+}
+
+static struct file_operations urdma_fops =
+{
+	.open = urdma_chardev_open,
+	.poll = urdma_chardev_poll,
+	.read = urdma_chardev_read,
+	.write = urdma_chardev_write,
+	.release = urdma_chardev_release,
 };
 
 static int siw_modify_port(struct ib_device *ofa_dev, u8 port, int mask,
@@ -185,6 +473,7 @@ static void siw_device_destroy(struct siw_dev *sdev)
 			sdev->ofa_dev.name,
 			sdev->netdev ? sdev->netdev->name : "(unattached)");
 
+	put_device(sdev->ofa_dev.dma_device);
 	siw_idr_release(sdev);
 	kfree(sdev->ofa_dev.iwcm);
 	if (sdev->netdev)
@@ -293,7 +582,7 @@ static struct siw_dev *siw_device_create(int list_index)
 	ofa_dev->phys_port_cnt = 1;
 
 	ofa_dev->num_comp_vectors = 1;
-	ofa_dev->dma_device = &usiw_generic_dma_device;
+	ofa_dev->dma_device = get_device(&usiw_generic_dma_device);
 	ofa_dev->query_device = siw_query_device;
 	ofa_dev->query_port = siw_query_port;
 #ifdef HAVE_IB_GET_PORT_IMMUTABLE
@@ -493,7 +782,30 @@ static struct notifier_block siw_netdev_nb = {
  */
 static __init int siw_init_module(void)
 {
+	struct urdma_chardev_data *chardev_data;
 	int x, rv;
+	dev_t devt;
+
+	chardev_data = kmalloc(sizeof(*chardev_data), GFP_KERNEL);
+	if (!chardev_data) {
+		rv = -ENOMEM;
+		goto out_nochardev;
+	}
+	spin_lock_init(&chardev_data->lock);
+	INIT_LIST_HEAD(&chardev_data->established_list);
+	INIT_LIST_HEAD(&chardev_data->disconnect_list);
+	INIT_LIST_HEAD(&chardev_data->rtr_wait_list);
+	init_waitqueue_head(&chardev_data->wait_head);
+	dev_set_drvdata(&usiw_generic_dma_device, chardev_data);
+
+	rv = register_chrdev(0, "urdma", &urdma_fops);
+	if (rv < 0) {
+		/* This gets implicitly cleaned up by unregister_chrdev once it
+		 * is registered. */
+		kfree(chardev_data);
+		goto out_nochardev;
+	}
+	usiw_generic_dma_device.devt = devt = MKDEV(rv, 0);
 
 	/*
 	 * The xprtrdma module needs at least some rudimentary bus to set
@@ -507,7 +819,7 @@ static __init int siw_init_module(void)
 
 	rv = device_register(&usiw_generic_dma_device);
 	if (rv)
-		goto out;
+		goto out_nodev;
 
 	rv = siw_cm_init();
 	if (rv)
@@ -552,19 +864,22 @@ out_free_devlist:
 out_unregister:
 	device_unregister(&usiw_generic_dma_device);
 
-out:
+out_nodev:
 	bus_unregister(&usiw_bus);
 out_nobus:
+	unregister_chrdev(MAJOR(devt), "urdma");
 	pr_info("urdma kernel support attach failed. Error: %d\n",
 			rv);
 	siw_cm_exit();
 
+out_nochardev:
 	return rv;
 }
 
 
 static void __exit siw_exit_module(void)
 {
+	struct urdma_chardev_data *file;
 	int x;
 
 	spin_lock(&siw_dev_lock);
@@ -587,6 +902,10 @@ static void __exit siw_exit_module(void)
 	device_unregister(&usiw_generic_dma_device);
 
 	bus_unregister(&usiw_bus);
+	unregister_chrdev(MAJOR(usiw_generic_dma_device.devt), "urdma");
+
+	file = dev_get_drvdata(&usiw_generic_dma_device);
+	kfree(file);
 
 	pr_info("urdma kernel support detached\n");
 }

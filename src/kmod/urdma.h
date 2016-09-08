@@ -76,6 +76,14 @@ struct siw_devinfo {
 	/* end ib_device_attr */
 };
 
+struct urdma_chardev_data {
+	struct device		*dev;
+	spinlock_t		lock;
+	struct list_head	established_list;
+	struct list_head	disconnect_list;
+	struct list_head	rtr_wait_list;
+	wait_queue_head_t	wait_head;
+};
 
 struct siw_dev {
 	struct ib_device	ofa_dev;
@@ -113,9 +121,6 @@ struct siw_objhdr {
 struct siw_event_file {
 	struct siw_ucontext	*ctx;
 	spinlock_t		lock;
-	struct list_head	established_list;
-	struct list_head	rtr_wait_list;
-	wait_queue_head_t	wait_head;
 };
 
 struct siw_ucontext {
@@ -175,6 +180,10 @@ struct siw_qp_attrs {
 	enum siw_qp_state	state;
 	u32			orq_size;
 	u32			irq_size;
+	u16			urdma_devid;
+	u16			urdma_qp_id;
+	u16			urdma_rxq;
+	u16			urdma_txq;
 	enum siw_qp_flags	flags;
 
 	struct socket		*llp_stream_handle;

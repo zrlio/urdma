@@ -124,6 +124,7 @@ static struct siw_cep *siw_cep_alloc(struct siw_dev  *sdev)
 	if (cep) {
 		unsigned long flags;
 
+		INIT_LIST_HEAD(&cep->disconnect_entry);
 		INIT_LIST_HEAD(&cep->rtr_wait_entry);
 		INIT_LIST_HEAD(&cep->established_entry);
 		INIT_LIST_HEAD(&cep->listenq);
