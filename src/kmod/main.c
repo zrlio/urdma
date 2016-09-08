@@ -214,22 +214,29 @@ static struct siw_dev *siw_dev_from_netdev(struct net_device *dev)
 	return sdev->netdev ? NULL : sdev;
 }
 
+static void siw_device_assign_guid(struct siw_dev *sdev,
+				   struct net_device *netdev)
+{
+	struct ib_device *ofa_dev = &sdev->ofa_dev;
+
+	/* HACK HACK HACK: change the node GUID to the hardware address
+	 * now that we know what it is */
+	pr_debug(DBG_DM ": set node guid for %s based on MAC address\n",
+			ofa_dev->name);
+	memset(&ofa_dev->node_guid, 0, sizeof(ofa_dev->node_guid));
+	memcpy(&ofa_dev->node_guid, netdev->dev_addr, 6);
+}
+
 static void siw_device_assign_netdev(struct siw_dev *sdev,
 				     struct net_device *netdev)
 {
-	struct ib_device *ofa_dev = &sdev->ofa_dev;
 	dev_hold(netdev);
 	sdev->netdev = netdev;
 
 	if (netdev->type != ARPHRD_LOOPBACK) {
-		/* HACK HACK HACK: change the node GUID to the hardware address
-		 * now that we know what it is */
-		pr_debug(DBG_DM ": set node guid for %s based on MAC address\n",
-				ofa_dev->name);
-		memset(&ofa_dev->node_guid, 0, sizeof(ofa_dev->node_guid));
-		memcpy(&ofa_dev->node_guid, netdev->dev_addr, 6);
+		siw_device_assign_guid(sdev, netdev);
 	}
-	WARN_ON_ONCE(ofa_dev->node_guid == 0);
+	WARN_ON_ONCE(sdev->ofa_dev.node_guid == 0);
 }
 
 static struct siw_dev *siw_device_create(int list_index)
@@ -463,13 +470,7 @@ static int siw_netdev_event(struct notifier_block *nb, unsigned long event,
 		break;
 
 	case NETDEV_CHANGEADDR:
-		/* HACK HACK HACK: change the node GUID to the hardware address
-		 * now that we know what it is */
-		pr_debug(DBG_DM ": set node guid for %s based on MAC address\n",
-				sdev->ofa_dev.name);
-		memset(&sdev->ofa_dev.node_guid, 0,
-				sizeof(sdev->ofa_dev.node_guid));
-		memcpy(&sdev->ofa_dev.node_guid, netdev->dev_addr, 6);
+		siw_device_assign_guid(sdev, netdev);
 		siw_port_event(sdev, 1, IB_EVENT_LID_CHANGE);
 
 		break;
