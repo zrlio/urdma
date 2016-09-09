@@ -302,7 +302,7 @@ struct usiw_qp {
 	struct usiw_cq *recv_cq;
 	struct usiw_mr_table *pd;
 
-	struct ee_state *ep_default;
+	struct ee_state remote_ep;
 
 	struct ibv_qp ib_qp;
 };

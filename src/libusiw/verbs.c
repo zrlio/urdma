@@ -1138,7 +1138,7 @@ usiw_post_send(struct ibv_qp *ib_qp, struct ibv_send_wr *wr,
 		}
 		wqe->wr_context = (void *)(uintptr_t)wr->wr_id;
 		wqe->iov_count = wr->num_sge;
-		wqe->remote_ep = qp->ep_default;
+		wqe->remote_ep = &qp->remote_ep;
 		wqe->state = SEND_WQE_INIT;
 		wqe->msn = 0; /* will be assigned at send time */
 		if (!(wqe->flags & usiw_send_inline)) {
@@ -1200,7 +1200,7 @@ usiw_post_recv(struct ibv_qp *ib_qp, struct ibv_recv_wr *wr,
 			wqe->iov[x].iov_len = wr->sg_list[x].length;
 			wqe->total_request_size += wqe->iov[x].iov_len;
 		}
-		wqe->remote_ep = qp->ep_default;
+		wqe->remote_ep = &qp->remote_ep;
 		wqe->msn = 0;
 		wqe->recv_size = 0;
 		wqe->input_size = 0;

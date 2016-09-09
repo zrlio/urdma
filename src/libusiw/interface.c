@@ -514,9 +514,10 @@ send_ddp_segment(struct usiw_qp *qp, struct rte_mbuf *sendmsg,
 
 
 static void
-send_trp_sack(struct usiw_qp *qp, struct ee_state *ep)
+send_trp_sack(struct usiw_qp *qp)
 {
 	struct rte_mbuf *sendmsg;
+	struct ee_state *ep = &qp->remote_ep;
 	struct trp_hdr *trp;
 
 	assert(ep->trp_flags & trp_recv_missing);
@@ -535,8 +536,9 @@ send_trp_sack(struct usiw_qp *qp, struct ee_state *ep)
 
 
 static void
-send_trp_fin(struct usiw_qp *qp, struct ee_state *ep)
+send_trp_fin(struct usiw_qp *qp)
 {
+	struct ee_state *ep = &qp->remote_ep;
 	struct rte_mbuf *sendmsg;
 	struct trp_hdr *trp;
 
@@ -561,8 +563,9 @@ send_trp_fin(struct usiw_qp *qp, struct ee_state *ep)
 
 
 static void
-send_trp_ack(struct usiw_qp *qp, struct ee_state *ep)
+send_trp_ack(struct usiw_qp *qp)
 {
+	struct ee_state *ep = &qp->remote_ep;
 	struct rte_mbuf *sendmsg;
 	struct trp_hdr *trp;
 
@@ -793,7 +796,7 @@ rq_flush(struct usiw_qp *qp)
 
 	rte_spinlock_lock(&qp->rq0.lock);
 	while (rte_ring_dequeue(qp->rq0.ring, (void **)&wqe) == 0) {
-		wqe->msn = qp->ep_default->expected_recv_msn++;
+		wqe->msn = qp->remote_ep.expected_recv_msn++;
 		usiw_recv_wqe_queue_add_active(&qp->rq0, wqe);
 	}
 	TAILQ_FOR_EACH(wqe, &qp->rq0.active_head, active, prev) {
@@ -1369,7 +1372,7 @@ qp_shutdown(struct usiw_qp *qp)
 	struct ibv_modify_qp cmd;
 	int ret;
 
-	send_trp_fin(qp, qp->ep_default);
+	send_trp_fin(qp);
 
 	rte_atomic16_set(&qp->conn_state, usiw_qp_error);
 	memset(&qp_attr, 0, sizeof(qp_attr));
@@ -1544,9 +1547,10 @@ process_trp_sack(struct ee_state *ep, uint32_t psn_min, uint32_t psn_max)
 
 
 static void
-sweep_unacked_packets(struct usiw_qp *qp, struct ee_state *ep, uint64_t now)
+sweep_unacked_packets(struct usiw_qp *qp, uint64_t now)
 {
 	struct pending_datagram_info *pending;
+	struct ee_state *ep = &qp->remote_ep;
 	struct rte_mbuf **end, **p, *sendmsg;
 	int count;
 
@@ -1660,13 +1664,7 @@ ddp_place_tagged_data(struct usiw_qp *qp, struct packet_context *orig)
 struct ee_state *
 usiw_get_ee_context(struct usiw_qp *qp, struct usiw_ah *ah)
 {
-	struct ee_state *ee = qp->ep_default;
-	if (!ee) {
-		/* Should never happen */
-		RTE_LOG(DEBUG, USER1, "Got packet on RX queue but no connection yet\n");
-		return NULL;
-	}
-
+	struct ee_state *ee = &qp->remote_ep;
 	return (is_same_ether_addr(&ah->ether_addr, &ee->ah.ether_addr)
 			&& ah->ipv4_addr == ee->ah.ipv4_addr
 			&& ah->udp_port == ee->ah.udp_port) ? ee : NULL;
@@ -1909,8 +1907,8 @@ process_receive_queue(struct usiw_qp *qp, void *prefetch_addr, uint64_t *now)
 	if (qp->port->flags & port_fdir) {
 		rx_count = rte_eth_rx_burst(qp->port->portid, qp->rx_queue,
 				rxmbuf, RX_BURST_SIZE);
-	} else if (qp->ep_default) {
-		rx_count = rte_ring_dequeue_burst(qp->ep_default->rx_queue,
+	} else if (qp->remote_ep.rx_queue) {
+		rx_count = rte_ring_dequeue_burst(qp->remote_ep.rx_queue,
 				(void **)rxmbuf, RX_BURST_SIZE);
 	} else {
 		rx_count = 0;
@@ -1953,7 +1951,7 @@ progress_qp(struct usiw_qp *qp)
 	process_receive_queue(qp, qp->sq.active_head.tqh_first, &now);
 
 	/* Call any timers only once per millisecond */
-	sweep_unacked_packets(qp, qp->ep_default, now);
+	sweep_unacked_packets(qp, now);
 
 	scount = 0;
 	TAILQ_FOR_EACH(send_wqe, &qp->sq.active_head, active, prev) {
@@ -1992,11 +1990,11 @@ progress_qp(struct usiw_qp *qp)
 
 	scount += respond_rdma_read(qp);
 
-	if (qp->ep_default->trp_flags & trp_ack_update) {
-		if (unlikely(qp->ep_default->trp_flags & trp_recv_missing)) {
-			send_trp_sack(qp, qp->ep_default);
+	if (qp->remote_ep.trp_flags & trp_ack_update) {
+		if (unlikely(qp->remote_ep.trp_flags & trp_recv_missing)) {
+			send_trp_sack(qp);
 		} else {
-			send_trp_ack(qp, qp->ep_default);
+			send_trp_ack(qp);
 		}
 	}
 
@@ -2073,7 +2071,6 @@ usiw_do_destroy_qp(struct usiw_qp *qp)
 	usiw_recv_wqe_queue_destroy(&qp->rq0);
 	usiw_send_wqe_queue_destroy(&qp->sq);
 	free(qp->readresp_store);
-	free(qp->ep_default);
 
 	free(qp);
 } /* usiw_do_destroy_qp */
@@ -2189,10 +2186,10 @@ poll_conn_state(struct usiw_context *ctx, int timeout)
 		char name[RTE_RING_NAMESIZE];
 		snprintf(name, RTE_RING_NAMESIZE, "qp%u_rxring",
 				qp->ib_qp.qp_num);
-		qp->ep_default->rx_queue = rte_ring_create(name,
+		qp->remote_ep.rx_queue = rte_ring_create(name,
 				qp->port->rx_desc_count, rte_socket_id(),
 				RING_F_SP_ENQ|RING_F_SC_DEQ);
-		if (!qp->ep_default->rx_queue) {
+		if (!qp->remote_ep.rx_queue) {
 			RTE_LOG(DEBUG, USER1, "Set up rx ring failed: %s\n",
 						rte_strerror(ret));
 			rte_atomic16_set(&qp->conn_state, usiw_qp_error);
@@ -2272,8 +2269,8 @@ find_matching_qp(struct usiw_context *ctx, struct rte_mbuf *pkt)
 			sizeof(*ether) + sizeof(*ipv4));
 
 	LIST_FOR_EACH(qp, &ctx->qp_active, ctx_entry, prev) {
-		ah = qp->ep_default ? &qp->ep_default->ah : 0;
-		if (ah && ah->ipv4_addr == ipv4->dst_addr
+		ah = &qp->remote_ep.ah;
+		if (ah->ipv4_addr == ipv4->dst_addr
 				&& ah->udp_port == udp->dst_port) {
 			return qp;
 		}
@@ -2295,8 +2292,7 @@ kni_process_burst(struct usiw_port *port,
 			while (i + j < count
 					&& (qp = find_matching_qp(port->ctx,
 							rxmbuf[i + j]))) {
-				/* This implies that qp->ep_default != NULL */
-				rte_ring_enqueue(qp->ep_default->rx_queue,
+				rte_ring_enqueue(qp->remote_ep.rx_queue,
 						rxmbuf[i + j]);
 				j++;
 			}
