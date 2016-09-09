@@ -337,8 +337,9 @@ struct usiw_port {
 	uint16_t tx_desc_count;
 
 	uint64_t flags;
-	uint64_t qp_bitmask;
 	uint16_t max_qp;
+	struct rte_ring *avail_qp;
+	struct usiw_qp *qp;
 
 	struct rte_kni *kni;
 	struct ether_addr ether_addr;

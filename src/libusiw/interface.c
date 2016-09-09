@@ -2072,7 +2072,7 @@ usiw_do_destroy_qp(struct usiw_qp *qp)
 	usiw_send_wqe_queue_destroy(&qp->sq);
 	free(qp->readresp_store);
 
-	free(qp);
+	rte_ring_enqueue(qp->port->avail_qp, qp);
 } /* usiw_do_destroy_qp */
 
 

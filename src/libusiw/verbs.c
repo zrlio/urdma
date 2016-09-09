@@ -730,26 +730,19 @@ usiw_post_srq_recv(__attribute__((unused)) struct ibv_srq *srq,
 } /* usiw_post_srq_recv */
 
 
-static uint16_t
+static struct usiw_qp *
 port_get_next_qp(struct usiw_port *port)
 {
-	uint32_t x;
+	void *result;
+	int ret;
 
-	if (!port->qp_bitmask) {
-		return 0;
+	ret = rte_ring_dequeue(port->avail_qp, &result);
+	if (ret) {
+		errno = -ret;
+		return NULL;
 	}
-	/* Skip special QPN 0 */
-	for (x = 1; x < 64; ++x) {
-		if (port->qp_bitmask & (UINT64_C(1) << x)) {
-			port->qp_bitmask &= ~(UINT64_C(1) << x);
-			return x;
-		}
-	}
-
-	/* Should never get here */
-	assert(0);
-	return 0;
-} /* port_get_next_qpn */
+	return result;
+} /* port_get_next_qp */
 
 
 static struct ibv_qp *
@@ -802,9 +795,8 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 
 	ctx = usiw_get_context(pd->context);
 
-	qp = malloc(sizeof(struct usiw_qp));
+	qp = port_get_next_qp(ctx->port);
 	if (!qp) {
-		errno = ENOMEM;
 		goto errout;
 	}
 
@@ -845,12 +837,6 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 	qp->timer_last = 0;
 	qp->pd = container_of(pd, struct usiw_mr_table, pd);
 
-	qp->rx_queue = qp->tx_queue
-		= port_get_next_qp(ctx->port);
-	if (qp->rx_queue == 0) {
-		errno = -retval;
-		goto free_kernel_qp;
-	}
 
 	retval = usiw_send_wqe_queue_init(qp->ib_qp.qp_num,
 			&qp->sq, qp_init_attr->cap.max_send_wr,
@@ -892,7 +878,7 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 free_kernel_qp:
 	ibv_cmd_destroy_qp(&qp->ib_qp);
 free_user_qp:
-	free(qp);
+	rte_ring_enqueue(ctx->port->avail_qp, qp);
 errout:
 	return NULL;
 } /* usiw_create_qp */
