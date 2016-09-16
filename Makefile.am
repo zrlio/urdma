@@ -59,9 +59,9 @@ src_liburdma_liburdma_la_SOURCES = \
 	src/liburdma/interface.h \
 	src/liburdma/kni.c \
 	src/liburdma/kni.h \
-	src/liburdma/list.h \
 	src/liburdma/verbs.c \
 	src/liburdma/verbs.h \
+	src/util/list.h \
 	src/util/util.c \
 	src/util/util.h
 src_liburdma_liburdma_la_CFLAGS = $(MACHINE_CFLAGS)
