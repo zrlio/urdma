@@ -148,24 +148,27 @@ CFLAGS="${CFLAGS} ${MACHINE_CFLAGS}"
 CPPFLAGS="${CPPFLAGS} ${DPDK_CPPFLAGS}"
 LDFLAGS="${CPPFLAGS} ${DPDK_LDFLAGS}"
 AC_CHECK_HEADERS([rte_ethdev.h], [],
-[AC_MSG_ERROR([urdma requires DPDK >= 2.2.0])])
+[AC_MSG_ERROR([urdma requires DPDK >= 16.07])])
 
 DPDK_LIBS=
 AC_SUBST([DPDK_LIBS])
-for lib in dpdk intel_dpdk; do
-	old_LIBS="${LIBS}"
-	LIBS="-l${lib} ${LIBS}"
-	AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <rte_eal.h>]],
-		[[int main(int argc, char *argv[]) {
-			rte_eal_init(argc, argv); return 0;
-		}]])],
-	[DPDK_LIBS=-l${lib}; break], [])
-	LIBS=${old_LIBS}
-done
-if test ${DPDK_LIBS}x = x; then
-	AC_MSG_ERROR([urdma requires DPDK >= 2.2.0])
-fi
-DPDK_LDFLAGS="${DPDK_LDFLAGS} -Wl,--whole-archive,${DPDK_LIBS},--no-whole-archive"
+old_LIBS="${LIBS}"
+LIBS="-ldpdk ${LIBS}"
+AC_MSG_CHECKING([for DPDK 16.07 built as shared libraries])
+AC_LINK_IFELSE([AC_LANG_PROGRAM(
+[[#include <rte_eal.h>
+ #include <rte_ethdev.h>]],
+[[int main(int argc, char *argv[]) {
+	struct rte_eth_dev_info info;
+	rte_eal_init(argc, argv);
+	info.nb_rx_queues = 1;
+	return 0;
+}]])],
+	[AC_MSG_RESULT([yes])],
+	[AC_MSG_RESULT([no])]
+	[AC_MSG_ERROR([urdma requires DPDK >= 16.07])])
+LIBS=${old_LIBS}
+DPDK_LDFLAGS="${DPDK_LDFLAGS} -Wl,--whole-archive,-ldpdk,--no-whole-archive"
 
 AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <rte_kni.h>]],
 	       [[int main(int argc, char *argv[]) {
