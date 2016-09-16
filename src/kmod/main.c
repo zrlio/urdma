@@ -63,11 +63,7 @@ MODULE_DESCRIPTION("Userspace Software iWARP Driver");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_VERSION("0.3");
 
-static int device_count = 1;
-module_param(device_count, int, 0444);
-MODULE_PARM_DESC(device_count, "Maximum number of devices urdma can attach to");
-
-static struct siw_dev **siw_devlist;
+static struct list_head urdma_devlist;
 DEFINE_SPINLOCK(siw_dev_lock);
 
 static ssize_t show_sw_version(struct device *dev,
@@ -421,6 +417,10 @@ static int siw_device_register(struct siw_dev *sdev)
 
 	sdev->attrs.vendor_part_id = dev_id++;
 
+	pr_debug(DBG_DM ": Interface '%s' for device '%s' up, HWaddr=%pM\n",
+			sdev->netdev->name, sdev->ofa_dev.name,
+			sdev->netdev->dev_addr);
+
 	sdev->is_registered = 1;
 	return 0;
 }
@@ -466,7 +466,7 @@ static void siw_device_deregister(struct siw_dev *sdev)
 
 static void siw_device_destroy(struct siw_dev *sdev)
 {
-	if (!sdev)
+	if (WARN_ONCE(!sdev, "call siw_device_destroy() with sdev==NULL"))
 		return;
 
 	pr_debug(DBG_DM ": destroy siw device %s netdev=%s\n",
@@ -482,23 +482,24 @@ static void siw_device_destroy(struct siw_dev *sdev)
 }
 
 
-static struct siw_dev *siw_dev_from_netdev(struct net_device *dev)
+static bool siw_dev_qualified(struct net_device *dev)
 {
+	return strncmp(dev->name, "kni", 3) == 0;
+}
+
+static struct siw_dev *siw_dev_from_netdev(struct net_device *netdev)
+{
+	struct list_head *lptr;
 	struct siw_dev *sdev;
-	int x;
-	for (x = 0; x < device_count; x++) {
-		sdev = siw_devlist[x];
-		if (sdev->netdev == dev)
+
+	list_for_each(lptr, &urdma_devlist) {
+		sdev = list_entry(lptr, struct siw_dev, list);
+		if (sdev->netdev == netdev) {
 			return sdev;
+		}
 	}
-	if (strncmp(dev->name, "kni", 3)) {
-		return NULL;
-	}
-	if (kstrtoint(dev->name + 3, 10, &x) || x < 0 || x >= device_count) {
-		return NULL;
-	}
-	sdev = siw_devlist[x];
-	return sdev->netdev ? NULL : sdev;
+
+	return NULL;
 }
 
 static void siw_device_assign_guid(struct siw_dev *sdev,
@@ -506,29 +507,20 @@ static void siw_device_assign_guid(struct siw_dev *sdev,
 {
 	struct ib_device *ofa_dev = &sdev->ofa_dev;
 
+	/* HACK HACK HACK: change the node GUID to the hardware address
+	 * now that we know what it is */
 	pr_debug(DBG_DM ": set node guid for %s based on HWaddr=%pM\n",
 			ofa_dev->name, netdev->dev_addr);
 	memset(&ofa_dev->node_guid, 0, sizeof(ofa_dev->node_guid));
 	memcpy(&ofa_dev->node_guid, netdev->dev_addr, 6);
 }
 
-static void siw_device_assign_netdev(struct siw_dev *sdev,
-				     struct net_device *netdev)
-{
-	dev_hold(netdev);
-	sdev->netdev = netdev;
-
-	if (netdev->type != ARPHRD_LOOPBACK) {
-		siw_device_assign_guid(sdev, netdev);
-	}
-	WARN_ON_ONCE(sdev->ofa_dev.node_guid == 0);
-}
-
-static struct siw_dev *siw_device_create(int list_index)
+static struct siw_dev *siw_device_create(struct net_device *netdev)
 {
 	struct siw_dev *sdev = (struct siw_dev *)ib_alloc_device(sizeof *sdev);
 	struct ib_device *ofa_dev;
 	size_t gidlen;
+	int index;
 
 	if (!sdev)
 		return NULL;
@@ -541,9 +533,28 @@ static struct siw_dev *siw_device_create(int list_index)
 		return NULL;
 	}
 
+	if (kstrtoint(netdev->name + 3, 10, &index) < 0 || index < 0) {
+		ib_dealloc_device(ofa_dev);
+		return NULL;
+	}
 	snprintf(ofa_dev->name, IB_DEVICE_NAME_MAX,
-			URDMA_DEV_PREFIX "%d", list_index);
+			URDMA_DEV_PREFIX "%d", index);
 
+	dev_hold(netdev);
+	sdev->netdev = netdev;
+	list_add_tail(&sdev->list, &urdma_devlist);
+
+	memset(&ofa_dev->node_guid, 0, sizeof(ofa_dev->node_guid));
+	if (netdev->type != ARPHRD_LOOPBACK) {
+		memcpy(&ofa_dev->node_guid, netdev->dev_addr, 6);
+	} else {
+		/*
+		 * Our device does not yet have an associated HW address,
+		 * but connection mangagement lib expects gid != 0
+		 */
+		gidlen = min(strlen(ofa_dev->name), (size_t)6);
+		memcpy(&ofa_dev->node_guid, ofa_dev->name, gidlen);
+	}
 	ofa_dev->owner = THIS_MODULE;
 
 	ofa_dev->uverbs_cmd_mask =
@@ -566,13 +577,6 @@ static struct siw_dev *siw_device_create(int list_index)
 
 	ofa_dev->node_type = RDMA_NODE_RNIC;
 	memcpy(ofa_dev->node_desc, URDMA_NODE_DESC, sizeof(URDMA_NODE_DESC));
-
-	/*
-	 * Our device does not yet have an associated HW address,
-	 * but connection mangagement lib expects gid != 0
-	 */
-	gidlen = min(strlen(ofa_dev->name), (size_t)6);
-	memcpy(&ofa_dev->node_guid, ofa_dev->name, gidlen);
 
 	/*
 	 * Current model (one-to-one device association):
@@ -696,16 +700,20 @@ static int siw_netdev_event(struct notifier_block *nb, unsigned long event,
 		goto done;
 
 	sdev = siw_dev_from_netdev(netdev);
-	if (!sdev)
-		goto unlock;
-
-	if (WARN_ONCE(!sdev->is_registered, "IB device %s not registered with IB core\n",
-					sdev->ofa_dev.name))
-		goto unlock;
 
 	switch (event) {
 
 	case NETDEV_UP:
+		if (!sdev) {
+			goto unlock;
+		}
+
+		if (sdev->is_registered) {
+			sdev->state = IB_PORT_ACTIVE;
+			siw_port_event(sdev, 1, IB_EVENT_PORT_ACTIVE);
+			break;
+		}
+
 		in_dev = in_dev_get(netdev);
 		if (!in_dev) {
 			pr_debug(DBG_DM ": %s: no in_dev\n", netdev->name);
@@ -715,43 +723,53 @@ static int siw_netdev_event(struct notifier_block *nb, unsigned long event,
 
 		if (in_dev->ifa_list) {
 			sdev->state = IB_PORT_ACTIVE;
-			siw_port_event(sdev, 1, IB_EVENT_PORT_ACTIVE);
+			siw_device_register(sdev);
 		} else {
 			pr_debug(DBG_DM ": %s: no ifa\n", netdev->name);
 			sdev->state = IB_PORT_INIT;
 		}
 		in_dev_put(in_dev);
 
-		pr_debug(DBG_DM ": Interface '%s' for device '%s' up, HWaddr=%pM\n",
-				netdev->name, sdev->ofa_dev.name,
-				netdev->dev_addr);
-
 		break;
 
 	case NETDEV_DOWN:
+		if (!sdev || !sdev->is_registered) {
+			goto unlock;
+		}
 		sdev->state = IB_PORT_DOWN;
 		siw_port_event(sdev, 1, IB_EVENT_PORT_ERR);
 		break;
 
 	case NETDEV_REGISTER:
-		siw_device_assign_netdev(sdev, netdev);
-		sdev->state = IB_PORT_INIT;
-		pr_debug(DBG_DM ": attach siw device %s to netdev %s\n",
-				sdev->ofa_dev.name, netdev->name);
-		break;
+		if (WARN_ONCE(sdev != NULL, "sdev %p exists but got NETDEV_REGISTER event",
+					(void *)sdev)) {
+			goto unlock;
 
-	case NETDEV_UNREGISTER:
-		sdev->state = IB_PORT_DOWN;
-		siw_port_event(sdev, 1, IB_EVENT_PORT_ERR);
-		/* FIXME: I assume this can race with something that needs
-		 * netdev */
-		if (sdev->netdev) {
-			dev_put(sdev->netdev);
-			sdev->netdev = NULL;
+		}
+		if (siw_dev_qualified(netdev)) {
+			sdev = siw_device_create(netdev);
+			if (sdev) {
+				sdev->state = IB_PORT_INIT;
+				pr_debug(DBG_DM ": create siw device %s for netdev %s\n",
+					sdev->ofa_dev.name, netdev->name);
+			}
 		}
 		break;
 
+	case NETDEV_UNREGISTER:
+		if (!sdev) {
+			goto unlock;
+		}
+		if (sdev->is_registered)
+			siw_device_deregister(sdev);
+		list_del(&sdev->list);
+		siw_device_destroy(sdev);
+		break;
+
 	case NETDEV_CHANGEADDR:
+		if (!sdev || !sdev->is_registered) {
+			goto unlock;
+		}
 		siw_device_assign_guid(sdev, netdev);
 		if (sdev->is_registered) {
 			siw_port_event(sdev, 1, IB_EVENT_LID_CHANGE);
@@ -763,7 +781,8 @@ static int siw_netdev_event(struct notifier_block *nb, unsigned long event,
 	 */
 	default:
 		pr_debug(DBG_DM " sdev=%s got unhandled netdev event %lu for netdev=%s\n",
-				sdev->ofa_dev.name, event, netdev->name);
+				sdev ? sdev->ofa_dev.name : "<NONE>",
+				event, netdev->name);
 		break;
 	}
 unlock:
@@ -783,7 +802,7 @@ static struct notifier_block siw_netdev_nb = {
 static __init int siw_init_module(void)
 {
 	struct urdma_chardev_data *chardev_data;
-	int x, rv;
+	int rv;
 	dev_t devt;
 
 	chardev_data = kmalloc(sizeof(*chardev_data), GFP_KERNEL);
@@ -827,19 +846,7 @@ static __init int siw_init_module(void)
 
 	siw_debug_init();
 
-	siw_devlist = kcalloc(device_count, sizeof(*siw_devlist), GFP_KERNEL);
-	if (!siw_devlist) {
-		goto out_unregister;
-	}
-	for (x = 0; x < device_count; x++) {
-		siw_devlist[x] = siw_device_create(x);
-		if (!siw_devlist[x]) {
-			goto out_free_devlist;
-		}
-		if (siw_device_register(siw_devlist[x])) {
-			goto out_free_devlist;
-		}
-	}
+	INIT_LIST_HEAD(&urdma_devlist);
 
 	rv = register_netdevice_notifier(&siw_netdev_nb);
 	if (rv) {
@@ -850,17 +857,6 @@ static __init int siw_init_module(void)
 	pr_info("urdma kernel support attached\n");
 	return 0;
 
-out_free_devlist:
-	for (x = 0; x < device_count; x++) {
-		if (!siw_devlist[x]) {
-			break;
-		}
-		if (siw_devlist[x]->is_registered) {
-			siw_device_deregister(siw_devlist[x]);
-		}
-		siw_device_destroy(siw_devlist[x]);
-	}
-	kfree(siw_devlist);
 out_unregister:
 	device_unregister(&usiw_generic_dma_device);
 
@@ -880,7 +876,7 @@ out_nochardev:
 static void __exit siw_exit_module(void)
 {
 	struct urdma_chardev_data *file;
-	int x;
+	struct siw_dev *sdev;
 
 	spin_lock(&siw_dev_lock);
 	unregister_netdevice_notifier(&siw_netdev_nb);
@@ -888,15 +884,14 @@ static void __exit siw_exit_module(void)
 
 	siw_cm_exit();
 
-	for (x = 0; x < device_count; x++) {
-		struct siw_dev *sdev = siw_devlist[x];
-		if (!sdev)
-			continue;
+	while (!list_empty(&urdma_devlist)) {
+		sdev = list_first_entry(&urdma_devlist, struct siw_dev, list);
+		list_del(&sdev->list);
 		if (sdev->is_registered)
 			siw_device_deregister(sdev);
+
 		siw_device_destroy(sdev);
 	}
-	kfree(siw_devlist);
 	siw_debugfs_delete();
 
 	device_unregister(&usiw_generic_dma_device);
