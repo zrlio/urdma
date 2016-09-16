@@ -1508,7 +1508,8 @@ do_process_ack(struct usiw_qp *qp, struct usiw_send_wqe *wqe,
 	wqe->bytes_acked += pending->ddp_length;
 	assert(wqe->bytes_sent >= wqe->bytes_acked);
 
-	if (wqe->bytes_acked == wqe->total_length) {
+	if (wqe->opcode != usiw_wr_read
+			&& wqe->bytes_acked == wqe->total_length) {
 		assert(wqe->state == SEND_WQE_WAIT);
 		wqe->state = SEND_WQE_COMPLETE;
 		try_complete_wqe(qp, wqe);
