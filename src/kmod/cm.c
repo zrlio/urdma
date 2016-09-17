@@ -813,7 +813,7 @@ static void siw_accept_newconn(struct siw_cep *cep)
 
 	rv = sock_create(AF_INET, SOCK_DGRAM, IPPROTO_UDP, &new_s);
 	if (rv) {
-		pr_info("sock_create failed: %d\n", rv);
+		pr_err("sock_create failed: %d\n", rv);
 		goto error;
 	}
 
@@ -1558,7 +1558,7 @@ int siw_accept(struct iw_cm_id *id, struct iw_cm_conn_param *params)
 	rv = s->ops->connect(s, (struct sockaddr *)&cep->llp.raddr,
 			     sizeof cep->llp.raddr, 0);
 	if (rv) {
-		pr_info("UDP socket connect failed: %d\n", rv);
+		pr_err("UDP socket connect failed: %d\n", rv);
 		up_write(&qp->state_lock);
 		goto error;
 	}

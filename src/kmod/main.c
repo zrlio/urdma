@@ -84,7 +84,6 @@ static struct device_attribute *siw_dev_attributes[] = {
 
 static void usiw_device_release(struct device *dev)
 {
-	pr_info("%s device released\n", dev_name(dev));
 }
 
 static struct device usiw_generic_dma_device = {
@@ -221,8 +220,8 @@ static void siw_device_assign_guid(struct siw_dev *sdev,
 
 	/* HACK HACK HACK: change the node GUID to the hardware address
 	 * now that we know what it is */
-	pr_debug(DBG_DM ": set node guid for %s based on MAC address\n",
-			ofa_dev->name);
+	pr_debug(DBG_DM ": set node guid for %s based on HWaddr=%pM\n",
+			ofa_dev->name, netdev->dev_addr);
 	memset(&ofa_dev->node_guid, 0, sizeof(ofa_dev->node_guid));
 	memcpy(&ofa_dev->node_guid, netdev->dev_addr, 6);
 }
@@ -437,14 +436,9 @@ static int siw_netdev_event(struct notifier_block *nb, unsigned long event,
 		}
 		in_dev_put(in_dev);
 
-		pr_debug(DBG_DM ": Interface '%s' for device '%s' up, HWaddr=%02x.%02x.%02x.%02x.%02x.%02x\n",
-				sdev->netdev->name, sdev->ofa_dev.name,
-				*(u8 *)sdev->netdev->dev_addr,
-				*((u8 *)sdev->netdev->dev_addr + 1),
-				*((u8 *)sdev->netdev->dev_addr + 2),
-				*((u8 *)sdev->netdev->dev_addr + 3),
-				*((u8 *)sdev->netdev->dev_addr + 4),
-				*((u8 *)sdev->netdev->dev_addr + 5));
+		pr_debug(DBG_DM ": Interface '%s' for device '%s' up, HWaddr=%pM\n",
+				netdev->name, sdev->ofa_dev.name,
+				netdev->dev_addr);
 
 		break;
 
