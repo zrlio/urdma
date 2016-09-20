@@ -460,6 +460,7 @@ int siw_query_device(struct ib_device *ofa_dev, struct ib_device_attr *attr,
 	memset(attr, 0, sizeof *attr);
 
 	attr->max_mr_size = rlimit(RLIMIT_MEMLOCK); /* per process */
+	attr->sys_image_guid = sdev->ofa_dev.node_guid;
 	attr->vendor_id = sdev->attrs.vendor_id;
 	attr->vendor_part_id = sdev->attrs.vendor_part_id;
 	attr->max_qp = sdev->attrs.max_qp;
@@ -467,10 +468,6 @@ int siw_query_device(struct ib_device *ofa_dev, struct ib_device_attr *attr,
 	attr->device_cap_flags = sdev->attrs.cap_flags;
 	attr->max_cq = sdev->attrs.max_cq;
 	attr->max_pd = sdev->attrs.max_pd;
-
-	if (sdev->netdev) {
-		memcpy(&attr->sys_image_guid, sdev->netdev->dev_addr, 6);
-	}
 
 	return 0;
 }
@@ -504,10 +501,11 @@ int siw_query_port(struct ib_device *ofa_dev, u8 port,
 	memset(attr, 0, sizeof *attr);
 
 	attr->state = sdev->state;
-	if (sdev->netdev) {
-		attr->max_mtu = siw_mtu_net2ofa(sdev->netdev->mtu);
-	} else {
+	if (WARN(!sdev->netdev, "No netdev associated with device %s",
+				ofa_dev->name)) {
 		attr->max_mtu = IB_MTU_1024;
+	} else {
+		attr->max_mtu = siw_mtu_net2ofa(sdev->netdev->mtu);
 	}
 	attr->active_mtu = attr->max_mtu;
 	attr->gid_tbl_len = 1;
@@ -548,7 +546,8 @@ int siw_query_gid(struct ib_device *ofa_dev, u8 port, int idx,
 
 	/* subnet_prefix == interface_id == 0; */
 	memset(gid, 0, sizeof *gid);
-	if (sdev->netdev) {
+	if (!WARN(!sdev->netdev, "No netdev associated with device %s",
+				ofa_dev->name)) {
 		memcpy(&gid->raw[0], sdev->netdev->dev_addr, 6);
 	}
 

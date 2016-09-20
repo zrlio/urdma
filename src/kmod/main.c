@@ -102,7 +102,6 @@ static int siw_modify_port(struct ib_device *ofa_dev, u8 port, int mask,
 	return -EOPNOTSUPP;
 }
 
-
 static int siw_device_register(struct siw_dev *sdev)
 {
 	struct ib_device *ofa_dev = &sdev->ofa_dev;
@@ -218,8 +217,6 @@ static void siw_device_assign_guid(struct siw_dev *sdev,
 {
 	struct ib_device *ofa_dev = &sdev->ofa_dev;
 
-	/* HACK HACK HACK: change the node GUID to the hardware address
-	 * now that we know what it is */
 	pr_debug(DBG_DM ": set node guid for %s based on HWaddr=%pM\n",
 			ofa_dev->name, netdev->dev_addr);
 	memset(&ofa_dev->node_guid, 0, sizeof(ofa_dev->node_guid));
@@ -467,7 +464,9 @@ static int siw_netdev_event(struct notifier_block *nb, unsigned long event,
 
 	case NETDEV_CHANGEADDR:
 		siw_device_assign_guid(sdev, netdev);
-		siw_port_event(sdev, 1, IB_EVENT_LID_CHANGE);
+		if (sdev->is_registered) {
+			siw_port_event(sdev, 1, IB_EVENT_LID_CHANGE);
+		}
 
 		break;
 	/*
