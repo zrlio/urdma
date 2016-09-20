@@ -1297,30 +1297,6 @@ usiw_destroy_flow(__attribute__((unused)) struct ibv_flow *flow)
 } /* usiw_destroy_flow */
 
 
-static int
-usiw_query_device_ex(struct ibv_context *context,
-		__attribute__((unused))
-		const struct ibv_query_device_ex_input *input,
-		struct ibv_device_attr_ex *attr,
-		__attribute__((unused)) size_t attr_size)
-{
-	int ret;
-
-	/* ignore input and attr_size for now --- the only way that we can get
-	 * here is if the caller supports extended verbs, and the odp_caps was
-	 * added at the same time, so no comp_mask bits are defined yet. */
-	assert(attr_size >= offsetof(struct ibv_device_attr_ex, odp_caps)
-			+ sizeof(attr->odp_caps));
-	ret = usiw_query_device(context, &attr->orig_attr);
-	if (ret < 0) {
-		return ret;
-	}
-	attr->comp_mask = 0;
-	memset(&attr->odp_caps, 0, sizeof(attr->odp_caps));
-	return 0;
-} /* usiw_query_device_ex */
-
-
 static struct ibv_context_ops usiw_ops = {
 	.query_device = usiw_query_device,
 	.query_port = usiw_query_port,
@@ -1410,8 +1386,6 @@ usiw_init_context(struct verbs_device *device, struct ibv_context *context,
 	memcpy(&ctx->vcontext.context.ops, &usiw_ops,
 			sizeof(ctx->vcontext.context.ops));
 	ctx->vcontext.context.num_comp_vectors = usiw_num_completion_vectors();
-	verbs_set_ctx_op(&ctx->vcontext, query_device_ex,
-			&usiw_query_device_ex);
 	verbs_set_ctx_op(&ctx->vcontext, ibv_destroy_flow, &usiw_destroy_flow);
 	verbs_set_ctx_op(&ctx->vcontext, ibv_create_flow, &usiw_create_flow);
 	verbs_set_ctx_op(&ctx->vcontext, open_qp, &usiw_open_qp);
