@@ -326,13 +326,18 @@ static int
 usiw_query_device(struct ibv_context *context,
 		struct ibv_device_attr *device_attr)
 {
+	struct ibv_query_device cmd;
+	uint64_t raw_fw_ver;
+	int ret;
+
 	if (!context || !device_attr) {
 		return -EINVAL;
 	}
 
-	snprintf(device_attr->fw_ver, 64, "0");
-	device_attr->node_guid = 0;
-	device_attr->sys_image_guid = 0;
+	ret = ibv_cmd_query_device(context, device_attr,
+			&raw_fw_ver, &cmd, sizeof(cmd));
+
+	snprintf(device_attr->fw_ver, 64, "%" PRIu64, raw_fw_ver);
 	device_attr->max_mr_size = MAX_MR_SIZE;
 	device_attr->page_size_cap = 4096;
 	device_attr->vendor_id = URDMA_VENDOR_ID;
@@ -377,19 +382,16 @@ usiw_query_port(struct ibv_context *context, uint8_t port_num,
 		struct ibv_port_attr *port_attr)
 {
 	struct usiw_context *ctx = usiw_get_context(context);
+	struct ibv_query_port cmd;
 
 	if (!context || !port_attr || port_num != 1) {
 		return -EINVAL;
 	}
 
-	memset(port_attr, 0, sizeof(*port_attr));
-	port_attr->state = ctx->port->ipv4_addr
-		? IBV_PORT_ACTIVE : IBV_PORT_DOWN;
-	port_attr->max_mtu = IBV_MTU_1024;
-	port_attr->active_mtu = IBV_MTU_1024;
-	port_attr->max_msg_sz = UINT32_MAX;
-	port_attr->link_layer = IBV_LINK_LAYER_ETHERNET;
+	ibv_cmd_query_port(context, port_num, port_attr,
+			&cmd, sizeof(cmd));
 
+	port_attr->max_msg_sz = UINT32_MAX;
 	return 0;
 } /* usiw_query_port */
 
