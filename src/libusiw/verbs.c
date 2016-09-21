@@ -48,6 +48,7 @@
 #include <rte_errno.h>
 #include <rte_ip.h>
 #include <rte_jhash.h>
+#include <rte_malloc.h>
 #include <rte_ring.h>
 
 #include "config_file.h"
@@ -127,11 +128,6 @@ usiw_accl_post_recvv(struct ibv_qp *ib_qp, const struct iovec *iov, size_t iov_s
 	}
 
 	qp = container_of(ib_qp, struct usiw_qp, ib_qp);
-	if (qp->qp_type != usiw_qp_rd
-			&& qp->qp_type != usiw_qp_rc) {
-		return -EINVAL;
-	}
-
 	x = qp_get_next_recv_wqe(qp, &wqe);
 	if (x < 0)
 		return x;
@@ -195,9 +191,7 @@ usiw_accl_post_sendv(struct ibv_qp *ib_qp, struct iovec *iov, size_t iov_size,
 	int x;
 
 	qp = container_of(ib_qp, struct usiw_qp, ib_qp);
-	if ((qp->qp_type != usiw_qp_rd
-				&& qp->qp_type != usiw_qp_rc)
-			|| (!ah && !qp_connected(qp))) {
+	if (!ah && !qp_connected(qp)) {
 		return -EINVAL;
 	}
 
@@ -205,7 +199,7 @@ usiw_accl_post_sendv(struct ibv_qp *ib_qp, struct iovec *iov, size_t iov_size,
 		return -EINVAL;
 	}
 
-	ee = qp->get_ee_context(qp, ah);
+	ee = usiw_get_ee_context(qp, ah);
 	if (!ee) {
 		return -EINVAL;
 	}
@@ -246,13 +240,11 @@ usiw_accl_post_write(struct ibv_qp *ib_qp, void *addr, size_t length,
 	int x;
 
 	qp = container_of(ib_qp, struct usiw_qp, ib_qp);
-	if ((qp->qp_type != usiw_qp_rd
-				&& qp->qp_type != usiw_qp_rc)
-			|| (!ah && !qp_connected(qp))) {
+	if (!ah && !qp_connected(qp)) {
 		return -EINVAL;
 	}
 
-	ee = qp->get_ee_context(qp, ah);
+	ee = usiw_get_ee_context(qp, ah);
 	if (!ee) {
 		return -EINVAL;
 	}
@@ -293,13 +285,11 @@ usiw_accl_post_read(struct ibv_qp *ib_qp, void *addr, size_t length,
 	int x;
 
 	qp = container_of(ib_qp, struct usiw_qp, ib_qp);
-	if ((qp->qp_type != usiw_qp_rd
-				&& qp->qp_type != usiw_qp_rc)
-			|| (!ah && !qp_connected(qp))) {
+	if (!ah && !qp_connected(qp)) {
 		return -EINVAL;
 	}
 
-	ee = qp->get_ee_context(qp, ah);
+	ee = usiw_get_ee_context(qp, ah);
 	if (!ee) {
 		return -EINVAL;
 	}
@@ -455,18 +445,6 @@ usiw_reg_mr(struct ibv_pd *pd, void *addr, size_t len, int access)
 	return usiw_reg_mr_with_rkey(pd, addr, len, access, rkey);
 } /* usiw_reg_mr */
 
-static struct ibv_mr *
-usiw_rereg_mr(__attribute__((unused)) struct ibv_mr *mr,
-		__attribute__((unused)) int flags,
-		__attribute__((unused)) struct ibv_pd *pd,
-		__attribute__((unused)) void *addr,
-		__attribute__((unused)) size_t length,
-		__attribute__((unused)) int access)
-{
-	errno = ENOSYS;
-	return NULL;
-} /* usiw_rereg_mr */
-
 static int
 usiw_dereg_mr(struct ibv_mr *mr)
 {
@@ -546,19 +524,39 @@ usiw_create_cq(struct ibv_context *context, int size,
 
 	cq->cq_id = resp.priv.cq_id;
 	snprintf(name, RTE_RING_NAMESIZE, "cq%" PRIu32 "_ready_ring", cq->cq_id);
-	cq->cqe_ring = rte_ring_create(name, size + 1, socket_id,
-			RING_F_SP_ENQ|RING_F_SC_DEQ);
+	cq->cqe_ring = rte_malloc(NULL, rte_ring_get_memsize(size + 1),
+			socket_id);
 	if (!cq->cqe_ring) {
 		errno = rte_errno;
 		ibv_cmd_destroy_cq(&cq->ib_cq);
 		free(cq);
 		return NULL;
 	}
+	ret = rte_ring_init(cq->cqe_ring, name, size + 1,
+			RING_F_SP_ENQ|RING_F_SC_DEQ);
+	if (ret) {
+		errno = -ret;
+		rte_free(cq->cqe_ring);
+		ibv_cmd_destroy_cq(&cq->ib_cq);
+		free(cq);
+		return NULL;
+	}
 	snprintf(name, RTE_RING_NAMESIZE, "cq%" PRIu32 "_empty_ring", cq->cq_id);
-	cq->free_ring = rte_ring_create(name, size + 1, socket_id,
+	cq->free_ring = rte_malloc(NULL, rte_ring_get_memsize(size + 1),
+			socket_id);
+	if (!cq->cqe_ring) {
+		errno = rte_errno;
+		rte_free(cq->cqe_ring);
+		ibv_cmd_destroy_cq(&cq->ib_cq);
+		free(cq);
+		return NULL;
+	}
+	ret = rte_ring_init(cq->free_ring, name, size + 1,
 			RING_F_SP_ENQ|RING_F_SC_DEQ);
 	if (!cq->free_ring) {
-		errno = rte_errno;
+		errno = ret;
+		rte_free(cq->free_ring);
+		rte_free(cq->cqe_ring);
 		ibv_cmd_destroy_cq(&cq->ib_cq);
 		free(cq);
 		return NULL;
@@ -640,8 +638,8 @@ usiw_destroy_cq(struct ibv_cq *cq)
 		return -1;
 	}
 	ret = ibv_cmd_destroy_cq(cq);
-	rte_ring_free(ourcq->cqe_ring);
-	rte_ring_free(ourcq->free_ring);
+	rte_free(ourcq->cqe_ring);
+	rte_free(ourcq->free_ring);
 	free(ourcq);
 	return ret;
 } /* usiw_destroy_cq */
@@ -732,32 +730,24 @@ usiw_post_srq_recv(__attribute__((unused)) struct ibv_srq *srq,
 } /* usiw_post_srq_recv */
 
 
-static uint16_t
+static struct usiw_qp *
 port_get_next_qp(struct usiw_port *port)
 {
-	uint32_t x;
+	void *result;
+	int ret;
 
-	if (!port->qp_bitmask) {
-		return 0;
+	ret = rte_ring_dequeue(port->avail_qp, &result);
+	if (ret) {
+		errno = -ret;
+		return NULL;
 	}
-	/* Skip special QPN 0 */
-	for (x = 1; x < 64; ++x) {
-		if (port->qp_bitmask & (UINT64_C(1) << x)) {
-			port->qp_bitmask &= ~(UINT64_C(1) << x);
-			return x;
-		}
-	}
-
-	/* Should never get here */
-	assert(0);
-	return 0;
-} /* port_get_next_qpn */
+	return result;
+} /* port_get_next_qp */
 
 
 static struct ibv_qp *
 usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 {
-	struct rte_hash_parameters hparam;
 	struct {
 		struct ibv_create_qp ibv;
 		struct usiw_udata_create_qp priv;
@@ -768,8 +758,6 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 	} resp;
 	struct usiw_context *ctx;
 	struct usiw_qp *qp;
-	char namebuf[RTE_HASH_NAMESIZE];
-	int32_t hres;
 	int retval;
 
 	if ((qp_init_attr->qp_type != IBV_QPT_UD
@@ -807,9 +795,8 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 
 	ctx = usiw_get_context(pd->context);
 
-	qp = malloc(sizeof(struct usiw_qp));
+	qp = port_get_next_qp(ctx->port);
 	if (!qp) {
-		errno = ENOMEM;
 		goto errout;
 	}
 
@@ -823,8 +810,6 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 		goto free_user_qp;
 	}
 
-	qp->qp_type = (qp_init_attr->qp_type == IBV_QPT_RC)
-		? usiw_qp_rc : usiw_qp_rd;
 	qp->qp_flags = qp_init_attr->sq_sig_all
 		? usiw_qp_sig_all : 0;
 	rte_atomic16_init(&qp->conn_state);
@@ -852,12 +837,6 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 	qp->timer_last = 0;
 	qp->pd = container_of(pd, struct usiw_mr_table, pd);
 
-	qp->rx_queue = qp->tx_queue
-		= port_get_next_qp(ctx->port);
-	if (qp->rx_queue == 0) {
-		errno = -retval;
-		goto free_kernel_qp;
-	}
 
 	retval = usiw_send_wqe_queue_init(qp->ib_qp.qp_num,
 			&qp->sq, qp_init_attr->cap.max_send_wr,
@@ -885,54 +864,21 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 		goto free_kernel_qp;
 	}
 
-	switch (qp->qp_type) {
-	case usiw_qp_rc:
-		qp->get_ee_context = usiw_get_ee_context_rc;
-		qp->ee_state_table = NULL;
-		break;
-	case usiw_qp_rd:
-		qp->get_ee_context = usiw_get_ee_context_rd;
-		snprintf(namebuf, RTE_HASH_NAMESIZE, "qpn%" PRIu32 "_ee",
-				qp->ib_qp.qp_num);
-		hparam.name = namebuf;
-		hparam.entries = MAX_REMOTE_ENDPOINTS;
-		static_assert(sizeof(struct usiw_ah) == 12,
-				"sizeof(struct usiw_ah) is 12");
-		hparam.key_len = sizeof(struct usiw_ah);
-		hparam.hash_func = rte_jhash;
-		hparam.hash_func_init_val = 0;
-		hparam.socket_id = SOCKET_ID_ANY;
-		hparam.extra_flag = 0;
-		qp->ee_state_table = rte_hash_create(&hparam);
-		if (!qp->ee_state_table) {
-			errno = -retval;
-			goto free_kernel_qp;
-		}
-		break;
-	default:
-		assert(0);
-		errno = EINVAL;
-		goto free_kernel_qp;
-	}
-
 	rte_atomic32_init(&qp->refcnt);
 	rte_atomic32_set(&qp->refcnt, 1);
 
 	rte_spinlock_lock(&ctx->qp_lock);
 	rte_atomic32_inc(&ctx->qp_init_count);
-	hres = rte_hash_add_key_data(ctx->qp, &qp->ib_qp.qp_num, qp);
+	HASH_ADD(hh, ctx->qp, ib_qp.qp_num,
+			sizeof(qp->ib_qp.qp_num), qp);
 	rte_spinlock_unlock(&ctx->qp_lock);
-	if (hres < 0) {
-		errno = -hres;
-		goto free_kernel_qp;
-	}
 
 	return &qp->ib_qp;
 
 free_kernel_qp:
 	ibv_cmd_destroy_qp(&qp->ib_qp);
 free_user_qp:
-	free(qp);
+	rte_ring_enqueue(ctx->port->avail_qp, qp);
 errout:
 	return NULL;
 } /* usiw_create_qp */
@@ -1036,7 +982,6 @@ usiw_destroy_qp(struct ibv_qp *ib_qp)
 {
 	struct usiw_qp *qp;
 	struct usiw_context *ctx;
-	NDEBUG_UNUSED int32_t hret;
 	int ret;
 
 	ret = ibv_cmd_destroy_qp(ib_qp);
@@ -1054,9 +999,8 @@ usiw_destroy_qp(struct ibv_qp *ib_qp)
 	rte_atomic16_set(&qp->conn_state, usiw_qp_error);
 
 	rte_spinlock_lock(&ctx->qp_lock);
-	hret = rte_hash_del_key(ctx->qp, &qp->ib_qp.qp_num);
+	HASH_DEL(ctx->qp, qp);
 	rte_spinlock_unlock(&ctx->qp_lock);
-	assert(hret >= 0);
 
 	if (rte_atomic32_sub_return(&qp->refcnt, 1) == 0) {
 		usiw_do_destroy_qp(qp);
@@ -1180,7 +1124,7 @@ usiw_post_send(struct ibv_qp *ib_qp, struct ibv_send_wr *wr,
 		}
 		wqe->wr_context = (void *)(uintptr_t)wr->wr_id;
 		wqe->iov_count = wr->num_sge;
-		wqe->remote_ep = qp->ep_default;
+		wqe->remote_ep = &qp->remote_ep;
 		wqe->state = SEND_WQE_INIT;
 		wqe->msn = 0; /* will be assigned at send time */
 		if (!(wqe->flags & usiw_send_inline)) {
@@ -1216,10 +1160,7 @@ usiw_post_recv(struct ibv_qp *ib_qp, struct ibv_recv_wr *wr,
 	int x, ret;
 
 	qp = container_of(ib_qp, struct usiw_qp, ib_qp);
-	if ((qp->qp_type != usiw_qp_rd
-				&& qp->qp_type != usiw_qp_rc)
-			|| rte_atomic16_read(&qp->conn_state)
-							== usiw_qp_error) {
+	if (rte_atomic16_read(&qp->conn_state) == usiw_qp_error) {
 		*bad_wr = wr;
 		return EINVAL;
 	}
@@ -1245,7 +1186,7 @@ usiw_post_recv(struct ibv_qp *ib_qp, struct ibv_recv_wr *wr,
 			wqe->iov[x].iov_len = wr->sg_list[x].length;
 			wqe->total_request_size += wqe->iov[x].iov_len;
 		}
-		wqe->remote_ep = qp->ep_default;
+		wqe->remote_ep = &qp->remote_ep;
 		wqe->msn = 0;
 		wqe->recv_size = 0;
 		wqe->input_size = 0;
@@ -1382,7 +1323,7 @@ static struct ibv_context_ops usiw_ops = {
 	.alloc_pd = usiw_alloc_pd,
 	.dealloc_pd = usiw_dealloc_pd,
 	.reg_mr = usiw_reg_mr,
-	.rereg_mr = usiw_rereg_mr,
+	.rereg_mr = NULL,
 	.dereg_mr = usiw_dereg_mr,
 	.alloc_mw = usiw_alloc_mw,
 	.bind_mw = usiw_bind_mw,
@@ -1449,8 +1390,6 @@ usiw_init_context(struct verbs_device *device, struct ibv_context *context,
 	} resp;
 	struct usiw_context *ctx;
 	struct usiw_device *dev;
-	struct rte_hash_parameters hp;
-	char hname[RTE_HASH_NAMESIZE];
 	int ret;
 
 	context->cmd_fd = cmd_fd;
@@ -1485,15 +1424,7 @@ usiw_init_context(struct verbs_device *device, struct ibv_context *context,
 	rte_atomic32_init(&ctx->qp_init_count);
 	LIST_INIT(&ctx->qp_active);
 
-	snprintf(hname, RTE_HASH_NAMESIZE, "ctx%p_qp", (void *)context);
-	memset(&hp, 0, sizeof(hp));
-	hp.name = hname;
-	hp.entries = 2 * DPDKV_MAX_QP;
-	hp.key_len = sizeof(uint32_t);
-	hp.hash_func = rte_jhash;
-	hp.hash_func_init_val = 0;
-	hp.socket_id = SOCKET_ID_ANY;
-	ctx->qp = rte_hash_create(&hp);
+	ctx->qp = NULL;
 	rte_spinlock_init(&ctx->qp_lock);
 
 	return 0;
@@ -1504,6 +1435,4 @@ void
 usiw_uninit_context(__attribute__((unused)) struct verbs_device *device,
 		__attribute__((unused)) struct ibv_context *ib_ctx)
 {
-	struct usiw_context *ctx = usiw_get_context(ib_ctx);
-	rte_hash_free(ctx->qp);
 } /* usiw_uninit_context */

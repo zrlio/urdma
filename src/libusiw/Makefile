@@ -57,11 +57,10 @@ CFLAGS += -std=gnu11 -O2 -fvisibility=hidden
 CFLAGS += $(DEBUG_FLAGS) $(WERROR_FLAGS) -Wno-cast-qual -Wno-error=unused-parameter
 CFLAGS += -I$(BASE_SRCDIR)/include -I$(BASE_SRCDIR)/src/util -I$(RTE_SRCDIR)
 CFLAGS += $(shell pkg-config --cflags libnl-route-3.0 libnl-3.0 json-c)
-LDLIBS += -lrdmacm -libverbs
+LDLIBS += -lrdmacm -libverbs -ldpdk
 LDLIBS += $(shell pkg-config --libs libnl-route-3.0 libnl-3.0 json-c)
 
 POSTCLEAN += target-libclean
-include $(BASE_SRCDIR)/config/linkdpdk.mk
 include $(RTE_SDK)/mk/rte.extshared.mk
 include $(BASE_SRCDIR)/config/distfiles.mk
 

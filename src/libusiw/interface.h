@@ -46,9 +46,10 @@
 
 #include <infiniband/driver.h>
 
+#include <uthash.h>
+
 #include <rte_ethdev.h>
 #include <rte_ether.h>
-#include <rte_hash.h>
 #include <rte_kni.h>
 #include <rte_mbuf.h>
 #include <rte_mempool.h>
@@ -62,7 +63,6 @@
 #define RX_BURST_SIZE 32
 #define DPDKV_MAX_QP 64
 #define MAX_ARP_ENTRIES 32
-#define MAX_REMOTE_ENDPOINTS 32
 #define MAX_RECV_WR 1023
 #define MAX_SEND_WR 1023
 #define DPDK_VERBS_IOV_LEN_MAX 32
@@ -176,7 +176,6 @@ struct usiw_mr_table {
 };
 
 struct usiw_send_wqe_queue {
-	struct rte_hash *active;
 	struct rte_ring *ring;
 	TAILQ_HEAD(usiw_send_wqe_active_head, usiw_send_wqe) active_head;
 	uint64_t *bitmask;
@@ -188,7 +187,6 @@ struct usiw_send_wqe_queue {
 };
 
 struct usiw_recv_wqe_queue {
-	struct rte_hash *active;
 	struct rte_ring *ring;
 	TAILQ_HEAD(usiw_recv_wqe_active_head, usiw_recv_wqe) active_head;
 	uint64_t *bitmask;
@@ -253,11 +251,6 @@ enum usiw_qp_state {
 	usiw_qp_error = 3,
 };
 
-enum usiw_qp_type {
-	usiw_qp_rd = 0,
-	usiw_qp_rc = 1,
-};
-
 enum {
 	usiw_qp_sig_all = 0x1,
 };
@@ -269,7 +262,6 @@ DECLARE_TAILQ_HEAD(read_response_state);
  * queue pairs and the libibverbs interface. */
 struct usiw_qp {
 	rte_atomic32_t refcnt;
-	uint16_t qp_type;
 	uint16_t udp_port;
 	uint16_t rx_queue;
 	uint16_t tx_queue;
@@ -280,6 +272,7 @@ struct usiw_qp {
 	sem_t conn_event_sem;
 
 	LIST_ENTRY(usiw_qp) ctx_entry;
+	UT_hash_handle hh;
 	struct usiw_context *ctx;
 	struct usiw_port *port;
 	struct usiw_cq *send_cq;
@@ -309,11 +302,7 @@ struct usiw_qp {
 	struct usiw_cq *recv_cq;
 	struct usiw_mr_table *pd;
 
-	struct ee_state *(*get_ee_context)(struct usiw_qp *qp,
-						struct usiw_ah *ah);
-	struct ee_state *ep_default;
-	struct rte_hash *ee_state_table;
-	struct ee_state ee_state_entries[MAX_REMOTE_ENDPOINTS];
+	struct ee_state remote_ep;
 
 	struct ibv_qp ib_qp;
 };
@@ -348,8 +337,9 @@ struct usiw_port {
 	uint16_t tx_desc_count;
 
 	uint64_t flags;
-	uint64_t qp_bitmask;
 	uint16_t max_qp;
+	struct rte_ring *avail_qp;
+	struct usiw_qp *qp;
 
 	struct rte_kni *kni;
 	struct ether_addr ether_addr;
@@ -367,7 +357,7 @@ struct usiw_context {
 	LIST_HEAD(usiw_qp_head, usiw_qp) qp_active;
 	rte_atomic32_t qp_init_count;
 		/**< The number of queue pairs in the INIT state. */
-	struct rte_hash *qp;
+	struct usiw_qp *qp;
 		/**< Hash table of all non-destroyed queue pairs in any
 		 * state.  Guarded by qp_lock. */
 	rte_spinlock_t qp_lock;
@@ -440,10 +430,7 @@ void
 usiw_recv_wqe_queue_destroy(struct usiw_recv_wqe_queue *q);
 
 struct ee_state *
-usiw_get_ee_context_rc(struct usiw_qp *qp, struct usiw_ah *ah);
-
-struct ee_state *
-usiw_get_ee_context_rd(struct usiw_qp *qp, struct usiw_ah *ah);
+usiw_get_ee_context(struct usiw_qp *qp, struct usiw_ah *ah);
 
 void
 usiw_do_destroy_qp(struct usiw_qp *qp);

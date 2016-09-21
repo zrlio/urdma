@@ -49,6 +49,7 @@
 #include <rte_errno.h>
 #include <rte_ip.h>
 #include <rte_jhash.h>
+#include <rte_malloc.h>
 #include <rte_ring.h>
 
 #include "config_file.h"
@@ -176,8 +177,26 @@ usiw_port_init(struct usiw_port *iface)
 		iface->tx_desc_count = TX_DESC_COUNT_MAX;
 	}
 
-	/* All QPs except 0 are initially available */
-	iface->qp_bitmask = UINT64_MAX - 1;
+	snprintf(name, RTE_RING_NAMESIZE,
+			"port_%u_qp_ring", iface->portid);
+	iface->avail_qp = rte_ring_create("port_%u_qp_ring", iface->max_qp,
+			SOCKET_ID_ANY, 0);
+	if (!iface->avail_qp) {
+		rte_exit(EXIT_FAILURE, "Cannot allocate QP ring: %s\n",
+				rte_strerror(rte_errno));
+	}
+
+	iface->qp = rte_calloc("urdma_qp", iface->max_qp + 1,
+			sizeof(*iface->qp), 0);
+	if (!iface->qp) {
+		rte_exit(EXIT_FAILURE, "Cannot allocate QP array: %s\n",
+				rte_strerror(rte_errno));
+	}
+	for (q = 0; q < iface->max_qp; ++q) {
+		iface->qp[q + 1].tx_queue = q + 1;
+		iface->qp[q + 1].rx_queue = q + 1;
+		rte_ring_enqueue(iface->avail_qp, &iface->qp[q + 1]);
+	}
 
 	snprintf(name, RTE_MEMPOOL_NAMESIZE,
 			"port_%u_rx_mempool", iface->portid);
