@@ -183,7 +183,7 @@ usiw_port_init(struct usiw_port *iface)
 
 	snprintf(name, RTE_RING_NAMESIZE,
 			"port_%u_qp_ring", iface->portid);
-	iface->avail_qp = rte_ring_create("port_%u_qp_ring", iface->max_qp,
+	iface->avail_qp = rte_ring_create(name, iface->max_qp,
 			SOCKET_ID_ANY, 0);
 	if (!iface->avail_qp) {
 		rte_exit(EXIT_FAILURE, "Cannot allocate QP ring: %s\n",
