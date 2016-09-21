@@ -118,6 +118,25 @@ AC_SUBST([IBV_DEVICE_LIBRARY_EXTENSION])
 AC_SEARCH_LIBS([rdma_create_id], [rdmacm], [], [AC_MSG_ERROR([dnl
 urdma requires librdmacm])])
 PKG_CHECK_MODULES([LIBNL3], [libnl-3.0 libnl-route-3.0])
+AC_MSG_CHECKING([whether netlink/route/link.h includes linux/if.h])
+old_CFLAGS="$CFLAGS"
+old_LIBS="$LIBS"
+CFLAGS="$CFLAGS $LIBNL3_CFLAGS"
+LIBS="$LIBS $LIBNL3_LIBS"
+AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <netlink/route/link.h>]],
+	       [[int main(void) {
+			int x = IFF_UP;
+			return 0;
+		}]])],
+		[AC_MSG_RESULT([yes])]
+		[AVOID_NET_IF_H=1],
+		[AC_MSG_RESULT([no])]
+		[AVOID_NET_IF_H=0])
+AC_DEFINE_UNQUOTED([AVOID_NET_IF_H], [$AVOID_NET_IF_H],
+		   [Define to 1 if netlink/route/link.h includes linux/if.h])
+CFLAGS="$old_CFLAGS"
+LIBS="$old_LIBS"
+
 PKG_CHECK_MODULES([JSON_C], [json-c])
 
 AC_HEADER_ASSERT

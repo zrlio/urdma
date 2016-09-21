@@ -47,6 +47,9 @@
 #include <netlink/socket.h>
 #include <netlink/route/addr.h>
 #include <netlink/route/link.h>
+#ifndef AVOID_NET_IF_H
+#include <net/if.h>
+#endif
 
 #include "config_file.h"
 #include "interface.h"
