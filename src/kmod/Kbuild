@@ -37,6 +37,6 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-obj-m += usiw.o
+obj-m += urdma.o
 
-usiw-objs := ae.o cm.o debug.o main.o mem.o obj.o qp.o verbs.o
+urdma-objs := ae.o cm.o debug.o main.o mem.o obj.o qp.o verbs.o

@@ -47,7 +47,7 @@ AM_SILENT_RULES([yes])
 LT_PREREQ([2.2])
 LT_INIT
 AC_CONFIG_MACRO_DIR([config])
-AC_CONFIG_SRCDIR([src/libusiw/verbs.c])
+AC_CONFIG_SRCDIR([src/liburdma/verbs.c])
 AC_CONFIG_HEADERS([config.h])
 
 AC_ARG_VAR([RTE_SDK], [Location of DPDK SDK installation])
@@ -56,10 +56,10 @@ AC_ARG_VAR([MACHINE_CFLAGS], [target machine optimization C compiler flags])
 AC_ARG_VAR([KERNELDIR], [kernel source directory])
 AC_SUBST([KERNELDIR])
 if test ${RTE_SDK}x = x; then
-	AC_MSG_ERROR([usiw requires DPDK.  Set RTE_SDK to the DPDK install location])
+	AC_MSG_ERROR([urdma requires DPDK.  Set RTE_SDK to the DPDK install location])
 fi
 if test ${RTE_TARGET}x = x; then
-	AC_MSG_ERROR([usiw requires DPDK.  Set RTE_TARGET to the DPDK compilation target])
+	AC_MSG_ERROR([urdma requires DPDK.  Set RTE_TARGET to the DPDK compilation target])
 fi
 
 MACHINE_CFLAGS="-march=native"
@@ -73,7 +73,7 @@ if test ${KERNELDIR}x = x; then
 	KERNELDIR="/lib/modules/`uname -r`/build"
 fi
 if test ! -f ${KERNELDIR}/Makefile; then
-	AC_MSG_ERROR([usiw requires a kernel source tree.  Install kernel-devel or equivalent])
+	AC_MSG_ERROR([urdma requires a kernel source tree.  Install kernel-devel or equivalent])
 fi
 
 AC_ARG_ENABLE([werror], [AS_HELP_STRING([--enable-werror],

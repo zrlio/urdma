@@ -43,34 +43,34 @@ AM_CFLAGS = $(EXTRA_CFLAGS) \
 	    -fvisibility=hidden
 
 EXTRA_DIST = gpl-2.0.txt config/version.sh
-include_HEADERS = include/usiw_kabi.h \
+include_HEADERS = include/urdma_kabi.h \
 		include/proto.h \
 		include/proto_memcached.h \
 		include/proto_trp.h \
 		include/kvstore_limits.h \
 		include/kvstore_storage.h
 
-lib_LTLIBRARIES = src/libusiw/libusiw.la
-src_libusiw_libusiw_la_SOURCES = \
-	src/libusiw/config_file.c \
-	src/libusiw/config_file.h \
-	src/libusiw/driver.c \
-	src/libusiw/interface.c \
-	src/libusiw/interface.h \
-	src/libusiw/kni.c \
-	src/libusiw/kni.h \
-	src/libusiw/list.h \
-	src/libusiw/verbs.c \
-	src/libusiw/verbs.h \
+lib_LTLIBRARIES = src/liburdma/liburdma.la
+src_liburdma_liburdma_la_SOURCES = \
+	src/liburdma/config_file.c \
+	src/liburdma/config_file.h \
+	src/liburdma/driver.c \
+	src/liburdma/interface.c \
+	src/liburdma/interface.h \
+	src/liburdma/kni.c \
+	src/liburdma/kni.h \
+	src/liburdma/list.h \
+	src/liburdma/verbs.c \
+	src/liburdma/verbs.h \
 	src/util/util.c \
 	src/util/util.h
-src_libusiw_libusiw_la_CFLAGS = $(MACHINE_CFLAGS)
-src_libusiw_libusiw_la_CPPFLAGS = -Dusiw_confdir='"$(sysconfdir)/rdma"' -I$(srcdir)/include -I$(srcdir)/src/util $(LIBNL3_CFLAGS) $(JSON_C_CFLAGS) $(DPDK_CPPFLAGS)
-src_libusiw_libusiw_la_LDFLAGS = -avoid-version \
+src_liburdma_liburdma_la_CFLAGS = $(MACHINE_CFLAGS)
+src_liburdma_liburdma_la_CPPFLAGS = -Durdma_confdir='"$(sysconfdir)/rdma"' -I$(srcdir)/include -I$(srcdir)/src/util $(LIBNL3_CFLAGS) $(JSON_C_CFLAGS) $(DPDK_CPPFLAGS)
+src_liburdma_liburdma_la_LDFLAGS = -avoid-version \
 	-release @IBV_DEVICE_LIBRARY_EXTENSION@ $(DPDK_LDFLAGS)
-src_libusiw_libusiw_la_LIBADD = $(LIBNL3_LIBS) $(JSON_C_LIBS) $(DPDK_LIBS)
+src_liburdma_liburdma_la_LIBADD = $(LIBNL3_LIBS) $(JSON_C_LIBS) $(DPDK_LIBS)
 verbsconfdir = $(sysconfdir)/libibverbs.d
-dist_verbsconf_DATA = src/libusiw/usiw.driver
+dist_verbsconf_DATA = src/liburdma/urdma.driver
 
 bin_PROGRAMS = src/udp_pingpong/udp_pingpong
 src_udp_pingpong_udp_pingpong_SOURCES = \
@@ -96,7 +96,7 @@ bin_PROGRAMS += src/verbs_pingpong/verbs_pingpong
 src_verbs_pingpong_verbs_pingpong_SOURCES = \
 	src/verbs_pingpong/main.c
 src_verbs_pingpong_verbs_pingpong_CFLAGS = $(MACHINE_CFLAGS)
-src_verbs_pingpong_verbs_pingpong_CPPFLAGS = -I$(srcdir)/include -I$(srcdir)/src/libusiw $(DPDK_CPPFLAGS)
+src_verbs_pingpong_verbs_pingpong_CPPFLAGS = -I$(srcdir)/include -I$(srcdir)/src/liburdma $(DPDK_CPPFLAGS)
 src_verbs_pingpong_verbs_pingpong_LDFLAGS = $(DPDK_LDFLAGS)
 src_verbs_pingpong_verbs_pingpong_LDADD = $(DPDK_LIBS)
 
@@ -112,9 +112,9 @@ src_kvstore_server_kvstore_server_SOURCES = \
 	src/util/util.c \
 	src/util/util.h
 src_kvstore_server_kvstore_server_CFLAGS = $(MACHINE_CFLAGS)
-src_kvstore_server_kvstore_server_CPPFLAGS = -I$(srcdir)/include -I$(srcdir)/src/util -I$(srcdir)/src/libusiw $(DPDK_CPPFLAGS)
+src_kvstore_server_kvstore_server_CPPFLAGS = -I$(srcdir)/include -I$(srcdir)/src/util -I$(srcdir)/src/liburdma $(DPDK_CPPFLAGS)
 src_kvstore_server_kvstore_server_LDFLAGS = $(DPDK_LDFLAGS)
-src_kvstore_server_kvstore_server_LDADD = src/libusiw/libusiw.la $(DPDK_LIBS) -lm
+src_kvstore_server_kvstore_server_LDADD = src/liburdma/liburdma.la $(DPDK_LIBS) -lm
 
 bin_PROGRAMS += src/kvstore_client/kvstore_client
 src_kvstore_client_kvstore_client_SOURCES = \
@@ -124,9 +124,9 @@ src_kvstore_client_kvstore_client_SOURCES = \
 	src/util/util.c \
 	src/util/util.h
 src_kvstore_client_kvstore_client_CFLAGS = $(MACHINE_CFLAGS)
-src_kvstore_client_kvstore_client_CPPFLAGS = -I$(srcdir)/include -I$(srcdir)/src/util -I$(srcdir)/src/libusiw $(DPDK_CPPFLAGS)
+src_kvstore_client_kvstore_client_CPPFLAGS = -I$(srcdir)/include -I$(srcdir)/src/util -I$(srcdir)/src/liburdma $(DPDK_CPPFLAGS)
 src_kvstore_client_kvstore_client_LDFLAGS = $(DPDK_LDFLAGS)
-src_kvstore_client_kvstore_client_LDADD = src/libusiw/libusiw.la $(DPDK_LIBS) -lm
+src_kvstore_client_kvstore_client_LDADD = src/liburdma/liburdma.la $(DPDK_LIBS) -lm
 
 # Disable the uninstall check since the kernel build system doesn't
 # provide a module uninstall target.

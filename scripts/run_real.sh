@@ -56,8 +56,8 @@ make O=build
 sudo make O=build RTE_SDK=${RTE_SDK} RTE_TARGET=${RTE_TARGET} modules_install
 sudo setcap cap_net_admin+ep $(realpath build/src/${TESTAPP}/${RTE_TARGET}/app/${TESTAPP})
 
-sudo modprobe -r usiw || true
-sudo modprobe usiw
+sudo modprobe -r urdma || true
+sudo modprobe urdma
 
-export IBV_DRIVERS=$(realpath build/src/libusiw/${RTE_TARGET}/lib/libusiw)
+export IBV_DRIVERS=$(realpath build/src/liburdma/${RTE_TARGET}/lib/liburdma)
 build/src/${TESTAPP}/${RTE_TARGET}/app/${TESTAPP} "$@"

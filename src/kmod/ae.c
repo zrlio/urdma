@@ -51,7 +51,7 @@
 #include <rdma/ib_smi.h>
 #include <rdma/ib_user_verbs.h>
 
-#include "siw.h"
+#include "urdma.h"
 #include "obj.h"
 #include "cm.h"
 

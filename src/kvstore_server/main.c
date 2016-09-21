@@ -230,7 +230,7 @@ handle_recv_get(struct ibv_qp *qp,
 	}
 
 	send_credits--;
-	ret = usiw_accl_post_write(qp, h->value,
+	ret = urdma_accl_post_write(qp, h->value,
 			RTE_MIN(rte_be_to_cpu_32(cmd->header->rdma_length),
 				h->length), NULL,
 			rte_be_to_cpu_64(cmd->header->rdma_offset),
@@ -332,14 +332,14 @@ respond:
 	resp_head->key_length = rte_cpu_to_be_16(resp_head->key_length);
 	resp_head->total_body_length = rte_cpu_to_be_32(response_size);
 
-	ret = usiw_accl_post_recv(qp, (void *)(uintptr_t)wc->wr_id,
+	ret = urdma_accl_post_recv(qp, (void *)(uintptr_t)wc->wr_id,
 			RECV_BUF_LEN, (void *)(uintptr_t)wc->wr_id);
 	if (ret) {
 		RTE_LOG(ERR, USER2, "post_recv failed: %s\n", strerror(-ret));
 	}
 
 	response_size += sizeof(*resp_head);
-        ret = usiw_accl_post_send(qp, resp_head, response_size, NULL, response);
+        ret = urdma_accl_post_send(qp, resp_head, response_size, NULL, response);
         if (ret) {
                 send_credits++;
                 RTE_LOG(ERR, USER2, "post_send failed for %s request id=%" PRIx32 ": %s\n",
@@ -445,9 +445,9 @@ server_new(struct sockaddr *listen_addr)
 	if (ret) {
 		perror("ibv_query_device");
 		goto free_listen_id;
-	} else if (ib_devattr.vendor_id != USIW_DEVICE_VENDOR_ID
+	} else if (ib_devattr.vendor_id != URDMA_DEVICE_VENDOR_ID
 			|| ib_devattr.vendor_part_id
-					!= USIW_DEVICE_VENDOR_PART_ID) {
+					!= URDMA_DEVICE_VENDOR_PART_ID) {
 		fprintf(stderr, "Bound device is not our driver\n");
 		goto free_cm_id;
 	}
@@ -481,7 +481,7 @@ server_new(struct sockaddr *listen_addr)
 	}
 
 	for (x = 0; x < MAX_RECV_WR; ++x) {
-		ret = usiw_accl_post_recv(ctx->cm_id->qp, recvbuf[x],
+		ret = urdma_accl_post_recv(ctx->cm_id->qp, recvbuf[x],
 				RECV_BUF_LEN, recvbuf[x]);
 		if (ret < 0) {
 			fprintf(stderr, "dpdk_post_recv: %s\n",

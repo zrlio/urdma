@@ -58,15 +58,15 @@
 #include "config_file.h"
 #include "interface.h"
 #include "kni.h"
-#include "usiw_kabi.h"
+#include "urdma_kabi.h"
 #include "util.h"
 #include "verbs.h"
 
 enum { SIZE_POW2_MAX = (INT_MAX >> 1) + 1 };
 
-static_assert(USIW_VENDOR_ID == USIW_DEVICE_VENDOR_ID,
+static_assert(URDMA_VENDOR_ID == URDMA_DEVICE_VENDOR_ID,
 		"Vendor ID in verbs.h does not match kABI");
-static_assert(USIW_VENDOR_PART_ID == USIW_DEVICE_VENDOR_PART_ID,
+static_assert(URDMA_VENDOR_PART_ID == URDMA_DEVICE_VENDOR_PART_ID,
 		"Vendor part ID in verbs.h does not match kABI");
 
 /** Returns the least power of 2 greater than in.  If in is greater than the
@@ -93,7 +93,7 @@ usiw_hash_mr(uintptr_t addr, size_t len)
 
 __attribute__((__visibility__("default")))
 struct ibv_mr *
-usiw_reg_mr_with_rkey(struct ibv_pd *pd, void *addr, size_t len, int access,
+urdma_reg_mr_with_rkey(struct ibv_pd *pd, void *addr, size_t len, int access,
 		uint32_t rkey)
 {
 	struct usiw_mr_table *tbl = container_of(pd, struct usiw_mr_table, pd);
@@ -114,12 +114,12 @@ usiw_reg_mr_with_rkey(struct ibv_pd *pd, void *addr, size_t len, int access,
 	mr->access = access;
 	tbl->entries[hash] = mr;
 	return &mr->mr;
-} /* usiw_reg_mr_with_rkey */
+} /* urdma_reg_mr_with_rkey */
 
 
 __attribute__((__visibility__("default")))
 int
-usiw_accl_post_recvv(struct ibv_qp *ib_qp, const struct iovec *iov, size_t iov_size,
+urdma_accl_post_recvv(struct ibv_qp *ib_qp, const struct iovec *iov, size_t iov_size,
 		void *context)
 {
 	struct usiw_recv_wqe *wqe;
@@ -150,30 +150,30 @@ usiw_accl_post_recvv(struct ibv_qp *ib_qp, const struct iovec *iov, size_t iov_s
 	assert(x == 0);
 
 	return 0;
-} /* usiw_accl_post_recvv */
+} /* urdma_accl_post_recvv */
 
 
 __attribute__((__visibility__("default")))
 int
-usiw_accl_post_recv(struct ibv_qp *ib_qp, void *addr, size_t length, void *context)
+urdma_accl_post_recv(struct ibv_qp *ib_qp, void *addr, size_t length, void *context)
 {
 	struct iovec iov;
 	iov.iov_base = addr;
 	iov.iov_len = length;
-	return usiw_accl_post_recvv(ib_qp, &iov, 1, context);
-} /* usiw_accl_post_recv */
+	return urdma_accl_post_recvv(ib_qp, &iov, 1, context);
+} /* urdma_accl_post_recv */
 
 
 __attribute__((__visibility__("default")))
 int
-usiw_accl_post_send(struct ibv_qp *ib_qp, void *addr, size_t length,
-		struct usiw_ah *ah, void *context)
+urdma_accl_post_send(struct ibv_qp *ib_qp, void *addr, size_t length,
+		struct urdma_ah *ah, void *context)
 {
 	struct iovec iov;
 	iov.iov_base = addr;
 	iov.iov_len = length;
-	return usiw_accl_post_sendv(ib_qp, &iov, 1, ah, context);
-} /* usiw_accl_post_send */
+	return urdma_accl_post_sendv(ib_qp, &iov, 1, ah, context);
+} /* urdma_accl_post_send */
 
 
 static bool
@@ -185,8 +185,8 @@ qp_connected(struct usiw_qp *qp)
 
 __attribute__((__visibility__("default")))
 int
-usiw_accl_post_sendv(struct ibv_qp *ib_qp, struct iovec *iov, size_t iov_size,
-		struct usiw_ah *ah, void *context)
+urdma_accl_post_sendv(struct ibv_qp *ib_qp, struct iovec *iov, size_t iov_size,
+		struct urdma_ah *ah, void *context)
 {
 	struct usiw_qp *qp;
 	struct ee_state *ee;
@@ -229,13 +229,13 @@ usiw_accl_post_sendv(struct ibv_qp *ib_qp, struct iovec *iov, size_t iov_size,
 	assert(x == 0);
 
 	return 0;
-} /* usiw_accl_post_sendv */
+} /* urdma_accl_post_sendv */
 
 
 __attribute__((__visibility__("default")))
 int
-usiw_accl_post_write(struct ibv_qp *ib_qp, void *addr, size_t length,
-		struct usiw_ah *ah, uint64_t remote_addr, uint32_t rkey,
+urdma_accl_post_write(struct ibv_qp *ib_qp, void *addr, size_t length,
+		struct urdma_ah *ah, uint64_t remote_addr, uint32_t rkey,
 		void *context)
 {
 	struct usiw_qp *qp;
@@ -274,13 +274,13 @@ usiw_accl_post_write(struct ibv_qp *ib_qp, void *addr, size_t length,
 	assert(x == 0);
 
 	return 0;
-} /* usiw_accl_post_write */
+} /* urdma_accl_post_write */
 
 
 __attribute__((__visibility__("default")))
 int
-usiw_accl_post_read(struct ibv_qp *ib_qp, void *addr, size_t length,
-		struct usiw_ah *ah, uint64_t remote_addr, uint32_t rkey,
+urdma_accl_post_read(struct ibv_qp *ib_qp, void *addr, size_t length,
+		struct urdma_ah *ah, uint64_t remote_addr, uint32_t rkey,
 		void *context)
 {
 	struct usiw_send_wqe *wqe;
@@ -319,7 +319,7 @@ usiw_accl_post_read(struct ibv_qp *ib_qp, void *addr, size_t length,
 	assert(x == 0);
 
 	return 0;
-} /* usiw_accl_post_read */
+} /* urdma_accl_post_read */
 
 
 static int
@@ -335,8 +335,8 @@ usiw_query_device(struct ibv_context *context,
 	device_attr->sys_image_guid = 0;
 	device_attr->max_mr_size = MAX_MR_SIZE;
 	device_attr->page_size_cap = 4096;
-	device_attr->vendor_id = USIW_VENDOR_ID;
-	device_attr->vendor_part_id = USIW_VENDOR_PART_ID;
+	device_attr->vendor_id = URDMA_VENDOR_ID;
+	device_attr->vendor_part_id = URDMA_VENDOR_PART_ID;
 	device_attr->hw_ver = 0;
 	device_attr->max_qp = DPDKV_MAX_QP;
 	device_attr->max_qp_wr = RTE_MIN(MAX_SEND_WR, MAX_RECV_WR);
@@ -446,7 +446,7 @@ usiw_reg_mr(struct ibv_pd *pd, void *addr, size_t len, int access)
 		return NULL;
 	}
 	rkey = usiw_hash_mr((uintptr_t)addr, len);
-	return usiw_reg_mr_with_rkey(pd, addr, len, access, rkey);
+	return urdma_reg_mr_with_rkey(pd, addr, len, access, rkey);
 } /* usiw_reg_mr */
 
 static int
@@ -498,7 +498,7 @@ usiw_create_cq(struct ibv_context *context, int size,
 	struct ibv_create_cq cmd;
 	struct {
 		struct ibv_create_cq_resp ibv;
-		struct usiw_uresp_create_cq priv;
+		struct urdma_uresp_create_cq priv;
 	} resp;
 	struct usiw_cq *cq;
 	unsigned int x;
@@ -754,11 +754,11 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 {
 	struct {
 		struct ibv_create_qp ibv;
-		struct usiw_udata_create_qp priv;
+		struct urdma_udata_create_qp priv;
 	} cmd;
 	struct {
 		struct ibv_create_qp_resp ibv;
-		struct usiw_uresp_create_qp priv;
+		struct urdma_uresp_create_qp priv;
 	} resp;
 	struct usiw_context *ctx;
 	struct usiw_qp *qp;
@@ -1375,8 +1375,8 @@ usiw_num_completion_vectors(void)
 } /* usiw_num_completion_vectors */
 
 void
-usiw_query_qp_stats(const struct ibv_qp *restrict ib_qp,
-		struct usiw_qp_stats *restrict stats)
+urdma_query_qp_stats(const struct ibv_qp *restrict ib_qp,
+		struct urdma_qp_stats *restrict stats)
 {
 	struct usiw_qp *qp = container_of(ib_qp, struct usiw_qp, ib_qp);
 	memcpy(stats, &qp->stats, sizeof(*stats));
@@ -1390,7 +1390,7 @@ usiw_init_context(struct verbs_device *device, struct ibv_context *context,
 	struct ibv_get_context cmd;
 	struct {
 		struct ibv_get_context_resp ibv;
-		struct usiw_uresp_alloc_ctx priv;
+		struct urdma_uresp_alloc_ctx priv;
 	} resp;
 	struct usiw_context *ctx;
 	struct usiw_device *dev;

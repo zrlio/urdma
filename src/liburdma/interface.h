@@ -97,7 +97,7 @@ struct usiw_wc {
 	enum ibv_wc_opcode opcode;
 	uint32_t byte_len;
 	uint32_t qp_num;
-	struct usiw_ah ah;
+	struct urdma_ah ah;
 };
 
 struct usiw_recv_wqe {
@@ -207,7 +207,7 @@ enum {
 };
 
 struct ee_state {
-	struct usiw_ah ah;
+	struct urdma_ah ah;
 	uint32_t expected_recv_msn;
 	uint32_t expected_read_msn;
 	uint32_t expected_ack_msn;
@@ -287,7 +287,7 @@ struct usiw_qp {
 	struct usiw_send_wqe_queue sq;
 
 	struct rte_eth_fdir_filter fdir_filter;
-        struct usiw_qp_stats stats;
+        struct urdma_qp_stats stats;
 
 	uint64_t timer_last;
 	struct usiw_recv_wqe_queue rq0;
@@ -430,7 +430,7 @@ void
 usiw_recv_wqe_queue_destroy(struct usiw_recv_wqe_queue *q);
 
 struct ee_state *
-usiw_get_ee_context(struct usiw_qp *qp, struct usiw_ah *ah);
+usiw_get_ee_context(struct usiw_qp *qp, struct urdma_ah *ah);
 
 void
 usiw_do_destroy_qp(struct usiw_qp *qp);

@@ -616,7 +616,7 @@ do_send_command(struct client_state *state,
 					&remote_buf)) {
 			req->rdma_length = RTE_MIN(remote_buf.rdma_length,
 					(size_t)KVSTORE_VALUE_LEN_MAX);
-			return usiw_accl_post_read(qp, req->rdmabuf,
+			return urdma_accl_post_read(qp, req->rdmabuf,
 					req->rdma_length, NULL,
 					remote_buf.rdma_offset,
 					remote_buf.rdma_stag, req);
@@ -630,7 +630,7 @@ do_send_command(struct client_state *state,
 					&remote_buf)) {
 			req->rdma_length = RTE_MIN(remote_buf.rdma_length,
 					req->rdma_length);
-			return usiw_accl_post_write(qp, req->rdmabuf,
+			return urdma_accl_post_write(qp, req->rdmabuf,
 					req->rdma_length, NULL,
 					remote_buf.rdma_offset,
 					remote_buf.rdma_stag, req);
@@ -652,7 +652,7 @@ do_send_command(struct client_state *state,
 		iov[1].iov_base = req->rdmabuf;
 		iov[1].iov_len = req->rdma_length;
 	}
-	return usiw_accl_post_sendv(qp, iov, iov_count, NULL, req);
+	return urdma_accl_post_sendv(qp, iov, iov_count, NULL, req);
 } /* do_send_command */
 
 /** Reads the next command from the text input stream, converts it to its
@@ -929,7 +929,7 @@ handle_completion(struct client_state *state,
 	switch (wc->opcode) {
 	case IBV_WC_RECV:
 		req = handle_response(state, wr_context);
-		usiw_accl_post_recv(qp, wr_context, RECV_BUF_LEN,
+		urdma_accl_post_recv(qp, wr_context, RECV_BUF_LEN,
 				wr_context);
 		state->stats.recv_completion_count++;
 		break;
@@ -1062,9 +1062,9 @@ client_new(struct sockaddr *local_addr, struct sockaddr *server_addr)
 	if (ret) {
 		perror("ibv_query_device");
 		goto free_cm_id;
-	} else if (ib_devattr.vendor_id != USIW_DEVICE_VENDOR_ID
+	} else if (ib_devattr.vendor_id != URDMA_DEVICE_VENDOR_ID
 			|| ib_devattr.vendor_part_id
-					!= USIW_DEVICE_VENDOR_PART_ID) {
+					!= URDMA_DEVICE_VENDOR_PART_ID) {
 		fprintf(stderr, "Bound device is not our driver\n");
 		goto free_cm_id;
 	}
@@ -1105,7 +1105,7 @@ client_new(struct sockaddr *local_addr, struct sockaddr *server_addr)
 	init_send_bufs(state);
 
 	for (x = 0; x < MAX_RECV_WR; ++x) {
-		ret = usiw_accl_post_recv(state->cm_id->qp, state->recvbuf[x],
+		ret = urdma_accl_post_recv(state->cm_id->qp, state->recvbuf[x],
 				RECV_BUF_LEN, state->recvbuf[x]);
 		if (ret < 0)
 			rte_exit(EXIT_FAILURE, "Error posting receive %u: %s\n",

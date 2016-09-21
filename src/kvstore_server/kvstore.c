@@ -284,7 +284,7 @@ fill_entry(struct kvstore *store, struct kv_elem *elem, int hash,
 		memcpy(elem->handle.value, value, value_len);
 	}
 
-	elem->handle.mr = usiw_reg_mr_with_rkey(store->pd,
+	elem->handle.mr = urdma_reg_mr_with_rkey(store->pd,
 				elem->handle.value,
 				elem->handle.length,
 				IBV_ACCESS_REMOTE_READ|IBV_ACCESS_REMOTE_WRITE,

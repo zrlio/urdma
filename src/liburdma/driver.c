@@ -59,7 +59,7 @@
 #include "config_file.h"
 #include "interface.h"
 #include "kni.h"
-#include "usiw_kabi.h"
+#include "urdma_kabi.h"
 #include "util.h"
 
 #define RX_DESC_COUNT_MAX 512
@@ -299,17 +299,17 @@ do_init_driver(void)
 	int portid, port_count;
 	int retval;
 
-	conf_file = fopen(urdma_confdir "/dpdkv.json", "r");
+	conf_file = fopen(urdma_confdir "/urdma.json", "r");
 	if (!conf_file) {
 		fprintf(stderr, "Could not read config file %s: %s\n",
-				urdma_confdir "/dpdkv.json",
+				urdma_confdir "/urdma.json",
 				strerror(errno));
 		return;
 	}
 	retval = parse_config(conf_file, &config);
 	if (retval < 0) {
 		fprintf(stderr, "Could not parse config file %s: %s\n",
-				urdma_confdir "/dpdkv.json",
+				urdma_confdir "/urdma.json",
 				strerror(errno));
 		return;
 	}
@@ -392,7 +392,7 @@ static struct verbs_device *
 usiw_verbs_driver_init(const char *uverbs_sys_path, int abi_version)
 {
 	static pthread_once_t driver_init_once = PTHREAD_ONCE_INIT;
-	static const char siw_node_desc[] = USIW_NODE_DESC;
+	static const char siw_node_desc[] = URDMA_NODE_DESC;
 	struct ibv_device *ibdev;
 	char siw_devpath[IBV_SYSFS_PATH_MAX];
 	char node_desc[24];
@@ -409,7 +409,7 @@ usiw_verbs_driver_init(const char *uverbs_sys_path, int abi_version)
 				value, sizeof value) < 0)
 		return NULL;
 
-	if (sscanf(value, USIW_DEV_PREFIX "%d", &portid) < 1)
+	if (sscanf(value, URDMA_DEV_PREFIX "%d", &portid) < 1)
 		return NULL;
 
 	memset(siw_devpath, 0, IBV_SYSFS_PATH_MAX);
@@ -426,8 +426,8 @@ usiw_verbs_driver_init(const char *uverbs_sys_path, int abi_version)
 	if (strncmp(siw_node_desc, node_desc, strlen(siw_node_desc)))
 		return NULL;
 
-	if (abi_version < USIW_ABI_VERSION_MIN
-			|| abi_version > USIW_ABI_VERSION_MAX) {
+	if (abi_version < URDMA_ABI_VERSION_MIN
+			|| abi_version > URDMA_ABI_VERSION_MAX) {
 		return NULL;
 	}
 
@@ -449,6 +449,5 @@ usiw_register_driver(void)
 		perror("WARNING: set dumpable flag failed; DPDK may not initialize properly");
 	}
 
-	verbs_register_driver("dpdkv", &usiw_verbs_driver_init);
-	fprintf(stderr, "dpdkv software iwarp verbs driver registered\n");
+	verbs_register_driver("urdma", &usiw_verbs_driver_init);
 } /* usiw_register_driver */

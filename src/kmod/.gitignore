@@ -2,7 +2,7 @@
 *.ko
 *.mod.h
 *.mod.c
-usiw_kabi.h
+urdma_kabi.h
 Module.symvers
 modules.order
 .tmp_versions
