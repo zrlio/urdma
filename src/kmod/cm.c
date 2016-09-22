@@ -53,7 +53,7 @@
 #include <rdma/ib_user_verbs.h>
 #include <rdma/rdma_cm.h>
 
-#include "siw.h"
+#include "urdma.h"
 #include "cm.h"
 #include "obj.h"
 

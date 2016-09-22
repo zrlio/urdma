@@ -37,8 +37,8 @@
  * SOFTWARE.
  */
 
-#ifndef _SIW_H
-#define _SIW_H
+#ifndef URDMA_H
+#define URDMA_H
 
 #include <linux/idr.h>
 #include <rdma/ib_verbs.h>
@@ -46,7 +46,7 @@
 #include <linux/netdevice.h>
 #include <linux/module.h>
 
-#include <usiw_kabi.h>
+#include "urdma_kabi.h"
 #include "backports.h"
 #include "iwarp.h"
 

@@ -1,9 +1,10 @@
-#
+# Makefile.in
+
 # Userspace Software iWARP library for DPDK
 #
-# Authors: Patrick MacArthur <pam@zurich.ibm.com>
+# Authors: Patrick MacArthur <patrick@patrickmacarthur.net>
 #
-# Copyright (c) 2016, IBM Corporation
+# Copyright (c) 2016, University of New Hampshire InterOperability Laboratory
 #
 # This software is available to you under a choice of one of two
 # licenses.  You may choose to be licensed under the terms of the GNU
@@ -35,34 +36,78 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-ifeq ($(BASE_SRCDIR),)
-$(error "Please run make on the top-level directory")
-endif
 
-include $(RTE_SDK)/mk/rte.vars.mk
+SOURCES = ae.c backports.h cm.c cm.h debug.c debug.h iwarp.h main.c mem.c \
+	  obj.c obj.h qp.c urdma.h verbs.c verbs.h Kbuild
 
-# binary name
-APP = kvstore_client
+.PHONY: all
+all:
+	for i in $(SOURCES); do if [ ! -e $${i} ]; then ln -s @srcdir@/$${i} $${i}; fi; done
+	if [ ! -e urdma_kabi.h ]; then ln -s @top_srcdir@/include/urdma_kabi.h .; fi
+	make -C @KERNELDIR@ M=`pwd` top_srcdir=$(realpath @top_srcdir@) modules
 
-VPATH += $(BASE_SRCDIR)/src/util
+Makefile: @srcdir@/Makefile.in
+	cd @top_builddir@; ./config.status
 
-# all source are stored in SRCS-y
-SRCS-y := main.c options.c util.c
-NODIST_SRCS := util.c
-HEADERS := options.h
+.PHONY: distdir
+distdir:
+	for i in $(SOURCES); do cp @srcdir@/$${i} $(distdir)/$${i}; done
 
-CFLAGS += -std=gnu11 -O2
-CFLAGS += $(DEBUG_FLAGS) $(WERROR_FLAGS) -Wno-cast-qual
-CFLAGS += -I$(BASE_SRCDIR)/include -I$(BASE_SRCDIR)/src/libusiw
-CFLAGS += -I$(BASE_SRCDIR)/src/util -I$(RTE_SRCDIR)
-LDLIBS += --whole-archive
-LDLIBS += -L$(BASE_OUTPUT)/src/libusiw/$(RTE_TARGET)/lib -lusiw-rdmav2
-LDLIBS += --no-whole-archive
-LDLIBS += -lrdmacm -libverbs
-LDLIBS += $(shell pkg-config --libs libnl-route-3.0 libnl-3.0 json-c)
+.PHONY: install
+install: install-exec install-data
 
-include $(RTE_SDK)/mk/rte.extapp.mk
-include $(BASE_SRCDIR)/config/distfiles.mk
+.PHONY: install-exec
+install-exec:
+	make -C @KERNELDIR@ M=`pwd` INSTALL_MOD_PATH=$(DESTDIR) modules_install
 
-target-appclean:
-	$(RM) $(RTE_OUTPUT)/app/$(APP).map $(RTE_OUTPUT)/app/$(APP) $(RTE_OUTPUT)/$(APP).map
+install-data:
+
+uninstall:
+
+install-dvi:
+
+install-html:
+
+install-info:
+
+install-ps:
+
+install-pdf:
+
+installdirs:
+
+check:
+
+installcheck:
+
+.PHONY: mostlyclean
+mostlyclean:
+	make -C @KERNELDIR@ M=`pwd` clean
+
+.PHONY: clean
+clean: mostlyclean
+	for i in $(SOURCES); do if [ -h $${i} ]; then $(RM) $${i}; fi; done
+	$(RM) urdma_kabi.h
+
+.PHONY: distclean
+distclean: clean
+	$(RM) Makefile
+
+.PHONY: maintainer-clean
+maintainer-clean: distclean
+
+dvi:
+
+pdf:
+
+ps:
+
+info:
+
+html:
+
+tags:
+
+.PHONY: ctags
+ctags: Makefile
+	ctags $(SOURCES)

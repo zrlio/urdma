@@ -143,8 +143,8 @@ EOF
 
 sudo tee /etc/sudoers.d/dpdk.conf <<EOF
 %dpdk     ALL=(ALL)       NOPASSWD: /sbin/setcap cap_net_admin+ep *
-%dpdk     ALL=(ALL)       NOPASSWD: /sbin/rmmod siw2
-%dpdk     ALL=(ALL)       NOPASSWD: /sbin/insmod /home/pam/src/usiw/build/src/kdpdkverbs/x86_64-native-linuxapp-gcc/kmod/usiw.ko
+%dpdk     ALL=(ALL)       NOPASSWD: /sbin/rmmod urdma
+%dpdk     ALL=(ALL)       NOPASSWD: /sbin/modprobe urdma *
 EOF
 
 sudo groupadd dpdk

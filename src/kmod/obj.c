@@ -40,7 +40,7 @@
 #include <linux/spinlock.h>
 #include <linux/kref.h>
 
-#include "siw.h"
+#include "urdma.h"
 #include "obj.h"
 #include "cm.h"
 

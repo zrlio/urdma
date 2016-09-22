@@ -38,6 +38,10 @@
  * SOFTWARE.
  */
 
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#endif
+
 #include <assert.h>
 #include <errno.h>
 #include <inttypes.h>
@@ -61,7 +65,7 @@
 #include "interface.h"
 #include "list.h"
 #include "proto.h"
-#include "usiw_kabi.h"
+#include "urdma_kabi.h"
 #include "util.h"
 
 #define IP_HDR_PROTO_UDP 17
@@ -408,7 +412,7 @@ prepend_udp_header(struct rte_mbuf *sendmsg, unsigned int src_port,
  */
 static void
 send_udp_dgram(struct usiw_qp *qp, struct rte_mbuf *sendmsg,
-		struct usiw_ah *dest, uint32_t raw_cksum)
+		struct urdma_ah *dest, uint32_t raw_cksum)
 {
 	struct udp_hdr *udp;
 	struct ipv4_hdr *ip;
@@ -683,7 +687,7 @@ get_next_cqe(struct usiw_cq *cq, struct usiw_wc **cqe)
 static void
 finish_post_cqe(struct usiw_cq *cq, struct usiw_wc *cqe)
 {
-	struct usiw_cq_event event;
+	struct urdma_cq_event event;
 	struct usiw_context *ctx;
 	ssize_t ret;
 
@@ -987,7 +991,7 @@ do_rdmap_read_request(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 	}
 
 	rkey = STAG_RDMA_READ(wqe->msn);
-	temp_mr = usiw_reg_mr_with_rkey(&qp->pd->pd, wqe->iov[0].iov_base,
+	temp_mr = urdma_reg_mr_with_rkey(&qp->pd->pd, wqe->iov[0].iov_base,
 			wqe->iov[0].iov_len, IBV_ACCESS_REMOTE_WRITE,
 			rkey);
 	if (!temp_mr) {
@@ -1504,7 +1508,8 @@ do_process_ack(struct usiw_qp *qp, struct usiw_send_wqe *wqe,
 	wqe->bytes_acked += pending->ddp_length;
 	assert(wqe->bytes_sent >= wqe->bytes_acked);
 
-	if (wqe->bytes_acked == wqe->total_length) {
+	if (wqe->opcode != usiw_wr_read
+			&& wqe->bytes_acked == wqe->total_length) {
 		assert(wqe->state == SEND_WQE_WAIT);
 		wqe->state = SEND_WQE_COMPLETE;
 		try_complete_wqe(qp, wqe);
@@ -1662,7 +1667,7 @@ ddp_place_tagged_data(struct usiw_qp *qp, struct packet_context *orig)
 
 
 struct ee_state *
-usiw_get_ee_context(struct usiw_qp *qp, struct usiw_ah *ah)
+usiw_get_ee_context(struct usiw_qp *qp, struct urdma_ah *ah)
 {
 	struct ee_state *ee = &qp->remote_ep;
 	return (is_same_ether_addr(&ah->ether_addr, &ee->ah.ether_addr)
@@ -1679,7 +1684,7 @@ process_data_packet(struct usiw_qp *qp, struct rte_mbuf *mbuf)
 	struct ipv4_hdr *ipv4_hdr;
 	struct udp_hdr *udp_hdr;
 	struct trp_hdr *trp_hdr;
-	struct usiw_ah ah;
+	struct urdma_ah ah;
 	uint16_t trp_opcode;
 
 #ifdef DEBUG_PACKET_HEADERS
@@ -2098,8 +2103,8 @@ lookup_qp_id(struct usiw_context *ctx, uint32_t qp_id)
 static void
 poll_conn_state(struct usiw_context *ctx, int timeout)
 {
-	struct usiw_qp_connected_event event;
-	struct usiw_qp_rtr_event rtr_event;
+	struct urdma_qp_connected_event event;
+	struct urdma_qp_rtr_event rtr_event;
 	struct usiw_qp *qp;
 	struct pollfd pollfd;
 	unsigned int x;
@@ -2255,7 +2260,7 @@ find_matching_qp(struct usiw_context *ctx, struct rte_mbuf *pkt)
 	struct ether_hdr *ether;
 	struct ipv4_hdr *ipv4;
 	struct udp_hdr *udp;
-	struct usiw_ah *ah;
+	struct urdma_ah *ah;
 
 	ether = rte_pktmbuf_mtod(pkt, struct ether_hdr *);
 	if (ether->ether_type != ETHER_TYPE_IPv4) {

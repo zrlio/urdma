@@ -51,18 +51,16 @@
 #include <rte_ether.h>
 #include <rte_timer.h>
 
-#define USIW_DEVICE_VENDOR_ID		0x626d74
-#define USIW_DEVICE_VENDOR_PART_ID	0x0816
+#define URDMA_DEVICE_VENDOR_ID		0x626d74
+#define URDMA_DEVICE_VENDOR_PART_ID	0x0816
 
-struct usiw_mr_table;
-
-struct usiw_ah {
+struct urdma_ah {
 	struct ether_addr ether_addr;
 	uint16_t udp_port;
 	uint32_t ipv4_addr;
 };
 
-struct usiw_qp_stats {
+struct urdma_qp_stats {
         uintmax_t *recv_count_histo;
 		/**< An array of recv_max_burst_size + 1 elements.  The
 		 * element at index X corresponds to the number of times that a
@@ -73,37 +71,37 @@ struct usiw_qp_stats {
 };
 
 struct ibv_mr *
-usiw_reg_mr_with_rkey(struct ibv_pd *pd, void *addr, size_t len, int access,
+urdma_reg_mr_with_rkey(struct ibv_pd *pd, void *addr, size_t len, int access,
 		uint32_t rkey);
 
 int
-usiw_accl_post_recv(struct ibv_qp *qp, void *addr, size_t length,
+urdma_accl_post_recv(struct ibv_qp *qp, void *addr, size_t length,
 		void *context);
 
 int
-usiw_accl_post_recvv(struct ibv_qp *qp, const struct iovec *iov,
+urdma_accl_post_recvv(struct ibv_qp *qp, const struct iovec *iov,
 		size_t iov_size, void *context);
 
 int
-usiw_accl_post_send(struct ibv_qp *qp, void *addr, size_t length,
-		struct usiw_ah *ah, void *context);
+urdma_accl_post_send(struct ibv_qp *qp, void *addr, size_t length,
+		struct urdma_ah *ah, void *context);
 
 int
-usiw_accl_post_sendv(struct ibv_qp *qp, struct iovec *iov, size_t iov_size,
-		struct usiw_ah *ah, void *context);
+urdma_accl_post_sendv(struct ibv_qp *qp, struct iovec *iov, size_t iov_size,
+		struct urdma_ah *ah, void *context);
 
 int
-usiw_accl_post_write(struct ibv_qp *qp, void *addr, size_t length,
-		struct usiw_ah *ah, uint64_t remote_addr,
+urdma_accl_post_write(struct ibv_qp *qp, void *addr, size_t length,
+		struct urdma_ah *ah, uint64_t remote_addr,
 		uint32_t rkey, void *context);
 
 int
-usiw_accl_post_read(struct ibv_qp *qp, void *addr, size_t length,
-		struct usiw_ah *ah, uint64_t remote_addr,
+urdma_accl_post_read(struct ibv_qp *qp, void *addr, size_t length,
+		struct urdma_ah *ah, uint64_t remote_addr,
 		uint32_t rkey, void *context);
 
 void
-usiw_query_qp_stats(const struct ibv_qp *restrict qp,
-		struct usiw_qp_stats *restrict stats);
+urdma_query_qp_stats(const struct ibv_qp *restrict qp,
+		struct urdma_qp_stats *restrict stats);
 
 #endif

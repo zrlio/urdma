@@ -36,15 +36,20 @@
  * SOFTWARE.
  */
 
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#endif
+
 #include <assert.h>
 #include <rte_kni.h>
-#include <sys/socket.h>
-#include <linux/if.h>
 #include <netlink/msg.h>
 #include <netlink/netlink.h>
 #include <netlink/socket.h>
 #include <netlink/route/addr.h>
 #include <netlink/route/link.h>
+#ifndef AVOID_NET_IF_H
+#include <net/if.h>
+#endif
 
 #include "config_file.h"
 #include "interface.h"

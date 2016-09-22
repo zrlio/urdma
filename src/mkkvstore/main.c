@@ -40,6 +40,10 @@
 
 /* Creates an empty key-value store. */
 
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#endif
+
 #include <assert.h>
 #include <fcntl.h>
 #include <getopt.h>

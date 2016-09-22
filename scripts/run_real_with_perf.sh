@@ -56,8 +56,8 @@ make O=build
 sudo make O=build RTE_SDK=${RTE_SDK} RTE_TARGET=${RTE_TARGET} modules_install
 sudo setcap cap_net_admin+ep ${TOP_SRCDIR}/build/src/${TESTAPP}/${RTE_TARGET}/app/${TESTAPP}
 
-sudo modprobe -r usiw &>/dev/null || true
-sudo modprobe usiw
+sudo modprobe -r urdma &>/dev/null || true
+sudo modprobe urdma
 
-export IBV_DRIVERS=$(realpath build/src/libusiw/${RTE_TARGET}/lib/libusiw)
+export IBV_DRIVERS=$(realpath build/src/liburdma/${RTE_TARGET}/lib/liburdma)
 perf record --call-graph dwarf -o ${HOME}/perf.${LOGID}.data -- ${TOP_SRCDIR}/build/src/${TESTAPP}/${RTE_TARGET}/app/${TESTAPP} "$@"

@@ -52,7 +52,7 @@
 #include <rdma/ib_smi.h>
 #include <rdma/ib_user_verbs.h>
 
-#include "siw.h"
+#include "urdma.h"
 #include "verbs.h"
 #include "obj.h"
 #include "cm.h"
@@ -141,7 +141,7 @@ static ssize_t siw_event_file_read(struct file *filp, char __user *buf,
 		size_t count, loff_t *pos)
 {
 	struct siw_event_file *file;
-	struct usiw_qp_connected_event event;
+	struct urdma_qp_connected_event event;
 	struct net_device *netdev;
 	struct siw_cep *cep;
 	ssize_t rv;
@@ -248,9 +248,9 @@ static ssize_t siw_event_file_write(struct file *filp, const char __user *buf,
 		size_t count, loff_t *pos)
 {
 	struct siw_event_file *file;
-	struct usiw_event_storage event;
-	struct usiw_cq_event *cq_event;
-	struct usiw_qp_rtr_event *qp_rtr_event;
+	struct urdma_event_storage event;
+	struct urdma_cq_event *cq_event;
+	struct urdma_qp_rtr_event *qp_rtr_event;
 	struct siw_cq *cq;
 	struct siw_qp *qp;
 	ssize_t rv;
@@ -276,7 +276,7 @@ static ssize_t siw_event_file_write(struct file *filp, const char __user *buf,
 			rv = -EINVAL;
 			goto out;
 		}
-		cq_event = (struct usiw_cq_event *)&event;
+		cq_event = (struct urdma_cq_event *)&event;
 		cq = siw_cq_id2obj(file->ctx->sdev, cq_event->cq_id);
 		cq->ofa_cq.comp_handler(&cq->ofa_cq, cq->ofa_cq.cq_context);
 		siw_cq_put(cq);
@@ -286,7 +286,7 @@ static ssize_t siw_event_file_write(struct file *filp, const char __user *buf,
 			rv = -EINVAL;
 			goto out;
 		}
-		qp_rtr_event = (struct usiw_qp_rtr_event *)&event;
+		qp_rtr_event = (struct urdma_qp_rtr_event *)&event;
 		qp = siw_qp_id2obj(file->ctx->sdev, qp_rtr_event->qp_id);
 		list_del(&qp->cep->rtr_wait_entry);
 		spin_unlock_irq(&file->lock);
@@ -397,7 +397,7 @@ struct ib_ucontext *siw_alloc_ucontext(struct ib_device *ofa_dev,
 
 	ctx->sdev = sdev;
 	if (udata) {
-		struct usiw_uresp_alloc_ctx uresp;
+		struct urdma_uresp_alloc_ctx uresp;
 		struct file *filp;
 
 		memset(&uresp, 0, sizeof uresp);
@@ -728,8 +728,8 @@ struct ib_qp *siw_create_qp(struct ib_pd *ofa_pd,
 	qp->attrs.state = SIW_QP_STATE_IDLE;
 
 	if (udata) {
-		struct usiw_udata_create_qp ureq;
-		struct usiw_uresp_create_qp uresp;
+		struct urdma_udata_create_qp ureq;
+		struct urdma_uresp_create_qp uresp;
 
 		rv = ib_copy_from_udata(&ureq, udata, sizeof(ureq));
 		if (rv)
@@ -930,7 +930,7 @@ static struct ib_cq *do_siw_create_cq(struct ib_device *ofa_dev,
 	struct siw_ucontext		*ctx;
 	struct siw_cq			*cq = NULL;
 	struct siw_dev			*sdev = siw_dev_ofa2siw(ofa_dev);
-	struct usiw_uresp_create_cq	uresp;
+	struct urdma_uresp_create_cq	uresp;
 	int rv;
 
 	if (!ofa_dev) {

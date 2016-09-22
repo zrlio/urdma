@@ -51,7 +51,7 @@
 #include <rdma/ib_smi.h>
 #include <rdma/ib_user_verbs.h>
 
-#include "siw.h"
+#include "urdma.h"
 #include "obj.h"
 #include "cm.h"
 #include "verbs.h"
@@ -63,7 +63,7 @@ MODULE_VERSION("0.3");
 
 static int device_count = 1;
 module_param(device_count, int, 0444);
-MODULE_PARM_DESC(device_count, "Maximum number of devices usiw can attach to");
+MODULE_PARM_DESC(device_count, "Maximum number of devices urdma can attach to");
 
 static struct siw_dev **siw_devlist;
 DEFINE_SPINLOCK(siw_dev_lock);
@@ -89,12 +89,12 @@ static void usiw_device_release(struct device *dev)
 
 static struct device usiw_generic_dma_device = {
 	.archdata.dma_ops	= &usiw_dma_generic_ops,
-	.init_name		= "usiw-v0",
+	.init_name		= "urdma",
 	.release		= usiw_device_release
 };
 
 static struct bus_type usiw_bus = {
-	.name	= "usiw",
+	.name	= "urdma",
 };
 
 static int siw_modify_port(struct ib_device *ofa_dev, u8 port, int mask,
@@ -250,7 +250,7 @@ static struct siw_dev *siw_device_create(int list_index)
 	}
 
 	snprintf(ofa_dev->name, IB_DEVICE_NAME_MAX,
-			USIW_DEV_PREFIX "%d", list_index);
+			URDMA_DEV_PREFIX "%d", list_index);
 
 	ofa_dev->owner = THIS_MODULE;
 
@@ -273,7 +273,7 @@ static struct siw_dev *siw_device_create(int list_index)
 	    (1ull << IB_USER_VERBS_CMD_DESTROY_QP);
 
 	ofa_dev->node_type = RDMA_NODE_RNIC;
-	memcpy(ofa_dev->node_desc, USIW_NODE_DESC, sizeof(USIW_NODE_DESC));
+	memcpy(ofa_dev->node_desc, URDMA_NODE_DESC, sizeof(URDMA_NODE_DESC));
 
 	/*
 	 * Our device does not yet have an associated HW address,
@@ -352,11 +352,11 @@ static struct siw_dev *siw_device_create(int list_index)
 	/*
 	 * set and register sw version + user if type
 	 */
-	sdev->attrs.version = VERSION_ID_USIW;
+	sdev->attrs.version = VERSION_ID_URDMA;
 
-	sdev->attrs.vendor_id = USIW_VENDOR_ID;
-	sdev->attrs.vendor_part_id = USIW_VENDOR_PART_ID;
-	sdev->attrs.sw_version = VERSION_ID_USIW;
+	sdev->attrs.vendor_id = URDMA_VENDOR_ID;
+	sdev->attrs.vendor_part_id = URDMA_VENDOR_PART_ID;
+	sdev->attrs.sw_version = VERSION_ID_URDMA;
 	sdev->attrs.max_qp = SIW_MAX_QP;
 	sdev->attrs.max_ird = SIW_MAX_IRD;
 	sdev->attrs.max_ord = SIW_MAX_ORD;
@@ -536,7 +536,7 @@ static __init int siw_init_module(void)
 		goto out_unregister;
 	}
 
-	pr_info("Userspace SoftiWARP kernel support attached\n");
+	pr_info("urdma kernel support attached\n");
 	return 0;
 
 out_free_devlist:
@@ -556,7 +556,7 @@ out_unregister:
 out:
 	bus_unregister(&usiw_bus);
 out_nobus:
-	pr_info("Userspace SoftIWARP kernel support attach failed. Error: %d\n",
+	pr_info("urdma kernel support attach failed. Error: %d\n",
 			rv);
 	siw_cm_exit();
 
@@ -589,7 +589,7 @@ static void __exit siw_exit_module(void)
 
 	bus_unregister(&usiw_bus);
 
-	pr_info("Userspace SoftiWARP kernel support detached\n");
+	pr_info("urdma kernel support detached\n");
 }
 
 module_init(siw_init_module);

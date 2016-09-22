@@ -27,10 +27,33 @@ To build this package, RTE_SDK and RTE_TARGET need to be exported into the envir
 $ export RTE_SDK=${prefix}/share/dpdk
 $ export RTE_TARGET=x86_64-native-linuxapp-gcc
 
-To run an application with this driver, the KNI and usiw modules must be loaded:
+If you are pulling this from a fresh git clone, first run:
+
+$ autoreconf -i
+
+Then this follows the normal autotools-style build:
+
+$ ./configure --sysconfdir /etc
+$ make
+$ sudo make install
+
+Note that sysconfdir must match that of your libibverbs installation, in
+order for the verbs library to find the urdma driver.
+
+The configure script will look for your kernel source directory in the
+typical location by default (/lib/modules/`uname -r`/source).  You can
+set the KERNELDIR environment variable to specify a different location;
+for example, if you are building against a different kernel version than
+what it installed locally.
+
+By default, this package is compiled with -march=native as this enables
+machine instructions that are required by DPDK.  You can adjust this by
+setting the MACHINE_CFLAGS environment variable.
+
+To run an application with this driver, the KNI and urdma modules must be loaded:
 
 $ sudo modprobe rte_kni
-$ sudo modprobe usiw device_count=2
+$ sudo modprobe urdma device_count=2
 
 The device count is the number of devices that should be accessible via DPDK.
 These verbs devices are pre-created so libibverbs will call our userspace

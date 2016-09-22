@@ -1,0 +1,8 @@
+*.cmd
+*.ko
+*.mod.h
+*.mod.c
+urdma_kabi.h
+Module.symvers
+modules.order
+.tmp_versions

@@ -38,6 +38,10 @@
  * SOFTWARE.
  */
 
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#endif
+
 #define _GNU_SOURCE
 
 #include <alloca.h>
@@ -994,9 +998,9 @@ main(int argc, char *argv[])
 
 	for (ibctx = *ib_devs; ibctx != NULL; ++ibctx) {
 		ret = ibv_query_device(ibctx, &ib_devattr);
-		if (!ret && ib_devattr.vendor_id == USIW_DEVICE_VENDOR_ID
+		if (!ret && ib_devattr.vendor_id == URDMA_DEVICE_VENDOR_ID
 				&& ib_devattr.vendor_part_id
-						== USIW_DEVICE_VENDOR_PART_ID) {
+						== URDMA_DEVICE_VENDOR_PART_ID) {
 			break;
 		}
 	}
