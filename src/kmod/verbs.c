@@ -1152,3 +1152,30 @@ int siw_post_srq_recv(struct ib_srq *ofa_srq, struct ib_recv_wr *wr,
 {
 	return -ENOSYS;
 }
+
+#ifdef HAVE_IB_GET_PORT_IMMUTABLE
+/*
+ * urdma_port_immutable()
+ *
+ * Set immutable port attributes.
+ *
+ * @ofa_dev:	OFA device structure
+ * @port_num:	port number
+ * @immutable:	structure containing immutable fields to fill in
+ */
+int urdma_port_immutable(struct ib_device *ibdev, u8 port_num,
+			struct ib_port_immutable *immutable)
+{
+	struct ib_port_attr attr;
+	int err;
+
+	err = siw_query_port(ibdev, port_num, &attr);
+	if (err)
+		return err;
+
+	immutable->pkey_tbl_len = attr.pkey_tbl_len;
+	immutable->gid_tbl_len = attr.gid_tbl_len;
+
+	return 0;
+}
+#endif

@@ -58,6 +58,9 @@
 /* Introduced in Linux commits a97e2d86a9b88 and 4cd7c9479aff3, which first
  * appeared in Linux 4.2-rc1. */
 #define HAVE_IB_PROCESS_MAD_SIZES 1
+/* Introduced in Linux commit 7738613e7cb41 and first appeared in
+ * Linux 4.2-rc1. */
+#define HAVE_IB_GET_PORT_IMMUTABLE 1
 #endif
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 5, 0)
