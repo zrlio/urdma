@@ -465,8 +465,10 @@ static int siw_netdev_event(struct notifier_block *nb, unsigned long event,
 		siw_port_event(sdev, 1, IB_EVENT_PORT_ERR);
 		/* FIXME: I assume this can race with something that needs
 		 * netdev */
-		dev_put(sdev->netdev);
-		sdev->netdev = NULL;
+		if (sdev->netdev) {
+			dev_put(sdev->netdev);
+			sdev->netdev = NULL;
+		}
 		break;
 
 	case NETDEV_CHANGEADDR:
