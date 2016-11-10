@@ -293,6 +293,9 @@ static struct siw_dev *siw_device_create(int list_index)
 	ofa_dev->dma_device = &usiw_generic_dma_device;
 	ofa_dev->query_device = siw_query_device;
 	ofa_dev->query_port = siw_query_port;
+#ifdef HAVE_IB_GET_PORT_IMMUTABLE
+	ofa_dev->get_port_immutable = urdma_port_immutable;
+#endif
 	ofa_dev->query_qp = siw_query_qp;
 	ofa_dev->modify_port = siw_modify_port;
 	ofa_dev->query_pkey = siw_query_pkey;

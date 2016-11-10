@@ -116,4 +116,9 @@ extern int siw_no_mad(struct ib_device *ofa_dev, int flags, u8 port,
 		      u16 *out_mad_pkey_index);
 #endif
 
+#ifdef HAVE_IB_GET_PORT_IMMUTABLE
+extern int urdma_port_immutable(struct ib_device *ibdev, u8 port_num,
+				struct ib_port_immutable *immutable);
+#endif
+
 #endif
