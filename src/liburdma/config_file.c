@@ -51,7 +51,6 @@
 #include <sys/prctl.h>
 
 #include "config_file.h"
-#include "interface.h"
 #include "util.h"
 
 static int
