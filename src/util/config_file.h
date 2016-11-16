@@ -40,20 +40,25 @@
 
 enum { ipv4_addr_len_max = 20 };
 
+struct json_object;
+
 struct usiw_port_config {
 	char ipv4_address[ipv4_addr_len_max];
 };
 
 struct usiw_config {
-	int eal_argc;
-	char **eal_argv;
-	int port_count;
-	struct usiw_port_config *port_config;
-	char **freelist;
+	struct json_object *root;
 };
 
 int
-parse_config(FILE *in, struct usiw_config *config);
+urdma__config_file_get_ports(struct usiw_config *config,
+			     struct usiw_port_config **port_config);
+
+int
+urdma__config_file_get_eal_args(struct usiw_config *config, char **argv);
+
+int
+urdma__config_file_open(struct usiw_config *config);
 
 void
-usiw_config_destroy(struct usiw_config *config);
+urdma__config_file_close(struct usiw_config *config);

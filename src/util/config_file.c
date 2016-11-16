@@ -48,18 +48,21 @@
 #include <json_object.h>
 #include <json_tokener.h>
 #include <stdio.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <sys/prctl.h>
 
 #include "config_file.h"
 #include "util.h"
 
-static int
-analyze_ports(struct json_object *root, struct usiw_config *config)
+int
+urdma__config_file_get_ports(struct usiw_config *config,
+			     struct usiw_port_config **port_config)
 {
 	struct json_object *ports, *port, *ipv4;
-	int i;
+	int port_count, i;
 
-	if (!json_object_object_get_ex(root, "ports", &ports)) {
+	if (!json_object_object_get_ex(config->root, "ports", &ports)) {
 		fprintf(stderr, "Configuration error: JSON root object has no \"ports\" field\n");
 		return -EINVAL;
 	}
@@ -69,12 +72,12 @@ analyze_ports(struct json_object *root, struct usiw_config *config)
 		return -EINVAL;
 	}
 
-	config->port_count = json_object_array_length(ports);
-	config->port_config = calloc(config->port_count, sizeof(*config->port_config));
-	if (!config->port_config) {
+	port_count = json_object_array_length(ports);
+	*port_config = calloc(port_count, sizeof(**port_config));
+	if (!(*port_config)) {
 		return -ENOMEM;
 	}
-	for (i = 0; i < config->port_count; i++) {
+	for (i = 0; i < port_count; i++) {
 		port = json_object_array_get_idx(ports, i);
 		if (!json_object_is_type(port, json_type_object)) {
 			fprintf(stderr, "Configuration error: port array element %d is not hash\n",
@@ -89,13 +92,13 @@ analyze_ports(struct json_object *root, struct usiw_config *config)
 			fprintf(stderr, "Configuration error: ipv4_address is not string\n");
 			return -EINVAL;
 		}
-		strncpy(config->port_config[i].ipv4_address,
+		strncpy((*port_config)[i].ipv4_address,
 				json_object_get_string(ipv4),
 				ipv4_addr_len_max);
 	}
 
-	return 0;
-} /* analyze_ports */
+	return port_count;
+} /* urdma__config_file_get_ports */
 
 static char *
 get_argv0(void)
@@ -109,34 +112,41 @@ get_argv0(void)
 	return strdup(name);
 } /* get_argv0 */
 
-static int
-analyze_eal_args(struct json_object *root, struct usiw_config *config)
-{
-	struct json_object *args;
-	int key_len, len, i, ret;
 
-	if (!json_object_object_get_ex(root, "eal_args", &args)) {
-		/* eal_args are optional; we accept defaults if this field is
-		 * not present */
-		config->eal_argc = 1;
-		config->eal_argv = calloc(2, sizeof(*config->eal_argv));
-		config->eal_argv[0] = get_argv0();
-		return config->eal_argv ? 0 : -ENOMEM;
+static int
+get_arg_count(struct usiw_config *config, struct json_object **args)
+{
+	if (!json_object_object_get_ex(config->root, "eal_args", args)) {
+		return 0;
 	}
 
-	if (!json_object_is_type(args, json_type_object)) {
+	if (!json_object_is_type(*args, json_type_object)) {
 		fprintf(stderr, "Configuration error: \"eal_args\" field is not a hash\n");
 		return -EINVAL;
 	}
 
-	len = json_object_object_length(args);
-	config->eal_argv = calloc(2 * (len + 1),
-			sizeof(*config->eal_argv));
-	if (!config->eal_argv) {
-		return -ENOMEM;
+	return json_object_object_length(*args) + 1;
+} /* get_arg_count */
+
+
+/** Parse the user-supplied EAL arguments in the configuration file into an
+ * argument array. If argv is NULL, return the expected value of argc. The
+ * user is expected to allocate argv with at least (argc + 1) elements, in order
+ * to hold the terminating argv[argc] = NULL element. The behavior is undefined
+ * if argv is not large enough. */
+int
+urdma__config_file_get_eal_args(struct usiw_config *config, char **argv)
+{
+	struct json_object *args;
+	int argc, key_len, len, i, ret;
+
+	argc = get_arg_count(config, &args);
+	if (!argv) {
+		return argc;
 	}
-	config->eal_argv[0] = get_argv0();
-	if (!config->eal_argv[0]) {
+
+	argv[0] = get_argv0();
+	if (!argv[0]) {
 		i = 0;
 		goto free_args;
 	}
@@ -147,7 +157,7 @@ analyze_eal_args(struct json_object *root, struct usiw_config *config)
 		switch (json_object_get_type(value)) {
 		case json_type_boolean:
 			if (json_object_get_boolean(value)) {
-				ret = asprintf(&config->eal_argv[i++], "-%s%s",
+				ret = asprintf(&argv[i++], "-%s%s",
 						key_len > 1 ? "-" : "",
 						key);
 				if (ret < 0) {
@@ -157,19 +167,19 @@ analyze_eal_args(struct json_object *root, struct usiw_config *config)
 			break;
 		case json_type_string:
 			if (key_len > 1) {
-				ret = asprintf(&config->eal_argv[i++], "--%s=%s",
+				ret = asprintf(&argv[i++], "--%s=%s",
 						key,
 						json_object_get_string(value));
 				if (ret < 0) {
 					goto free_args;
 				}
 			} else {
-				ret = asprintf(&config->eal_argv[i++], "-%s",
+				ret = asprintf(&argv[i++], "-%s",
 						key);
 				if (ret < 0) {
 					goto free_args;
 				}
-				ret = asprintf(&config->eal_argv[i++], "%s",
+				ret = asprintf(&argv[i++], "%s",
 						json_object_get_string(value));
 				if (ret < 0) {
 					goto free_args;
@@ -178,19 +188,19 @@ analyze_eal_args(struct json_object *root, struct usiw_config *config)
 			break;
 		case json_type_int:
 			if (key_len > 1) {
-				ret = asprintf(&config->eal_argv[i++], "--%s=%" PRId64,
+				ret = asprintf(&argv[i++], "--%s=%" PRId64,
 						key,
 						json_object_get_int64(value));
 				if (ret < 0) {
 					goto free_args;
 				}
 			} else {
-				ret = asprintf(&config->eal_argv[i++], "-%s",
+				ret = asprintf(&argv[i++], "-%s",
 						key);
 				if (ret < 0) {
 					goto free_args;
 				}
-				ret = asprintf(&config->eal_argv[i++], "%" PRId64,
+				ret = asprintf(&argv[i++], "%" PRId64,
 						json_object_get_int64(value));
 				if (ret < 0) {
 					goto free_args;
@@ -199,19 +209,19 @@ analyze_eal_args(struct json_object *root, struct usiw_config *config)
 			break;
 		case json_type_double:
 			if (key_len > 1) {
-				ret = asprintf(&config->eal_argv[i++], "--%s=%.12f",
+				ret = asprintf(&argv[i++], "--%s=%.12f",
 						key,
 						json_object_get_double(value));
 				if (ret < 0) {
 					goto free_args;
 				}
 			} else {
-				ret = asprintf(&config->eal_argv[i++], "-%s",
+				ret = asprintf(&argv[i++], "-%s",
 						key);
 				if (ret < 0) {
 					goto free_args;
 				}
-				ret = asprintf(&config->eal_argv[i++], "%.12f",
+				ret = asprintf(&argv[i++], "%.12f",
 						json_object_get_double(value));
 				if (ret < 0) {
 					goto free_args;
@@ -219,50 +229,21 @@ analyze_eal_args(struct json_object *root, struct usiw_config *config)
 			}
 			break;
 		default:
-			config->eal_argc = i;
 			errno = EINVAL;
 			goto free_args;
 		}
 	}
-	config->eal_argc = i;
-	config->eal_argv[i] = NULL;
+	argv[i] = NULL;
 
-	config->freelist = malloc(2 * (len + 1) * sizeof(*config->freelist));
-	if (config->freelist) {
-		memcpy(config->freelist, config->eal_argv,
-				2 * (len + 1) * sizeof(*config->freelist));
-	}
-
-	return 0;
+	return i;
 
 free_args:
 	for (len = i, i = 0; i < len; ++i) {
-		free(config->eal_argv[i]);
+		free(argv[i]);
 	}
-	free(config->eal_argv);
 	return -errno;
-} /* analyze_eal_args */
+} /* urdma__config_file_get_eal_args */
 
-static int
-analyze_root(struct json_object *root, struct usiw_config *config)
-{
-	int ret;
-
-	if (!json_object_is_type(root, json_type_object)) {
-		fprintf(stderr, "Configuration error: JSON root object is not hash\n");
-		return -EINVAL;
-	}
-
-	if ((ret = analyze_ports(root, config)) < 0) {
-		return ret;
-	}
-
-	if ((ret = analyze_eal_args(root, config)) < 0) {
-		return ret;
-	}
-
-	return 0;
-} /* analyze_root */
 
 /** Parses the given JSON configuration file for the IPv4 addresses to assign
  * to each interface.  An example configuration file looks like:
@@ -274,7 +255,7 @@ analyze_root(struct json_object *root, struct usiw_config *config)
  * ports.  On output, it is the number of actually configured ports, which will
  * always be less than or equal to the value given as input.
  */
-int
+static int
 parse_config(FILE *in, struct usiw_config *config)
 {
 	static const size_t buf_size = 1024;
@@ -324,8 +305,14 @@ parse_config(FILE *in, struct usiw_config *config)
 		ret = -EINVAL;
 		goto free_object;
 	}
+	if (!json_object_is_type(obj, json_type_object)) {
+		fprintf(stderr, "Configuration error: JSON root object is not hash\n");
+		return -EINVAL;
+	}
+	config->root = obj;
 
-	ret = analyze_root(obj, config);
+	ret = 0;
+	goto free_tokener;
 
 free_object:
 	json_object_put(obj);
@@ -334,15 +321,31 @@ free_tokener:
 	return ret;
 } /* parse_config */
 
-void
-usiw_config_destroy(struct usiw_config *config)
+int
+urdma__config_file_open(struct usiw_config *config)
 {
-	int i;
+	static const char conf_file_name[] = urdma_confdir "/" PACKAGE_NAME ".json";
+	FILE *in;
+	int fd;
+	int ret;
 
-	for (i = 0; i < config->eal_argc; i++) {
-		free(config->freelist[i]);
+	fd = open(conf_file_name, O_RDONLY|O_CLOEXEC);
+	if (fd < 0) {
+		return -errno;
 	}
-	free(config->eal_argv);
-	free(config->freelist);
-	free(config->port_config);
+	in = fdopen(fd, "r");
+	if (!in) {
+		close(fd);
+		return -errno;
+	}
+
+	ret = parse_config(in, config);
+	fclose(in);
+	return ret;
+} /* urdma__config_file_open */
+
+void
+urdma__config_file_close(struct usiw_config *config)
+{
+	json_object_put(config->root);
 } /* usiw_config_free */

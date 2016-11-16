@@ -292,28 +292,81 @@ usiw_port_init(struct usiw_port *iface)
 
 
 static void
-do_init_driver(void)
+free_arg_list(int argc, char **argv)
+{
+	for (int i = 0; i < argc; ++i) {
+		free(argv[i]);
+	}
+	free(argv);
+} /* free_arg_list */
+
+
+static bool
+do_config(int *eal_argc, char ***eal_argv, int *port_count,
+					struct usiw_port_config **port_config)
 {
 	struct usiw_config config;
-	FILE *conf_file;
+	bool result = false;
+	int ret;
+
+	ret = urdma__config_file_open(&config);
+	if (ret < 0) {
+		fprintf(stderr, "Could not read config file: %s\n",
+				strerror(errno));
+		goto out;
+	}
+
+	*port_count = urdma__config_file_get_ports(&config, port_config);
+	if (!(*port_count)) {
+		goto close_config;
+	}
+
+	/* Need to allocate argc + 2 elements for EAL args
+	 * argc returned by urdma__config_file_get_eal_argc does not include
+	 * process name
+	 *
+	 * argv array must contain:
+	 * [0] "<procname>"
+	 * [1..argc-1] "<argv>"
+	 * [argc] NULL
+	 */
+	*eal_argc = urdma__config_file_get_eal_args(&config, NULL);
+	*eal_argv = calloc(*eal_argc + 2, sizeof(**eal_argv));
+	if (!(*eal_argv)) {
+		goto free_ports;
+	}
+
+	if (urdma__config_file_get_eal_args(&config, *eal_argv) < 0) {
+		fprintf(stderr, "Could not parse EAL arguments from config file: %s\n",
+				strerror(errno));
+		goto free_eal_args;
+	}
+	result = true;
+	goto close_config;
+
+free_eal_args:
+	free_arg_list(*eal_argc, *eal_argv);
+free_ports:
+	free(*port_config);
+close_config:
+	urdma__config_file_close(&config);
+out:
+	return result;
+} /* do_config */
+
+
+static void
+do_init_driver(void)
+{
+	struct usiw_port_config *port_config;
+	char **eal_argv;
+	int eal_argc;
 	int portid, port_count;
 	int retval;
 
-	conf_file = fopen(urdma_confdir "/urdma.json", "r");
-	if (!conf_file) {
-		fprintf(stderr, "Could not read config file %s: %s\n",
-				urdma_confdir "/urdma.json",
-				strerror(errno));
+	if (!do_config(&eal_argc, &eal_argv, &port_count, &port_config)) {
 		return;
 	}
-	retval = parse_config(conf_file, &config);
-	if (retval < 0) {
-		fprintf(stderr, "Could not parse config file %s: %s\n",
-				urdma_confdir "/urdma.json",
-				strerror(errno));
-		return;
-	}
-	fclose(conf_file);
 
 	/* rte_eal_init does nothing and returns -1 if it was already called
 	 * (although this behavior is not documented).  rte_eal_init also
@@ -323,10 +376,10 @@ do_init_driver(void)
 	 * EAL configuration by not calling rte_eal_init() before calling into
 	 * a verbs function, allowing us to work with unmodified verbs
 	 * applications. */
-	rte_eal_init(config.eal_argc, config.eal_argv);
+	rte_eal_init(eal_argc, eal_argv);
+	free_arg_list(eal_argc, eal_argv);
 
-	port_count = RTE_MIN(rte_eth_dev_count(), config.port_count);
-	if (port_count == 0) {
+	if (rte_eth_dev_count() < port_count) {
 		errno = ENODEV;
 		goto err;
 	}
@@ -369,7 +422,7 @@ do_init_driver(void)
 	}
 	for (portid = 0; portid < driver->port_count; portid++) {
 		retval = usiw_set_ipv4_addr(driver, &driver->ports[portid],
-				&config.port_config[portid]);
+				&port_config[portid]);
 		if (retval < 0) {
 			RTE_LOG(DEBUG, USER1, "Could not set port %u IPv4 address: %s\n",
 					portid, strerror(-retval));
@@ -383,7 +436,7 @@ do_init_driver(void)
 free_driver:
 	free(driver);
 err:
-	usiw_config_destroy(&config);
+	free(port_config);
 	driver = NULL;
 } /* do_init_driver */
 
