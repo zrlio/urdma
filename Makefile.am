@@ -52,8 +52,6 @@ include_HEADERS = include/urdma_kabi.h \
 
 lib_LTLIBRARIES = src/liburdma/liburdma.la
 src_liburdma_liburdma_la_SOURCES = \
-	src/liburdma/config_file.c \
-	src/liburdma/config_file.h \
 	src/liburdma/driver.c \
 	src/liburdma/interface.c \
 	src/liburdma/interface.h \
@@ -61,6 +59,8 @@ src_liburdma_liburdma_la_SOURCES = \
 	src/liburdma/kni.h \
 	src/liburdma/verbs.c \
 	src/liburdma/verbs.h \
+	src/util/config_file.c \
+	src/util/config_file.h \
 	src/util/list.h \
 	src/util/util.c \
 	src/util/util.h
