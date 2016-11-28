@@ -159,7 +159,7 @@ usiw_set_ipv4_addr(struct usiw_driver *driver, struct usiw_port *port,
 		struct usiw_port_config *config)
 {
 	struct rtnl_addr *addr;
-	struct rtnl_link *link, *link_changes;
+	struct rtnl_link *link;
 	struct nl_cache *link_cache;
 	struct nl_sock *sock;
 	int ifindex, ret;
@@ -187,31 +187,13 @@ usiw_set_ipv4_addr(struct usiw_driver *driver, struct usiw_port *port,
 		ret = nlerr_to_syserr(ret);
 	}
 
-	link_changes = rtnl_link_alloc();
-	if (!link_changes) {
-		ret = -ENOMEM;
-		goto unref_link;
-	}
-	rtnl_link_set_flags(link_changes, IFF_UP);
-	ret = rtnl_link_change(sock, link, link_changes, 0);
-	if (ret != 0) {
-		rtnl_link_put(link_changes);
-		ret = nlerr_to_syserr(ret);
-		goto unref_link;
-	}
-	rtnl_link_put(link_changes);
-
-	link_changes = rtnl_link_alloc();
-	if (!link_changes) {
-		ret = -ENOMEM;
-		goto unref_link;
-	}
-	port_set_mac_addr(port->portid, link_changes);
-	ret = rtnl_link_change(sock, link, link_changes, 0);
+	port_set_mac_addr(port->portid, link);
+	rtnl_link_set_flags(link, IFF_UP);
+	ret = rtnl_link_change(sock, link, link, 0);
 	if (ret != 0) {
 		ret = nlerr_to_syserr(ret);
+		goto unref_link;
 	}
-	rtnl_link_put(link_changes);
 
 unref_link:
 	rtnl_link_put(link);

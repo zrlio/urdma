@@ -309,7 +309,7 @@ flush_tx_queue(struct usiw_qp *qp)
 
 	begin = qp->txq;
 	do {
-		ret = rte_eth_tx_burst(qp->port->portid, qp->tx_queue,
+		ret = rte_eth_tx_burst(qp->dev->portid, qp->shm_qp->tx_queue,
 			begin, qp->txq_end - begin);
 		if (ret > 0) {
 			RTE_LOG(DEBUG, USER1, "Transmitted %d packets\n", ret);
@@ -329,7 +329,7 @@ enqueue_ether_frame(struct rte_mbuf *sendmsg, unsigned int ether_type,
 								sizeof(*eth));
 
 	ether_addr_copy(dst_addr, &eth->d_addr);
-	rte_eth_macaddr_get(qp->port->portid, &eth->s_addr);
+	rte_eth_macaddr_get(qp->dev->portid, &eth->s_addr);
 	eth->ether_type = rte_cpu_to_be_16(ether_type);
 	sendmsg->l2_len = sizeof(*eth);
 #ifdef DEBUG_PACKET_HEADERS
@@ -412,19 +412,21 @@ prepend_udp_header(struct rte_mbuf *sendmsg, unsigned int src_port,
  */
 static void
 send_udp_dgram(struct usiw_qp *qp, struct rte_mbuf *sendmsg,
-		struct urdma_ah *dest, uint32_t raw_cksum)
+		uint32_t raw_cksum)
 {
 	struct udp_hdr *udp;
 	struct ipv4_hdr *ip;
 
-	if (qp->port->flags & port_checksum_offload) {
+	if (qp->dev->flags & port_checksum_offload) {
 		sendmsg->ol_flags
 			|= PKT_TX_UDP_CKSUM|PKT_TX_IPV4|PKT_TX_IP_CKSUM;
 	}
 
-	udp = prepend_udp_header(sendmsg, qp->udp_port, dest->udp_port);
+	udp = prepend_udp_header(sendmsg, qp->shm_qp->local_udp_port,
+			qp->shm_qp->remote_udp_port);
 	ip = prepend_ipv4_header(sendmsg, IP_HDR_PROTO_UDP,
-			qp->port->ipv4_addr, dest->ipv4_addr);
+			qp->dev->ipv4_addr,
+			qp->shm_qp->remote_ipv4_addr);
 
 	udp->dgram_cksum = rte_ipv4_phdr_cksum(ip, sendmsg->ol_flags);
 	if (!(sendmsg->ol_flags & PKT_TX_UDP_CKSUM)) {
@@ -438,7 +440,8 @@ send_udp_dgram(struct usiw_qp *qp, struct rte_mbuf *sendmsg,
 					: ~raw_cksum;
 	}
 
-	enqueue_ether_frame(sendmsg, ETHER_TYPE_IPv4, qp, &dest->ether_addr);
+	enqueue_ether_frame(sendmsg, ETHER_TYPE_IPv4, qp,
+			&qp->shm_qp->remote_ether_addr);
 } /* send_udp_dgram */
 
 static int
@@ -457,7 +460,7 @@ resend_ddp_segment(struct usiw_qp *qp, struct rte_mbuf *sendmsg,
 		return -EIO;
 	}
 
-	hdr = rte_pktmbuf_alloc(qp->port->tx_hdr_mempool);
+	hdr = rte_pktmbuf_alloc(qp->dev->tx_hdr_mempool);
 	if (!hdr) {
 		return -ENOMEM;
 	}
@@ -473,11 +476,11 @@ resend_ddp_segment(struct usiw_qp *qp, struct rte_mbuf *sendmsg,
 	}
 
 	rte_pktmbuf_chain(hdr, sendmsg);
-	if (!qp->port->flags & port_checksum_offload) {
+	if (!qp->dev->flags & port_checksum_offload) {
 		payload_raw_cksum = info->ddp_raw_cksum
 			+ rte_raw_cksum(trp, sizeof(*trp));
 	}
-	send_udp_dgram(qp, hdr, &ep->ah, payload_raw_cksum);
+	send_udp_dgram(qp, hdr, payload_raw_cksum);
 
 	return 0;
 } /* resend_ddp_segment */
@@ -502,7 +505,7 @@ send_ddp_segment(struct usiw_qp *qp, struct rte_mbuf *sendmsg,
 	pending->wqe = wqe;
 	pending->transmit_count = 0;
 	pending->ddp_length = payload_length;
-	if (!qp->port->flags & port_checksum_offload) {
+	if (!qp->dev->flags & port_checksum_offload) {
 		pending->ddp_raw_cksum = rte_raw_cksum(
 				rte_pktmbuf_mtod(sendmsg, void *),
 				rte_pktmbuf_data_len(sendmsg));
@@ -525,7 +528,7 @@ send_trp_sack(struct usiw_qp *qp)
 	struct trp_hdr *trp;
 
 	assert(ep->trp_flags & trp_recv_missing);
-	sendmsg = rte_pktmbuf_alloc(qp->port->tx_hdr_mempool);
+	sendmsg = rte_pktmbuf_alloc(qp->dev->tx_hdr_mempool);
 	trp = (struct trp_hdr *)rte_pktmbuf_append(sendmsg, sizeof(*trp));
 	trp->psn = rte_cpu_to_be_32(ep->recv_sack_psn.min);
 	trp->ack_psn = rte_cpu_to_be_32(ep->recv_sack_psn.max);
@@ -533,8 +536,8 @@ send_trp_sack(struct usiw_qp *qp)
 
 	ep->trp_flags &= ~trp_ack_update;
 
-	send_udp_dgram(qp, sendmsg, &ep->ah,
-			(qp->port->flags & port_checksum_offload)
+	send_udp_dgram(qp, sendmsg,
+			(qp->dev->flags & port_checksum_offload)
 					? 0 : rte_raw_cksum(trp, sizeof(*trp)));
 } /* send_trp_sack */
 
@@ -546,7 +549,7 @@ send_trp_fin(struct usiw_qp *qp)
 	struct rte_mbuf *sendmsg;
 	struct trp_hdr *trp;
 
-	sendmsg = rte_pktmbuf_alloc(qp->port->tx_hdr_mempool);
+	sendmsg = rte_pktmbuf_alloc(qp->dev->tx_hdr_mempool);
 	trp = (struct trp_hdr *)rte_pktmbuf_append(sendmsg, sizeof(*trp));
 	trp->psn = rte_cpu_to_be_32(ep->send_next_psn);
 	trp->ack_psn = rte_cpu_to_be_32(ep->recv_ack_psn);
@@ -556,8 +559,8 @@ send_trp_fin(struct usiw_qp *qp)
 		ep->trp_flags &= ~trp_ack_update;
 	}
 
-	send_udp_dgram(qp, sendmsg, &ep->ah,
-			(qp->port->flags & port_checksum_offload)
+	send_udp_dgram(qp, sendmsg,
+			(qp->dev->flags & port_checksum_offload)
 					? 0 : rte_raw_cksum(trp, sizeof(*trp)));
 
 	/* Force flush of TX queue since we are shutting down, but we still
@@ -574,15 +577,15 @@ send_trp_ack(struct usiw_qp *qp)
 	struct trp_hdr *trp;
 
 	assert(!(ep->trp_flags & trp_recv_missing));
-	sendmsg = rte_pktmbuf_alloc(qp->port->tx_hdr_mempool);
+	sendmsg = rte_pktmbuf_alloc(qp->dev->tx_hdr_mempool);
 	trp = (struct trp_hdr *)rte_pktmbuf_append(sendmsg, sizeof(*trp));
 	trp->psn = rte_cpu_to_be_32(ep->send_next_psn);
 	trp->ack_psn = rte_cpu_to_be_32(ep->recv_ack_psn);
 	trp->opcode = rte_cpu_to_be_16(0);
 	ep->trp_flags &= ~trp_ack_update;
 
-	send_udp_dgram(qp, sendmsg, &ep->ah,
-			(qp->port->flags & port_checksum_offload)
+	send_udp_dgram(qp, sendmsg,
+			(qp->dev->flags & port_checksum_offload)
 					? 0 : rte_raw_cksum(trp, sizeof(*trp)));
 } /* send_trp_ack */
 
@@ -737,7 +740,6 @@ post_recv_cqe(struct usiw_qp *qp, struct usiw_recv_wqe *wqe,
 	cqe->opcode = IBV_WC_RECV;
 	cqe->byte_len = wqe->input_size;
 	cqe->qp_num = qp->ib_qp.qp_num;
-	memcpy(&cqe->ah, &wqe->remote_ep->ah, sizeof(cqe->ah));
 
 	qp_free_recv_wqe(qp, wqe);
 	finish_post_cqe(cq, cqe);
@@ -785,7 +787,6 @@ post_send_cqe(struct usiw_qp *qp, struct usiw_send_wqe *wqe,
 	cqe->status = status;
 	cqe->opcode = get_ibv_send_wc_opcode(wqe->opcode);
 	cqe->qp_num = qp->ib_qp.qp_num;
-	memcpy(&cqe->ah, &wqe->remote_ep->ah, sizeof(cqe->ah));
 
 	qp_free_send_wqe(qp, wqe, true);
 	finish_post_cqe(cq, cqe);
@@ -860,13 +861,13 @@ do_rdmap_send(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 	size_t payload_length;
 	uint16_t mtu;
 
-	rte_eth_dev_get_mtu(qp->port->portid, &mtu);
+	rte_eth_dev_get_mtu(qp->dev->portid, &mtu);
 	mtu = RDMAP_MAX_PAYLOAD(mtu, struct rdmap_untagged_packet);
 
 	while (wqe->bytes_sent < wqe->total_length
 			&& serial_less_32(wqe->remote_ep->send_next_psn,
 					wqe->remote_ep->send_max_psn)) {
-		sendmsg = rte_pktmbuf_alloc(qp->port->tx_ddp_mempool);
+		sendmsg = rte_pktmbuf_alloc(qp->dev->tx_ddp_mempool);
 
 		payload_length = RTE_MIN(mtu, wqe->total_length
 				- wqe->bytes_sent);
@@ -917,13 +918,13 @@ do_rdmap_write(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 	size_t payload_length;
 	uint16_t mtu;
 
-	rte_eth_dev_get_mtu(qp->port->portid, &mtu);
+	rte_eth_dev_get_mtu(qp->dev->portid, &mtu);
 	mtu = RDMAP_MAX_PAYLOAD(mtu, struct rdmap_tagged_packet);
 
 	while (wqe->bytes_sent < wqe->total_length
 			&& serial_less_32(wqe->remote_ep->send_next_psn,
 					wqe->remote_ep->send_max_psn)) {
-		sendmsg = rte_pktmbuf_alloc(qp->port->tx_ddp_mempool);
+		sendmsg = rte_pktmbuf_alloc(qp->dev->tx_ddp_mempool);
 
 		payload_length = RTE_MIN(mtu, wqe->total_length
 				- wqe->bytes_sent);
@@ -977,7 +978,7 @@ do_rdmap_read_request(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 		return;
 	}
 
-	if (qp->ird_active >= qp->ird_max) {
+	if (qp->ird_active >= qp->shm_qp->ird_max) {
 		/* Cannot issue more than ird_max simultaneous RDMA READ
 		 * Requests. */
 		return;
@@ -996,14 +997,14 @@ do_rdmap_read_request(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 			rkey);
 	if (!temp_mr) {
 		/* FIXME: issue error completion */
-		rte_atomic16_set(&qp->conn_state, usiw_qp_error);
+		rte_atomic16_set(&qp->shm_qp->conn_state, usiw_qp_error);
 		return;
 	}
 	qp->ird_active++;
 
-	rte_eth_dev_get_mtu(qp->port->portid, &mtu);
+	rte_eth_dev_get_mtu(qp->dev->portid, &mtu);
 
-	sendmsg = rte_pktmbuf_alloc(qp->port->tx_ddp_mempool);
+	sendmsg = rte_pktmbuf_alloc(qp->dev->tx_ddp_mempool);
 
 	packet_length = sizeof(*new_rdmap);
 	new_rdmap = (struct rdmap_readreq_packet *)rte_pktmbuf_append(
@@ -1049,7 +1050,7 @@ static void
 do_rdmap_terminate(struct usiw_qp *qp, struct packet_context *orig,
 		enum rdmap_errno errcode)
 {
-	struct rte_mbuf *sendmsg = rte_pktmbuf_alloc(qp->port->tx_ddp_mempool);
+	struct rte_mbuf *sendmsg = rte_pktmbuf_alloc(qp->dev->tx_ddp_mempool);
 	struct rdmap_terminate_packet *new_rdmap;
 	struct rdmap_terminate_payload *payload;
 
@@ -1167,8 +1168,8 @@ process_send(struct usiw_qp *qp, struct packet_context *orig)
 			do_rdmap_terminate(qp, orig,
 					ddp_error_untagged_no_buffer);
 			rte_exit(EXIT_FAILURE, "rte_ring_dequeue rq0.ring port %u queue %u: %s\n",
-					qp->port->portid,
-					qp->rx_queue, rte_strerror(-ret));
+					qp->dev->portid,
+					qp->shm_qp->rx_queue, rte_strerror(-ret));
 		}
 
 		wqe->remote_ep = ee;
@@ -1219,7 +1220,7 @@ respond_rdma_read(struct usiw_qp *qp)
 	uint16_t mtu;
 	int count;
 
-	rte_eth_dev_get_mtu(qp->port->portid, &mtu);
+	rte_eth_dev_get_mtu(qp->dev->portid, &mtu);
 	mtu = RDMAP_MAX_PAYLOAD(mtu, struct rdmap_tagged_packet);
 
 	count = 0;
@@ -1227,7 +1228,7 @@ respond_rdma_read(struct usiw_qp *qp)
 		while (readresp->msg_size > 0
 				&& serial_less_32(readresp->sink_ep->send_next_psn,
 					readresp->sink_ep->send_max_psn)) {
-			sendmsg = rte_pktmbuf_alloc(qp->port->tx_ddp_mempool);
+			sendmsg = rte_pktmbuf_alloc(qp->dev->tx_ddp_mempool);
 
 			payload_length = RTE_MIN(mtu, readresp->msg_size);
 			dgram_length = RDMAP_TAGGED_ALLOC_SIZE(payload_length);
@@ -1308,7 +1309,7 @@ process_rdma_read_request(struct usiw_qp *qp, struct packet_context *orig)
 	readresp = qp->readresp_empty.tqh_first;
 	if (!readresp) {
 		RTE_LOG(DEBUG, USER1, "RDMA READ failure: exceeded ord_max %" PRIu8 "\n",
-				qp->ord_max);
+				qp->shm_qp->ord_max);
 		do_rdmap_terminate(qp, orig,
 				rdmap_error_remote_stream_catastrophic);
 		return;
@@ -1378,7 +1379,7 @@ qp_shutdown(struct usiw_qp *qp)
 
 	send_trp_fin(qp);
 
-	rte_atomic16_set(&qp->conn_state, usiw_qp_error);
+	rte_atomic16_set(&qp->shm_qp->conn_state, usiw_qp_error);
 	memset(&qp_attr, 0, sizeof(qp_attr));
 	qp_attr.qp_state = IBV_QPS_ERR;
 	ibv_cmd_modify_qp(&qp->ib_qp, &qp_attr, IBV_QP_STATE,
@@ -1386,14 +1387,6 @@ qp_shutdown(struct usiw_qp *qp)
 
 	sq_flush(qp);
 	rq_flush(qp);
-
-	ret = rte_eth_dev_filter_ctrl(qp->port->portid,
-			RTE_ETH_FILTER_FDIR, RTE_ETH_FILTER_DELETE,
-			&qp->fdir_filter);
-	if (ret) {
-		RTE_LOG(DEBUG, USER1, "Could not delete fdir filter for qp %" PRIu32 ": %s\n",
-				qp->ib_qp.qp_num, rte_strerror(ret));
-	}
 } /* qp_shutdown */
 
 
@@ -1595,7 +1588,7 @@ sweep_unacked_packets(struct usiw_qp *qp, uint64_t now)
 				post_send_cqe(qp, pending->wqe, IBV_WC_RETRY_EXC_ERR);
 				rte_spinlock_unlock(&qp->sq.lock);
 			}
-			rte_atomic16_set(&qp->conn_state, usiw_qp_error);
+			rte_atomic16_set(&qp->shm_qp->conn_state, usiw_qp_error);
 			if (p == ep->tx_head) {
 				*ep->tx_head = NULL;
 				if (++ep->tx_head == end) {
@@ -1666,16 +1659,6 @@ ddp_place_tagged_data(struct usiw_qp *qp, struct packet_context *orig)
 } /* ddp_place_tagged_data */
 
 
-struct ee_state *
-usiw_get_ee_context(struct usiw_qp *qp, struct urdma_ah *ah)
-{
-	struct ee_state *ee = &qp->remote_ep;
-	return (is_same_ether_addr(&ah->ether_addr, &ee->ah.ether_addr)
-			&& ah->ipv4_addr == ee->ah.ipv4_addr
-			&& ah->udp_port == ee->ah.udp_port) ? ee : NULL;
-} /* usiw_get_ee_context */
-
-
 static void
 process_data_packet(struct usiw_qp *qp, struct rte_mbuf *mbuf)
 {
@@ -1684,7 +1667,6 @@ process_data_packet(struct usiw_qp *qp, struct rte_mbuf *mbuf)
 	struct ipv4_hdr *ipv4_hdr;
 	struct udp_hdr *udp_hdr;
 	struct trp_hdr *trp_hdr;
-	struct urdma_ah ah;
 	uint16_t trp_opcode;
 
 #ifdef DEBUG_PACKET_HEADERS
@@ -1716,18 +1698,15 @@ process_data_packet(struct usiw_qp *qp, struct rte_mbuf *mbuf)
 	}
 
 	eth_hdr = rte_pktmbuf_mtod(mbuf, struct ether_hdr *);
-	ether_addr_copy(&eth_hdr->s_addr, &ah.ether_addr);
 
 	ipv4_hdr = (struct ipv4_hdr *)rte_pktmbuf_adj(mbuf, sizeof(*eth_hdr));
 	assert(ipv4_hdr->next_proto_id == IP_HDR_PROTO_UDP);
-	assert(ipv4_hdr->dst_addr == qp->port->ipv4_addr);
-	ah.ipv4_addr = ipv4_hdr->src_addr;
+	assert(ipv4_hdr->dst_addr == qp->dev->ipv4_addr);
 
 	udp_hdr = (struct udp_hdr *)rte_pktmbuf_adj(mbuf, sizeof(*ipv4_hdr));
-	assert(udp_hdr->dst_port == qp->udp_port);
-	ah.udp_port = udp_hdr->src_port;
+	assert(udp_hdr->dst_port == qp->shm_qp->local_udp_port);
 
-	ctx.src_ep = usiw_get_ee_context(qp, &ah);
+	ctx.src_ep = &qp->remote_ep;
 	if (!ctx.src_ep) {
 		/* Drop the packet; do not send TERMINATE */
 		return;
@@ -1906,11 +1885,12 @@ static int
 process_receive_queue(struct usiw_qp *qp, void *prefetch_addr, uint64_t *now)
 {
 	struct rte_mbuf *rxmbuf[RX_BURST_SIZE];
-	uint16_t rx_count, pkt;
+	uint16_t rx_count, pkt, i;
 
 	/* Get burst of RX packets */
-	if (qp->port->flags & port_fdir) {
-		rx_count = rte_eth_rx_burst(qp->port->portid, qp->rx_queue,
+	if (qp->dev->flags & port_fdir) {
+		rx_count = rte_eth_rx_burst(qp->dev->portid,
+				qp->shm_qp->rx_queue,
 				rxmbuf, RX_BURST_SIZE);
 	} else if (qp->remote_ep.rx_queue) {
 		rx_count = rte_ring_dequeue_burst(qp->remote_ep.rx_queue,
@@ -2007,77 +1987,22 @@ progress_qp(struct usiw_qp *qp)
 } /* progress_qp */
 
 
-/* Sets up the interface to use the given receive queue for messages to its UDP
- * port. */
-static int
-setup_filter_fdir(struct usiw_qp *qp)
-{
-	struct rte_eth_fdir_filter *fdirf;
-	struct usiw_port *port;
-	int retval;
-
-	port = qp->port;
-	fdirf = &qp->fdir_filter;
-	memset(fdirf, 0, sizeof(*fdirf));
-	fdirf->input.flow_type = RTE_ETH_FLOW_NONFRAG_IPV4_UDP;
-	fdirf->input.flow.udp4_flow.ip.dst_ip = port->ipv4_addr;
-	fdirf->action.behavior = RTE_ETH_FDIR_ACCEPT;
-	fdirf->action.report_status = RTE_ETH_FDIR_NO_REPORT_STATUS;
-	fdirf->soft_id = qp->rx_queue;
-	fdirf->action.rx_queue = qp->rx_queue;
-	fdirf->input.flow.udp4_flow.dst_port = qp->udp_port;
-	RTE_LOG(DEBUG, USER1, "fdir: assign rx queue %d: IP address %" PRIx32 ", UDP port %" PRIu16 "\n",
-				fdirf->action.rx_queue,
-				rte_be_to_cpu_32(port->ipv4_addr),
-				rte_be_to_cpu_16(qp->udp_port));
-	retval = rte_eth_dev_filter_ctrl(port->portid, RTE_ETH_FILTER_FDIR,
-			RTE_ETH_FILTER_ADD, fdirf);
-	if (retval != 0) {
-		RTE_LOG(CRIT, USER1, "Could not add fdir UDP filter: %s\n",
-				strerror(-retval));
-	}
-	return retval;
-} /* setup_filter_fdir */
-
-
-static int
-set_peer_addr(struct usiw_qp *qp, const uint8_t *ether_addr,
-		uint32_t addr, uint16_t port)
-{
-	struct ee_state *ee = &qp->remote_ep;
-
-	/* FIXME: Get this from the peer */
-	ee->send_max_psn = ee->tx_pending_size = qp->port->rx_desc_count / 2;
-	ee->tx_pending = calloc(ee->send_max_psn, sizeof(*ee->tx_pending));
-	if (!ee->tx_pending) {
-		free(ee);
-		return -ENOMEM;
-	}
-	memcpy(&ee->ah.ether_addr, ether_addr, ETHER_ADDR_LEN);
-	ee->ah.ipv4_addr = addr;
-	ee->ah.udp_port = port;
-	ee->expected_recv_msn = 1;
-	ee->expected_read_msn = 1;
-	ee->expected_ack_msn = 1;
-	ee->next_send_msn = 1;
-	ee->next_read_msn = 1;
-	ee->next_ack_msn = 1;
-
-	ee->tx_head = ee->tx_pending;
-
-	return 0;
-} /* set_peer_addr */
-
-
 void
 usiw_do_destroy_qp(struct usiw_qp *qp)
 {
-	sem_destroy(&qp->conn_event_sem);
+	struct urdmad_sock_qp_msg msg;
+
 	usiw_recv_wqe_queue_destroy(&qp->rq0);
 	usiw_send_wqe_queue_destroy(&qp->sq);
 	free(qp->readresp_store);
 
-	rte_ring_enqueue(qp->port->avail_qp, qp);
+	memset(&msg, 0, sizeof(msg));
+	msg.hdr.opcode = rte_cpu_to_be_32(urdma_sock_destroy_qp_req);
+	msg.hdr.dev_id = rte_cpu_to_be_16(qp->dev->portid);
+	msg.hdr.qp_id = rte_cpu_to_be_16(qp->shm_qp->qp_id);
+	msg.ptr = rte_cpu_to_be_64((uintptr_t)qp->shm_qp);
+	send(qp->dev->urdmad_fd, &msg, sizeof(msg), 0);
+	//free(qp);
 } /* usiw_do_destroy_qp */
 
 
@@ -2087,9 +2012,6 @@ lookup_qp_id(struct usiw_context *ctx, uint32_t qp_id)
 	struct usiw_qp *qp;
 
 	rte_spinlock_lock(&ctx->qp_lock);
-	if (ctx->qp) {
-		fprintf(stderr, "%p\n", &ctx->qp->hh);
-	}
 	HASH_FIND(hh, ctx->qp, &qp_id, sizeof(qp_id), qp);
 	rte_spinlock_unlock(&ctx->qp_lock);
 	if (qp) {
@@ -2101,156 +2023,31 @@ lookup_qp_id(struct usiw_context *ctx, uint32_t qp_id)
 
 
 static void
-poll_conn_state(struct usiw_context *ctx, int timeout)
+start_qp(struct usiw_qp *qp)
 {
-	struct urdma_qp_connected_event event;
-	struct urdma_qp_rtr_event rtr_event;
-	struct usiw_qp *qp;
-	struct pollfd pollfd;
 	unsigned int x;
 	ssize_t ret;
 
-	if (timeout) {
-		pollfd.fd = ctx->event_fd;
-		pollfd.events = POLLIN;
-		ret = poll(&pollfd, 1, timeout);
-		if (ret == 0) {
-			return;
-		} else if (ret < 0) {
-			static bool warned = false;
-			if (!warned) {
-				RTE_LOG(ERR, USER1, "Error polling event file for reading: %s\n",
-						strerror(errno));
-				warned = true;
-			}
-			rte_atomic16_set(&qp->conn_state, usiw_qp_error);
-			return;
-		}
-	}
-
-	ret = read(ctx->event_fd, &event, sizeof(event));
-	if (ret < 0 && errno == EAGAIN) {
-		return;
-	}
-	if (ret < 0 || (size_t)ret < sizeof(event)) {
-		static bool warned = false;
-		if (!warned) {
-			if (ret < 0) {
-				RTE_LOG(ERR, USER1, "Error reading event file: %s\n",
-						strerror(errno));
-			} else {
-				RTE_LOG(ERR, USER1, "Read only %zd/%zu bytes\n",
-						ret, sizeof(event));
-			}
-			warned = true;
-		}
-		return;
-	}
-
-	qp = lookup_qp_id(ctx, event.qp_id);
-	if (!qp) {
-		RTE_LOG(ERR, USER1, "Got connection event for unknown queue pair %" PRIu32 "\n",
-				event.qp_id);
-		return;
-	}
-	rte_spinlock_lock(&qp->conn_event_lock);
-	assert(event.src_port != 0);
-	assert(rte_atomic16_read(&qp->conn_state) != usiw_qp_connected);
-
-	qp->ord_max = event.ord_max;
-	qp->ird_max = event.ird_max;
-	qp->readresp_store = calloc(qp->ird_max,
+	rte_spinlock_lock(&qp->shm_qp->conn_event_lock);
+	qp->readresp_store = calloc(qp->shm_qp->ird_max,
 			sizeof(*qp->readresp_store));
 	if (!qp->readresp_store) {
 		RTE_LOG(DEBUG, USER1, "Set up readresp_store failed: %s\n",
 						strerror(errno));
-		rte_atomic16_set(&qp->conn_state, usiw_qp_error);
-		rte_spinlock_unlock(&qp->conn_event_lock);
+		rte_atomic16_set(&qp->shm_qp->conn_state, usiw_qp_error);
+		rte_spinlock_unlock(&qp->shm_qp->conn_event_lock);
 		return;
 	}
-	for (x = 0; x < qp->ird_max; ++x) {
+	for (x = 0; x < qp->shm_qp->ird_max; ++x) {
 		TAILQ_INSERT_TAIL(&qp->readresp_empty,
 				&qp->readresp_store[x],
 				qp_entry);
 	}
 
-	set_peer_addr(qp, event.dst_ether, event.dst_ipv4,
-			event.dst_port);
-
-	qp->udp_port = event.src_port;
-	if (ctx->port->flags & port_fdir) {
-		ret = setup_filter_fdir(qp);
-		if (ret < 0) {
-			RTE_LOG(DEBUG, USER1, "Set up flow director filter failed: %s\n",
-						rte_strerror(ret));
-			rte_atomic16_set(&qp->conn_state, usiw_qp_error);
-			rte_spinlock_unlock(&qp->conn_event_lock);
-			return;
-		}
-	} else {
-		char name[RTE_RING_NAMESIZE];
-		snprintf(name, RTE_RING_NAMESIZE, "qp%u_rxring",
-				qp->ib_qp.qp_num);
-		qp->remote_ep.rx_queue = rte_ring_create(name,
-				qp->port->rx_desc_count, rte_socket_id(),
-				RING_F_SP_ENQ|RING_F_SC_DEQ);
-		if (!qp->remote_ep.rx_queue) {
-			RTE_LOG(DEBUG, USER1, "Set up rx ring failed: %s\n",
-						rte_strerror(ret));
-			rte_atomic16_set(&qp->conn_state, usiw_qp_error);
-			rte_spinlock_unlock(&qp->conn_event_lock);
-			return;
-		}
-	}
-
-	/* Start the queues now that we have bound to an interface */
-	ret = rte_eth_dev_rx_queue_start(qp->port->portid,
-			qp->rx_queue);
-	if (ret < 0) {
-		RTE_LOG(DEBUG, USER1, "Enable RX queue %u failed: %s\n",
-				qp->rx_queue, rte_strerror(ret));
-		rte_atomic16_set(&qp->conn_state, usiw_qp_error);
-		rte_spinlock_unlock(&qp->conn_event_lock);
-		return;
-	}
-
-	ret = rte_eth_dev_tx_queue_start(qp->port->portid,
-			qp->tx_queue);
-	if (ret < 0) {
-		RTE_LOG(DEBUG, USER1, "Enable RX queue %u failed: %s\n",
-				qp->tx_queue, rte_strerror(ret));
-		rte_atomic16_set(&qp->conn_state, usiw_qp_error);
-		rte_spinlock_unlock(&qp->conn_event_lock);
-		return;
-	}
-
-	rtr_event.event_type = SIW_EVENT_QP_RTR;
-	rtr_event.qp_id = qp->ib_qp.qp_num;
-	ret = write(ctx->event_fd, &rtr_event, sizeof(rtr_event));
-	if (ret < 0 || (size_t)ret < sizeof(rtr_event)) {
-		static bool warned = false;
-		if (!warned) {
-			if (ret < 0) {
-				RTE_LOG(ERR, USER1, "Error writing event file: %s\n",
-						strerror(errno));
-			} else {
-				RTE_LOG(ERR, USER1, "Wrote only %zd/%zu bytes\n",
-						ret, sizeof(rtr_event));
-			}
-			warned = true;
-		}
-		rte_atomic16_set(&qp->conn_state, usiw_qp_error);
-		rte_spinlock_unlock(&qp->conn_event_lock);
-		return;
-	}
-
-	rte_atomic16_set(&qp->conn_state, usiw_qp_connected);
-	rte_atomic32_dec(&ctx->qp_init_count);
-	rte_spinlock_unlock(&qp->conn_event_lock);
-	LIST_INSERT_HEAD(&ctx->qp_active, qp, ctx_entry);
-
-	sem_post(&qp->conn_event_sem);
-} /* poll_conn_state */
+	rte_atomic16_set(&qp->shm_qp->conn_state, usiw_qp_running);
+	rte_atomic32_dec(&qp->ctx->qp_init_count);
+	rte_spinlock_unlock(&qp->shm_qp->conn_event_lock);
+} /* start_qp */
 
 
 static struct usiw_qp *
@@ -2260,7 +2057,6 @@ find_matching_qp(struct usiw_context *ctx, struct rte_mbuf *pkt)
 	struct ether_hdr *ether;
 	struct ipv4_hdr *ipv4;
 	struct udp_hdr *udp;
-	struct urdma_ah *ah;
 
 	ether = rte_pktmbuf_mtod(pkt, struct ether_hdr *);
 	if (ether->ether_type != ETHER_TYPE_IPv4) {
@@ -2274,9 +2070,9 @@ find_matching_qp(struct usiw_context *ctx, struct rte_mbuf *pkt)
 			sizeof(*ether) + sizeof(*ipv4));
 
 	LIST_FOR_EACH(qp, &ctx->qp_active, ctx_entry, prev) {
-		ah = &qp->remote_ep.ah;
-		if (ah->ipv4_addr == ipv4->dst_addr
-				&& ah->udp_port == udp->dst_port) {
+		if (qp->shm_qp->remote_ipv4_addr == ipv4->dst_addr
+				&& qp->shm_qp->remote_udp_port
+				== udp->dst_port) {
 			return qp;
 		}
 	}
@@ -2285,75 +2081,31 @@ find_matching_qp(struct usiw_context *ctx, struct rte_mbuf *pkt)
 } /* find_matching_qp */
 
 
-static void
-kni_process_burst(struct usiw_port *port,
-		struct rte_mbuf **rxmbuf, int count)
-{
-	struct usiw_qp *qp;
-	int i, j;
-
-	if (port->ctx && !(port->flags & port_fdir)) {
-		for (i = j = 0; i < count; i++) {
-			while (i + j < count
-					&& (qp = find_matching_qp(port->ctx,
-							rxmbuf[i + j]))) {
-				rte_ring_enqueue(qp->remote_ep.rx_queue,
-						rxmbuf[i + j]);
-				j++;
-			}
-			if (i + j < count) {
-				rxmbuf[i] = rxmbuf[i + j];
-			}
-		}
-
-		count -= j;
-	}
-	rte_kni_tx_burst(port->kni, rxmbuf, count);
-} /* kni_process_burst */
-
-
 int
 kni_loop(void *arg)
 {
 	struct usiw_driver *driver = arg;
-	struct usiw_port *port;
-	struct usiw_qp *qp, **prev;
+	struct usiw_device *dev, **dev_prev;
+	struct usiw_qp *qp, **qp_prev;
 	struct rte_mbuf *rxmbuf[RX_BURST_SIZE];
 	unsigned int count;
 	int portid, ret;
 
+	sem_wait(&driver->go);
 	while (1) {
-		for (portid = 0; portid < driver->port_count; ++portid) {
-			port = &driver->ports[portid];
-			ret = rte_kni_handle_request(port->kni);
-			if (ret) {
-				break;
-			}
-
-			count = rte_kni_rx_burst(port->kni,
-					rxmbuf, RX_BURST_SIZE);
-			if (count) {
-				rte_eth_tx_burst(port->portid, 0,
-					rxmbuf, count);
-			}
-
-			count = rte_eth_rx_burst(port->portid, 0,
-						rxmbuf, RX_BURST_SIZE);
-			if (count) {
-				kni_process_burst(port, rxmbuf, count);
-			}
-
-			if (!port->ctx) {
+		LIST_FOR_EACH(dev, &driver->devs, driver_entry, dev_prev) {
+			if (!dev->ctx) {
 				continue;
 			}
 
-			if (rte_atomic32_read(&port->ctx->qp_init_count) > 0) {
-				poll_conn_state(port->ctx, 0);
-			}
-
-			LIST_FOR_EACH(qp, &port->ctx->qp_active, ctx_entry, prev) {
-				switch (rte_atomic16_read(&qp->conn_state)) {
+			LIST_FOR_EACH(qp, &dev->ctx->qp_active,
+							ctx_entry, qp_prev) {
+				switch (rte_atomic16_read(&qp->shm_qp->conn_state)) {
 				case usiw_qp_connected:
+					/* start_qp() transitions to
+					 * usiw_qp_running */
+					start_qp(qp);
+				case usiw_qp_running:
 					progress_qp(qp);
 					break;
 				case usiw_qp_shutdown:

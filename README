@@ -8,10 +8,7 @@ Requirements
  - libibverbs >= 1.2.0 (versions less than 1.1.8 do not support verbs extensions
    and version 1.1.8 has a broken extensions ABI)
  - librdmacm >= 1.0.21
- - DPDK >= 16.04 built as shared libraries (CONFIG_RTE_BUILD_SHARED_LIB=y)
-     Note: DPDK 2.2.0 as provided by the CentOS, Fedora, etc.
-     repositories will work as long as your distribution package provides a
-     linker script called libdpdk.so
+ - DPDK >= 16.07 built as shared libraries (CONFIG_RTE_BUILD_SHARED_LIB=y)
  - libnl-3 and libnl-route-3
  - json-c
  - uthash (included in Fedora, Ubuntu, openSUSE, and EPEL for RHEL

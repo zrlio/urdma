@@ -41,9 +41,9 @@
 
 #include <rte_ethdev.h>
 
-#include "interface.h"
-
+struct usiw_driver;
 struct usiw_port_config;
+struct usiw_port;
 
 int
 usiw_set_ipv4_addr(struct usiw_driver *driver, struct usiw_port *port,

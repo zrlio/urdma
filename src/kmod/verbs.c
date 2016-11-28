@@ -44,8 +44,6 @@
 #include <linux/types.h>
 #include <linux/uaccess.h>
 #include <linux/vmalloc.h>
-#include <net/neighbour.h>
-#include <net/route.h>
 
 #include <rdma/iw_cm.h>
 #include <rdma/ib_verbs.h>
@@ -103,156 +101,13 @@ siw_mmap(struct ib_ucontext *ctx, struct vm_area_struct *vma)
 	return -ENOSYS;
 }
 
-static int fetch_dest_hwaddr(struct net_device *netdev,
-		u32 src_ipv4_addr, u32 dst_ipv4_addr, void *dst_hw_addr)
-{
-	struct neighbour *n;
-	struct rtable *rt;
-	struct flowi4 fl4;
-	int rv = 0;
-
-	memset(&fl4, 0, sizeof(fl4));
-	fl4.saddr = src_ipv4_addr;
-	fl4.daddr = dst_ipv4_addr;
-	fl4.flowi4_oif = netdev->ifindex;
-	rt = ip_route_output_key(&init_net, &fl4);
-	if (IS_ERR(rt)) {
-		return PTR_ERR(rt);
-	}
-
-	rcu_read_lock();
-	n = dst_neigh_lookup(&rt->dst, &dst_ipv4_addr);
-	if (!n || !(n->nud_state & NUD_VALID)) {
-		rv = -ENODATA;
-		goto out;
-	}
-	memcpy(dst_hw_addr, n->ha, ETHER_ADDR_LEN);
-	rcu_read_unlock();
-
-	if (n)
-		neigh_release(n);
-
-out:
-	ip_rt_put(rt);
-	return rv;
-}
-
-static ssize_t siw_event_file_read(struct file *filp, char __user *buf,
-		size_t count, loff_t *pos)
-{
-	struct siw_event_file *file;
-	struct urdma_qp_connected_event event;
-	struct net_device *netdev;
-	struct siw_cep *cep;
-	ssize_t rv;
-
-	if (count < sizeof(event)) {
-		return -EINVAL;
-	}
-
-	file = filp->private_data;
-	spin_lock_irq(&file->lock);
-	if (!file->ctx) {
-		rv = -EINVAL;
-		goto out;
-	}
-
-	while (list_empty(&file->established_list)) {
-		if (filp->f_flags & O_NONBLOCK) {
-			rv = -EAGAIN;
-			goto out;
-		}
-		spin_unlock_irq(&file->lock);
-
-		rv = wait_event_interruptible(file->wait_head,
-				(!list_empty(&file->established_list)));
-		if (rv < 0) {
-			return rv;
-		}
-
-		spin_lock_irq(&file->lock);
-		if (!file->ctx) {
-			rv = -EINVAL;
-			goto out;
-		}
-	}
-
-	cep = list_first_entry(&file->established_list,
-			struct siw_cep, established_entry);
-
-	memset(&event, 0, sizeof(event));
-	event.event_type = SIW_EVENT_QP_CONNECTED;
-	event.qp_id = cep->qp->ofa_qp.qp_num;
-	event.src_ipv4 = cep->llp.laddr.sin_addr.s_addr;
-	event.src_port = cep->llp.laddr.sin_port;
-	event.dst_ipv4 = cep->llp.raddr.sin_addr.s_addr;
-	event.dst_port = cep->llp.raddr.sin_port;
-	event.ord_max = cep->qp->attrs.orq_size;
-	event.ird_max = cep->qp->attrs.irq_size;
-
-	netdev = cep->sdev->netdev;
-	dev_hold(netdev);
-	spin_unlock_irq(&file->lock);
-
-	/* Must not have IRQs disabled when querying routing tables. */
-	rv = fetch_dest_hwaddr(netdev, event.src_ipv4, event.dst_ipv4,
-		&event.dst_ether);
-	if (copy_to_user(buf, &event, sizeof(event))) {
-		return -EFAULT;
-	}
-
-	spin_lock_irq(&file->lock);
-	dev_put(netdev);
-	list_del(&cep->established_entry);
-	list_add_tail(&cep->rtr_wait_entry, &file->rtr_wait_list);
-	spin_unlock_irq(&file->lock);
-
-	return sizeof(event);
-
-out:
-	spin_unlock_irq(&file->lock);
-	return rv;
-}
-
-static unsigned int siw_event_file_poll(struct file *filp,
-		struct poll_table_struct *poll_table)
-{
-	struct siw_event_file *file;
-	unsigned int rv = 0;
-
-	file = filp->private_data;
-	spin_lock_irq(&file->lock);
-	if (!file->ctx) {
-		rv = -EINVAL;
-		goto out;
-	}
-	spin_unlock_irq(&file->lock);
-
-	poll_wait(filp, &file->wait_head, poll_table);
-
-	spin_lock_irq(&file->lock);
-	if (!file->ctx) {
-		rv = -EINVAL;
-		goto out;
-	}
-	if (!list_empty(&file->established_list)) {
-		rv = POLLIN | POLLRDNORM;
-	}
-
-out:
-	spin_unlock_irq(&file->lock);
-	return rv;
-}
-
 static ssize_t siw_event_file_write(struct file *filp, const char __user *buf,
 		size_t count, loff_t *pos)
 {
 	struct siw_event_file *file;
 	struct urdma_event_storage event;
 	struct urdma_cq_event *cq_event;
-	struct urdma_qp_rtr_event *qp_rtr_event;
 	struct siw_cq *cq;
-	struct siw_qp *qp;
 	ssize_t rv;
 
 	if (count > sizeof(event)) {
@@ -281,18 +136,6 @@ static ssize_t siw_event_file_write(struct file *filp, const char __user *buf,
 		cq->ofa_cq.comp_handler(&cq->ofa_cq, cq->ofa_cq.cq_context);
 		siw_cq_put(cq);
 		break;
-	case SIW_EVENT_QP_RTR:
-		if (count != sizeof(*qp_rtr_event)) {
-			rv = -EINVAL;
-			goto out;
-		}
-		qp_rtr_event = (struct urdma_qp_rtr_event *)&event;
-		qp = siw_qp_id2obj(file->ctx->sdev, qp_rtr_event->qp_id);
-		list_del(&qp->cep->rtr_wait_entry);
-		spin_unlock_irq(&file->lock);
-		rv = siw_qp_rtr(qp->cep);
-		siw_qp_put(qp);
-		return (rv < 0) ? rv : count;
 	default:
 		pr_debug(" got invalid event type %u\n", event.event_type);
 		rv = -EINVAL;
@@ -309,16 +152,7 @@ out:
 static int siw_event_file_release(struct inode *ignored, struct file *filp)
 {
 	struct siw_event_file *file = filp->private_data;
-	struct siw_cep *cep;
-	struct list_head *pos, *next;
 
-	spin_lock_irq(&file->lock);
-	list_for_each_safe(pos, next, &file->rtr_wait_list) {
-		cep = list_entry(pos, struct siw_cep, rtr_wait_entry);
-		siw_qp_rtr_fail(cep);
-		list_del(pos);
-	}
-	spin_unlock_irq(&file->lock);
 	if (file->ctx) {
 		file->ctx->event_file = NULL;
 	}
@@ -328,9 +162,7 @@ static int siw_event_file_release(struct inode *ignored, struct file *filp)
 
 static struct file_operations siw_event_file_ops = {
 	.owner = THIS_MODULE,
-	.read = &siw_event_file_read,
 	.write = &siw_event_file_write,
-	.poll = &siw_event_file_poll,
 	.release = &siw_event_file_release,
 };
 
@@ -355,11 +187,8 @@ static struct file *siw_event_file_new(struct siw_ucontext *ctx, int *event_fd)
 	}
 	ctx->event_file->ctx = ctx;
 	spin_lock_init(&ctx->event_file->lock);
-	INIT_LIST_HEAD(&ctx->event_file->established_list);
-	INIT_LIST_HEAD(&ctx->event_file->rtr_wait_list);
-	init_waitqueue_head(&ctx->event_file->wait_head);
 	filp = anon_inode_getfile("[siwevent]", &siw_event_file_ops,
-			ctx->event_file, O_RDWR|O_NONBLOCK);
+			ctx->event_file, O_WRONLY|O_NONBLOCK);
 	if (IS_ERR(filp)) {
 		rv = PTR_ERR(filp);
 		goto free_event_file;
@@ -460,6 +289,7 @@ int siw_query_device(struct ib_device *ofa_dev, struct ib_device_attr *attr,
 	memset(attr, 0, sizeof *attr);
 
 	attr->max_mr_size = rlimit(RLIMIT_MEMLOCK); /* per process */
+	attr->sys_image_guid = sdev->ofa_dev.node_guid;
 	attr->vendor_id = sdev->attrs.vendor_id;
 	attr->vendor_part_id = sdev->attrs.vendor_part_id;
 	attr->max_qp = sdev->attrs.max_qp;
@@ -467,10 +297,6 @@ int siw_query_device(struct ib_device *ofa_dev, struct ib_device_attr *attr,
 	attr->device_cap_flags = sdev->attrs.cap_flags;
 	attr->max_cq = sdev->attrs.max_cq;
 	attr->max_pd = sdev->attrs.max_pd;
-
-	if (sdev->netdev) {
-		memcpy(&attr->sys_image_guid, sdev->netdev->dev_addr, 6);
-	}
 
 	return 0;
 }
@@ -504,10 +330,11 @@ int siw_query_port(struct ib_device *ofa_dev, u8 port,
 	memset(attr, 0, sizeof *attr);
 
 	attr->state = sdev->state;
-	if (sdev->netdev) {
-		attr->max_mtu = siw_mtu_net2ofa(sdev->netdev->mtu);
-	} else {
+	if (WARN(!sdev->netdev, "No netdev associated with device %s",
+				ofa_dev->name)) {
 		attr->max_mtu = IB_MTU_1024;
+	} else {
+		attr->max_mtu = siw_mtu_net2ofa(sdev->netdev->mtu);
 	}
 	attr->active_mtu = attr->max_mtu;
 	attr->gid_tbl_len = 1;
@@ -548,7 +375,8 @@ int siw_query_gid(struct ib_device *ofa_dev, u8 port, int idx,
 
 	/* subnet_prefix == interface_id == 0; */
 	memset(gid, 0, sizeof *gid);
-	if (sdev->netdev) {
+	if (!WARN(!sdev->netdev, "No netdev associated with device %s",
+				ofa_dev->name)) {
 		memcpy(&gid->raw[0], sdev->netdev->dev_addr, 6);
 	}
 
@@ -736,9 +564,13 @@ struct ib_qp *siw_create_qp(struct ib_pd *ofa_pd,
 			goto err_out_idr;
 		qp->attrs.irq_size = ureq.ird_max;
 		qp->attrs.orq_size = ureq.ord_max;
+		qp->attrs.urdma_devid = ureq.urdmad_dev_id;
+		qp->attrs.urdma_qp_id = ureq.urdmad_qp_id;
+		qp->attrs.urdma_rxq = ureq.rxq;
+		qp->attrs.urdma_txq = ureq.txq;
 
 		memset(&uresp, 0, sizeof uresp);
-		uresp.qp_id = QP_ID(qp);
+		uresp.kmod_qp_id = QP_ID(qp);
 
 		rv = ib_copy_to_udata(udata, &uresp, sizeof uresp);
 		if (rv)
@@ -1175,6 +1007,7 @@ int urdma_port_immutable(struct ib_device *ibdev, u8 port_num,
 
 	immutable->pkey_tbl_len = attr.pkey_tbl_len;
 	immutable->gid_tbl_len = attr.gid_tbl_len;
+	immutable->core_cap_flags = RDMA_CORE_PORT_IWARP;
 
 	return 0;
 }

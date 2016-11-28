@@ -56,6 +56,7 @@
 #include <rte_ring.h>
 #include <rte_spinlock.h>
 
+#include "urdmad_private.h"
 #include "list.h"
 #include "verbs.h"
 
@@ -78,7 +79,7 @@
 #define STAG_RDMA_READ(x) (STAG_TYPE_RDMA_READ | ((x) & STAG_MASK))
 
 struct usiw_context;
-struct usiw_port;
+struct usiw_device;
 struct usiw_qp;
 
 struct arp_entry {
@@ -97,7 +98,6 @@ struct usiw_wc {
 	enum ibv_wc_opcode opcode;
 	uint32_t byte_len;
 	uint32_t qp_num;
-	struct urdma_ah ah;
 };
 
 struct usiw_recv_wqe {
@@ -207,7 +207,6 @@ enum {
 };
 
 struct ee_state {
-	struct urdma_ah ah;
 	uint32_t expected_recv_msn;
 	uint32_t expected_read_msn;
 	uint32_t expected_ack_msn;
@@ -244,13 +243,6 @@ struct read_response_state {
 	TAILQ_ENTRY(read_response_state) qp_entry;
 };
 
-enum usiw_qp_state {
-	usiw_qp_unbound = 0,
-	usiw_qp_connected = 1,
-	usiw_qp_shutdown = 2,
-	usiw_qp_error = 3,
-};
-
 enum {
 	usiw_qp_sig_all = 0x1,
 };
@@ -262,19 +254,13 @@ DECLARE_TAILQ_HEAD(read_response_state);
  * queue pairs and the libibverbs interface. */
 struct usiw_qp {
 	rte_atomic32_t refcnt;
-	uint16_t udp_port;
-	uint16_t rx_queue;
-	uint16_t tx_queue;
+	struct urdmad_qp *shm_qp;
 	uint16_t qp_flags;
-	rte_atomic16_t conn_state;
-	enum ibv_qp_state qp_state;
-	rte_spinlock_t conn_event_lock;
-	sem_t conn_event_sem;
 
 	LIST_ENTRY(usiw_qp) ctx_entry;
 	UT_hash_handle hh;
 	struct usiw_context *ctx;
-	struct usiw_port *port;
+	struct usiw_device *dev;
 	struct usiw_cq *send_cq;
 
 	/* txq_end points one entry beyond the last entry in the table
@@ -295,8 +281,6 @@ struct usiw_qp {
 	struct read_response_state *readresp_store;
 	struct read_response_state_tailq_head readresp_active;
 	struct read_response_state_tailq_head readresp_empty;
-	uint8_t ord_max;
-	uint8_t ird_max;
 	uint8_t ird_active;
 
 	struct usiw_cq *recv_cq;
@@ -319,40 +303,14 @@ struct usiw_cq {
 	rte_spinlock_t lock;
 };
 
-enum usiw_port_flags {
+enum usiw_device_flags {
 	port_checksum_offload = 1,
 	port_fdir = 2,
 };
 
-struct usiw_port {
-	int portid;
-	uint64_t timer_freq;
-
-	struct rte_mempool *rx_mempool;
-	struct rte_mempool *tx_ddp_mempool;
-	struct rte_mempool *tx_hdr_mempool;
-	struct usiw_context *ctx;
-
-	uint16_t rx_desc_count;
-	uint16_t tx_desc_count;
-
-	uint64_t flags;
-	uint16_t max_qp;
-	struct rte_ring *avail_qp;
-	struct usiw_qp *qp;
-
-	struct rte_kni *kni;
-	struct ether_addr ether_addr;
-	uint32_t ipv4_addr;
-	int ipv4_prefix_len;
-
-	char kni_name[RTE_KNI_NAMESIZE];
-	struct rte_eth_dev_info dev_info;
-};
-
 struct usiw_context {
 	struct verbs_context vcontext;
-	struct usiw_port *port;
+	struct usiw_device *dev;
 	int event_fd;
 	LIST_HEAD(usiw_qp_head, usiw_qp) qp_active;
 	rte_atomic32_t qp_init_count;
@@ -373,17 +331,34 @@ usiw_get_context(struct ibv_context *ctx)
 
 struct usiw_device {
 	struct verbs_device vdev;
-	struct usiw_port *port;
+	LIST_ENTRY(usiw_device) driver_entry;
+	struct rte_mempool *rx_mempool;
+	struct rte_mempool *tx_ddp_mempool;
+	struct rte_mempool *tx_hdr_mempool;
+	struct urdmad_queue_range *queue_ranges;
+	struct usiw_context *ctx;
+	uint16_t portid;
+	uint16_t rx_desc_count;
+	uint16_t max_qp;
+	uint64_t flags;
+	struct ether_addr ether_addr;
+	uint32_t ipv4_addr;
+	int urdmad_fd;
 };
 
 struct usiw_driver {
-	struct nl_sock *nl_sock;
-	struct nl_cache *nl_link_cache;
-
-	int port_count;
-	uint16_t progress_lcore;
-	struct usiw_port ports[];
+	sem_t go;
+	struct nl_sock *sock;
+	struct nl_cache *link_cache;
+	struct nl_cache *addr_cache;
+	LIST_HEAD(usiw_device_list_head, usiw_device) devs;
+	int urdmad_fd;
+	uint32_t lcore_mask[RTE_MAX_LCORE / 32];
 };
+
+/** Starts the progress thread. */
+void
+start_progress_thread(void);
 
 struct usiw_mr **
 usiw_mr_lookup(struct usiw_mr_table *tbl, uint32_t rkey);
@@ -428,9 +403,6 @@ usiw_recv_wqe_queue_init(uint32_t qpn, struct usiw_recv_wqe_queue *q,
 
 void
 usiw_recv_wqe_queue_destroy(struct usiw_recv_wqe_queue *q);
-
-struct ee_state *
-usiw_get_ee_context(struct usiw_qp *qp, struct urdma_ah *ah);
 
 void
 usiw_do_destroy_qp(struct usiw_qp *qp);

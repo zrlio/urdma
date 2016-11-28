@@ -87,6 +87,10 @@ struct siw_cep {
 	 */
 	struct list_head	listenq;
 
+	/* The list of connections that have been disconnected but we have not
+	 * yet notified userspace. */
+	struct list_head	disconnect_entry;
+
 	/* The list of connections that have been established but we have not
 	 * yet notified userspace. */
 	struct list_head	established_entry;
@@ -107,6 +111,8 @@ struct siw_cep {
 	struct list_head	work_freelist;
 	struct siw_llp_info	llp;
 	struct siw_mpa_info	mpa;
+	uint16_t		urdmad_dev_id;
+	uint16_t		urdmad_qp_id;
 	int			ord;
 	int			ird;
 	int			sk_error; /* not (yet) used XXX */

@@ -64,10 +64,14 @@ struct urdma_uresp_create_cq {
 struct urdma_udata_create_qp {
 	uint32_t	ord_max;
 	uint32_t	ird_max;
+	uint16_t	urdmad_dev_id;
+	uint16_t	urdmad_qp_id;
+	uint16_t	rxq;
+	uint16_t	txq;
 };
 
 struct urdma_uresp_create_qp {
-	uint32_t	qp_id;
+	uint32_t	kmod_qp_id;
 };
 
 struct urdma_uresp_alloc_ctx {
@@ -82,7 +86,9 @@ struct urdma_cq_event {
 
 struct urdma_qp_connected_event {
 	uint32_t	event_type;
-	uint32_t	qp_id;
+	uint32_t	kmod_qp_id;
+	uint16_t	urdmad_dev_id;
+	uint16_t	urdmad_qp_id;
 	uint32_t	src_ipv4;
 	uint16_t	src_port;
 	uint32_t	dst_ipv4;
@@ -90,11 +96,19 @@ struct urdma_qp_connected_event {
 	uint16_t	dst_port;
 	uint8_t		ord_max;
 	uint8_t		ird_max;
+	uint16_t	rxq;
+	uint16_t	txq;
+};
+
+struct urdma_qp_disconnected_event {
+	uint32_t	event_type;
+	uint16_t	urdmad_dev_id;
+	uint16_t	urdmad_qp_id;
 };
 
 struct urdma_qp_rtr_event {
 	uint32_t	event_type;
-	uint32_t	qp_id;
+	uint32_t	kmod_qp_id;
 };
 
 struct urdma_event_storage {
@@ -106,14 +120,17 @@ enum urdma_event_type {
 	SIW_EVENT_COMP_POSTED	= 0,
 		/**< Sent from userspace to kernel to indicate that the
 		 * associated completion channel should be woken up. */
-	SIW_EVENT_QP_CONNECTED	= 1,
+	SIW_EVENT_QP_CONNECTED	 = 1,
 		/**< Sent from the kernel to userspace to indicate that a
 		 * connection is ready. */
-	SIW_EVENT_QP_RTR	= 2,
+	SIW_EVENT_QP_RTR	 = 2,
 		/**< Sent from userspace to the kernel in response to a
 		 * QP_CONNECTED event to indicate that we are ready to receive
 		 * messages on the queue pair (flow director filters have been
 		 * set up and DPDK queues enabled). */
+	SIW_EVENT_QP_DISCONNECTED = 3,
+		/**< Sent from the kernel to userspace to indicate that a
+		 * connection has been torn down. */
 };
 
 #endif

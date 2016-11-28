@@ -52,16 +52,14 @@ include_HEADERS = include/urdma_kabi.h \
 
 lib_LTLIBRARIES = src/liburdma/liburdma.la
 src_liburdma_liburdma_la_SOURCES = \
-	src/liburdma/config_file.c \
-	src/liburdma/config_file.h \
 	src/liburdma/driver.c \
 	src/liburdma/interface.c \
 	src/liburdma/interface.h \
-	src/liburdma/kni.c \
-	src/liburdma/kni.h \
-	src/liburdma/list.h \
 	src/liburdma/verbs.c \
 	src/liburdma/verbs.h \
+	src/util/config_file.c \
+	src/util/config_file.h \
+	src/util/list.h \
 	src/util/util.c \
 	src/util/util.h
 src_liburdma_liburdma_la_CFLAGS = $(MACHINE_CFLAGS)
@@ -72,7 +70,21 @@ src_liburdma_liburdma_la_LIBADD = $(LIBNL3_LIBS) $(JSON_C_LIBS) $(DPDK_LIBS)
 verbsconfdir = $(sysconfdir)/libibverbs.d
 dist_verbsconf_DATA = src/liburdma/urdma.driver
 
-bin_PROGRAMS = src/udp_pingpong/udp_pingpong
+bin_PROGRAMS = src/urdmad/urdmad
+src_urdmad_urdmad_SOURCES = \
+	src/urdmad/main.c \
+	src/urdmad/interface.h \
+	src/urdmad/kni.c \
+	src/urdmad/kni.h \
+	src/util/config_file.c \
+	src/util/config_file.h \
+	src/util/list.h
+src_urdmad_urdmad_CFLAGS = $(MACHINE_CFLAGS)
+src_urdmad_urdmad_CPPFLAGS = -Durdma_confdir='"$(sysconfdir)/rdma"' -I$(srcdir)/include -I$(srcdir)/src/util $(LIBNL3_CFLAGS) $(JSON_C_CFLAGS) $(DPDK_CPPFLAGS)
+src_urdmad_urdmad_LDFLAGS = $(DPDK_LDFLAGS)
+src_urdmad_urdmad_LDADD = $(LIBNL3_LIBS) $(JSON_C_LIBS) $(DPDK_LIBS)
+
+bin_PROGRAMS += src/udp_pingpong/udp_pingpong
 src_udp_pingpong_udp_pingpong_SOURCES = \
 	src/udp_pingpong/main.c \
 	src/util/util.c \

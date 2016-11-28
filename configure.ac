@@ -50,9 +50,19 @@ AC_CONFIG_MACRO_DIR([config])
 AC_CONFIG_SRCDIR([src/liburdma/verbs.c])
 AC_CONFIG_HEADERS([config.h])
 
+AC_PROG_CC
+CFLAGS="-std=gnu11 ${CFLAGS}"
+AC_COMPILE_IFELSE([AC_LANG_SOURCE([[
+#include <assert.h>
+static_assert(1, "compiler supports static_assert");]])],
+[], AC_MSG_ERROR([Compiler does not support static_assert]))
+AC_PROG_INSTALL
+AC_PROG_MAKE_SET
+AM_PROG_CC_C_O
+AC_PROG_MKDIR_P
+
 AC_ARG_VAR([RTE_SDK], [Location of DPDK SDK installation])
 AC_ARG_VAR([RTE_TARGET], [DPDK target system and toolchain])
-AC_ARG_VAR([MACHINE_CFLAGS], [target machine optimization C compiler flags])
 AC_ARG_VAR([KERNELDIR], [kernel source directory])
 AC_SUBST([KERNELDIR])
 if test ${RTE_SDK}x = x; then
@@ -62,12 +72,31 @@ if test ${RTE_TARGET}x = x; then
 	AC_MSG_ERROR([urdma requires DPDK.  Set RTE_TARGET to the DPDK compilation target])
 fi
 
-MACHINE_CFLAGS="-march=native"
-AC_SUBST([MACHINE_CFLAGS])
 DPDK_CPPFLAGS="-I${RTE_SDK}/${RTE_TARGET}/include -include rte_config.h"
 AC_SUBST([DPDK_CPPFLAGS])
 DPDK_LDFLAGS="-L${RTE_SDK}/${RTE_TARGET}/lib"
 AC_SUBST([DPDK_LDFLAGS])
+
+AC_CACHE_CHECK([for DPDK machine compiler flags],
+[urdma_cv_cflags_machine], [cat >conftest.make <<_EOF
+SHELL = /bin/sh
+include \$(RTE_SDK)/mk/rte.vars.mk
+.PHONY: all
+all:
+	@echo 'MACHINE_CFLAGS=\$(MACHINE_CFLAGS)'
+_EOF
+result=`${MAKE-make} -f conftest.make 2>/dev/null | grep MACHINE_CFLAGS=`
+AS_CASE([$result],
+	[MACHINE_CFLAGS=*],
+	[urdma_cv_cflags_machine=`printf %s "$result" | sed -e 's/^MACHINE_CFLAGS=//'`],
+	[urdma_cv_cflags_machine="not found"])
+AS_UNSET([result])
+rm -f conftest.make])
+if test "x$urdma_cv_cflags_machine" = "xnot found"; then
+	AC_MSG_ERROR([Could not detect DPDK compiler flags; check your DPDK installation])
+fi
+MACHINE_CFLAGS=$urdma_cv_cflags_machine
+AC_SUBST([MACHINE_CFLAGS])
 
 if test ${KERNELDIR}x = x; then
 	KERNELDIR="/lib/modules/`uname -r`/build"
@@ -84,17 +113,6 @@ AC_ARG_ENABLE([werror], [AS_HELP_STRING([--enable-werror],
 	       *) AC_MSG_ERROR([Invalid value ${enable_werror} for --enable-werror]) ;;
 	       esac])
 AC_SUBST([EXTRA_CFLAGS])
-
-AC_PROG_CC
-CFLAGS="-std=gnu11 ${CFLAGS}"
-AC_COMPILE_IFELSE([AC_LANG_SOURCE([[
-#include <assert.h>
-static_assert(1, "compiler supports static_assert");]])],
-[], AC_MSG_ERROR([Compiler does not support static_assert]))
-AC_PROG_INSTALL
-AC_PROG_MAKE_SET
-AM_PROG_CC_C_O
-AC_PROG_MKDIR_P
 
 AC_SEARCH_LIBS([verbs_register_driver], [ibverbs], [], [AC_MSG_ERROR([dnl
 urdma requires libibverbs >= 1.2.0])])
@@ -139,7 +157,13 @@ LIBS="$old_LIBS"
 
 PKG_CHECK_MODULES([JSON_C], [json-c])
 
+AC_CHECK_HEADERS([uthash.h], [], AC_MSG_ERROR([urdma requires uthash]))
 AC_HEADER_ASSERT
+
+AC_CHECK_HEADERS([sys/socket.h], [],
+		 [AC_MSG_ERROR([urdma requires sys/socket.h])])
+AC_CHECK_DECLS([SOCK_CLOEXEC], [], [], [AC_INCLUDES_DEFAULT()]
+[[#include <sys/socket.h>]])
 
 old_CFLAGS="${CFLAGS}"
 old_CPPFLAGS="${CPPFLAGS}"
@@ -148,24 +172,27 @@ CFLAGS="${CFLAGS} ${MACHINE_CFLAGS}"
 CPPFLAGS="${CPPFLAGS} ${DPDK_CPPFLAGS}"
 LDFLAGS="${CPPFLAGS} ${DPDK_LDFLAGS}"
 AC_CHECK_HEADERS([rte_ethdev.h], [],
-[AC_MSG_ERROR([urdma requires DPDK >= 2.2.0])])
+[AC_MSG_ERROR([urdma requires DPDK >= 16.07])])
 
 DPDK_LIBS=
 AC_SUBST([DPDK_LIBS])
-for lib in dpdk intel_dpdk; do
-	old_LIBS="${LIBS}"
-	LIBS="-l${lib} ${LIBS}"
-	AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <rte_eal.h>]],
-		[[int main(int argc, char *argv[]) {
-			rte_eal_init(argc, argv); return 0;
-		}]])],
-	[DPDK_LIBS=-l${lib}; break], [])
-	LIBS=${old_LIBS}
-done
-if test ${DPDK_LIBS}x = x; then
-	AC_MSG_ERROR([urdma requires DPDK >= 2.2.0])
-fi
-DPDK_LDFLAGS="${DPDK_LDFLAGS} -Wl,--whole-archive,${DPDK_LIBS},--no-whole-archive"
+old_LIBS="${LIBS}"
+LIBS="-ldpdk ${LIBS}"
+AC_MSG_CHECKING([for DPDK 16.07 built as shared libraries])
+AC_LINK_IFELSE([AC_LANG_PROGRAM(
+[[#include <rte_eal.h>
+ #include <rte_ethdev.h>]],
+[[int main(int argc, char *argv[]) {
+	struct rte_eth_dev_info info;
+	rte_eal_init(argc, argv);
+	info.nb_rx_queues = 1;
+	return 0;
+}]])],
+	[AC_MSG_RESULT([yes])],
+	[AC_MSG_RESULT([no])]
+	[AC_MSG_ERROR([urdma requires DPDK >= 16.07])])
+LIBS=${old_LIBS}
+DPDK_LDFLAGS="${DPDK_LDFLAGS} -Wl,--whole-archive,-ldpdk,--no-whole-archive"
 
 AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <rte_kni.h>]],
 	       [[int main(int argc, char *argv[]) {

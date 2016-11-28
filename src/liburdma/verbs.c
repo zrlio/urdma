@@ -55,9 +55,7 @@
 #include <rte_malloc.h>
 #include <rte_ring.h>
 
-#include "config_file.h"
 #include "interface.h"
-#include "kni.h"
 #include "urdma_kabi.h"
 #include "util.h"
 #include "verbs.h"
@@ -179,7 +177,8 @@ urdma_accl_post_send(struct ibv_qp *ib_qp, void *addr, size_t length,
 static bool
 qp_connected(struct usiw_qp *qp)
 {
-	return rte_atomic16_read(&qp->conn_state) == usiw_qp_connected;
+	uint16_t tmp = rte_atomic16_read(&qp->shm_qp->conn_state);
+	return tmp == usiw_qp_connected || tmp == usiw_qp_running;
 } /* qp_connected */
 
 
@@ -203,7 +202,7 @@ urdma_accl_post_sendv(struct ibv_qp *ib_qp, struct iovec *iov, size_t iov_size,
 		return -EINVAL;
 	}
 
-	ee = usiw_get_ee_context(qp, ah);
+	ee = &qp->remote_ep;
 	if (!ee) {
 		return -EINVAL;
 	}
@@ -248,7 +247,7 @@ urdma_accl_post_write(struct ibv_qp *ib_qp, void *addr, size_t length,
 		return -EINVAL;
 	}
 
-	ee = usiw_get_ee_context(qp, ah);
+	ee = &qp->remote_ep;
 	if (!ee) {
 		return -EINVAL;
 	}
@@ -293,7 +292,7 @@ urdma_accl_post_read(struct ibv_qp *ib_qp, void *addr, size_t length,
 		return -EINVAL;
 	}
 
-	ee = usiw_get_ee_context(qp, ah);
+	ee = &qp->remote_ep;
 	if (!ee) {
 		return -EINVAL;
 	}
@@ -326,19 +325,24 @@ static int
 usiw_query_device(struct ibv_context *context,
 		struct ibv_device_attr *device_attr)
 {
+	struct ibv_query_device cmd;
+	uint64_t raw_fw_ver;
+	int ret;
+
 	if (!context || !device_attr) {
 		return -EINVAL;
 	}
 
-	snprintf(device_attr->fw_ver, 64, "0");
-	device_attr->node_guid = 0;
-	device_attr->sys_image_guid = 0;
+	ret = ibv_cmd_query_device(context, device_attr,
+			&raw_fw_ver, &cmd, sizeof(cmd));
+
+	snprintf(device_attr->fw_ver, 64, "%" PRIu64, raw_fw_ver);
 	device_attr->max_mr_size = MAX_MR_SIZE;
 	device_attr->page_size_cap = 4096;
 	device_attr->vendor_id = URDMA_VENDOR_ID;
 	device_attr->vendor_part_id = URDMA_VENDOR_PART_ID;
 	device_attr->hw_ver = 0;
-	device_attr->max_qp = DPDKV_MAX_QP;
+	device_attr->max_qp = DPDKV_MAX_QP - 1;
 	device_attr->max_qp_wr = RTE_MIN(MAX_SEND_WR, MAX_RECV_WR);
 	device_attr->device_cap_flags = 0;
 	device_attr->max_sge = DPDK_VERBS_IOV_LEN_MAX;
@@ -377,19 +381,16 @@ usiw_query_port(struct ibv_context *context, uint8_t port_num,
 		struct ibv_port_attr *port_attr)
 {
 	struct usiw_context *ctx = usiw_get_context(context);
+	struct ibv_query_port cmd;
 
 	if (!context || !port_attr || port_num != 1) {
 		return -EINVAL;
 	}
 
-	memset(port_attr, 0, sizeof(*port_attr));
-	port_attr->state = ctx->port->ipv4_addr
-		? IBV_PORT_ACTIVE : IBV_PORT_DOWN;
-	port_attr->max_mtu = IBV_MTU_1024;
-	port_attr->active_mtu = IBV_MTU_1024;
-	port_attr->max_msg_sz = UINT32_MAX;
-	port_attr->link_layer = IBV_LINK_LAYER_ETHERNET;
+	ibv_cmd_query_port(context, port_num, port_attr,
+			&cmd, sizeof(cmd));
 
+	port_attr->max_msg_sz = UINT32_MAX;
 	return 0;
 } /* usiw_query_port */
 
@@ -734,19 +735,40 @@ usiw_post_srq_recv(__attribute__((unused)) struct ibv_srq *srq,
 } /* usiw_post_srq_recv */
 
 
-static struct usiw_qp *
-port_get_next_qp(struct usiw_port *port)
+static struct urdmad_qp *
+port_get_next_qp(struct usiw_device *dev)
 {
-	void *result;
-	int ret;
+	struct urdmad_sock_qp_msg msg;
+	ssize_t ret;
 
-	ret = rte_ring_dequeue(port->avail_qp, &result);
-	if (ret) {
-		errno = -ret;
+	memset(&msg, 0, sizeof(msg));
+	msg.hdr.opcode = rte_cpu_to_be_32(urdma_sock_create_qp_req);
+	msg.hdr.dev_id = rte_cpu_to_be_16(dev->portid);
+	ret = send(dev->urdmad_fd, &msg, sizeof(msg), 0);
+	if (ret < sizeof(msg)) {
 		return NULL;
 	}
-	return result;
+	ret = recv(dev->urdmad_fd, &msg, sizeof(msg), 0);
+	if (ret < sizeof(msg) || rte_be_to_cpu_32(msg.hdr.opcode)
+						!= urdma_sock_create_qp_resp) {
+		return NULL;
+	}
+	return (struct urdmad_qp *)(uintptr_t)rte_be_to_cpu_64(msg.ptr);
 } /* port_get_next_qp */
+
+
+static void
+port_return_qp(struct usiw_qp *qp)
+{
+	struct urdmad_sock_qp_msg msg;
+
+	memset(&msg, 0, sizeof(msg));
+	msg.hdr.opcode = rte_cpu_to_be_32(urdma_sock_destroy_qp_req);
+	msg.hdr.dev_id = rte_cpu_to_be_16(qp->dev->portid);
+	msg.hdr.qp_id = rte_cpu_to_be_16(qp->shm_qp->qp_id);
+	msg.ptr = rte_cpu_to_be_64((uintptr_t)qp->shm_qp);
+	send(qp->dev->urdmad_fd, &msg, sizeof(msg), 0);
+} /* port_return_qp */
 
 
 static struct ibv_qp *
@@ -761,6 +783,7 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 		struct urdma_uresp_create_qp priv;
 	} resp;
 	struct usiw_context *ctx;
+	struct ee_state *ee;
 	struct usiw_qp *qp;
 	int retval;
 
@@ -799,29 +822,34 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 
 	ctx = usiw_get_context(pd->context);
 
-	qp = port_get_next_qp(ctx->port);
+	qp = malloc(sizeof(*qp));
 	if (!qp) {
 		goto errout;
 	}
+	qp->shm_qp = port_get_next_qp(ctx->dev);
+	if (!qp->shm_qp) {
+		goto free_user_qp;
+	}
 
 	/* Create kernel QP for connection manager */
-	cmd.priv.ird_max = qp->ird_max = USIW_IRD_MAX;
-	cmd.priv.ord_max = qp->ord_max = USIW_ORD_MAX;
+	cmd.priv.urdmad_dev_id = ctx->dev->portid;
+	cmd.priv.urdmad_qp_id = qp->shm_qp->qp_id;
+	cmd.priv.ird_max = qp->shm_qp->ird_max = USIW_IRD_MAX;
+	cmd.priv.ord_max = qp->shm_qp->ord_max = USIW_ORD_MAX;
+	cmd.priv.rxq = qp->shm_qp->rx_queue;
+	cmd.priv.txq = qp->shm_qp->tx_queue;
 	retval = ibv_cmd_create_qp(pd, &qp->ib_qp, qp_init_attr,
 			&cmd.ibv, sizeof(cmd), &resp.ibv, sizeof(resp));
 	if (retval != 0) {
 		errno = retval;
-		goto free_user_qp;
+		goto return_user_qp;
 	}
 
 	qp->qp_flags = qp_init_attr->sq_sig_all
 		? usiw_qp_sig_all : 0;
-	rte_atomic16_init(&qp->conn_state);
-	rte_atomic16_set(&qp->conn_state, usiw_qp_unbound);
-	qp->qp_state = IBV_QPS_INIT;
-	rte_spinlock_init(&qp->conn_event_lock);
+	rte_atomic16_set(&qp->shm_qp->conn_state, usiw_qp_unbound);
 	qp->ctx = ctx;
-	qp->port = ctx->port;
+	qp->dev = ctx->dev;
 	qp->stats.recv_max_burst_size = RX_BURST_SIZE;
 	qp->stats.recv_count_histo = calloc(qp->stats.recv_max_burst_size + 1,
 			sizeof(*qp->stats.recv_count_histo));
@@ -840,7 +868,6 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 	qp->txq_end = qp->txq;
 	qp->timer_last = 0;
 	qp->pd = container_of(pd, struct usiw_mr_table, pd);
-
 
 	retval = usiw_send_wqe_queue_init(qp->ib_qp.qp_num,
 			&qp->sq, qp_init_attr->cap.max_send_wr,
@@ -864,9 +891,21 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 	TAILQ_INIT(&qp->readresp_empty);
 	qp->ird_active = 0;
 
-	if (sem_init(&qp->conn_event_sem, 0, 0) < 0) {
+	ee = &qp->remote_ep;
+	/* FIXME: Get this from the peer */
+	ee->send_max_psn = ee->tx_pending_size = qp->dev->rx_desc_count / 2;
+	ee->tx_pending = calloc(ee->send_max_psn, sizeof(*ee->tx_pending));
+	if (!ee->tx_pending) {
 		goto free_kernel_qp;
 	}
+	ee->expected_recv_msn = 1;
+	ee->expected_read_msn = 1;
+	ee->expected_ack_msn = 1;
+	ee->next_send_msn = 1;
+	ee->next_read_msn = 1;
+	ee->next_ack_msn = 1;
+
+	ee->tx_head = ee->tx_pending;
 
 	rte_atomic32_init(&qp->refcnt);
 	rte_atomic32_set(&qp->refcnt, 1);
@@ -877,12 +916,15 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 			sizeof(qp->ib_qp.qp_num), qp);
 	rte_spinlock_unlock(&ctx->qp_lock);
 
+	LIST_INSERT_HEAD(&qp->ctx->qp_active, qp, ctx_entry);
 	return &qp->ib_qp;
 
 free_kernel_qp:
 	ibv_cmd_destroy_qp(&qp->ib_qp);
+return_user_qp:
+	port_return_qp(qp);
 free_user_qp:
-	rte_ring_enqueue(ctx->port->avail_qp, qp);
+	free(qp);
 errout:
 	return NULL;
 } /* usiw_create_qp */
@@ -904,11 +946,12 @@ usiw_query_qp(struct ibv_qp *ib_qp, struct ibv_qp_attr *attr, int attr_mask,
 	}
 
 	qp = container_of(ib_qp, struct usiw_qp, ib_qp);
-	switch (rte_atomic16_read(&qp->conn_state)) {
+	switch (rte_atomic16_read(&qp->shm_qp->conn_state)) {
 	case usiw_qp_unbound:
 		attr->qp_state = IBV_QPS_INIT;
 		break;
 	case usiw_qp_connected:
+	case usiw_qp_running:
 		attr->qp_state = IBV_QPS_RTS;
 		break;
 	case usiw_qp_shutdown:
@@ -972,7 +1015,7 @@ usiw_modify_qp(struct ibv_qp *ib_qp, struct ibv_qp_attr *attr, int attr_mask)
 	switch (attr->qp_state) {
 	case IBV_QPS_SQD:
 	case IBV_QPS_ERR:
-		rte_atomic16_set(&qp->conn_state, usiw_qp_shutdown);
+		rte_atomic16_set(&qp->shm_qp->conn_state, usiw_qp_shutdown);
 		break;
 	default:
 		break;
@@ -992,7 +1035,7 @@ usiw_destroy_qp(struct ibv_qp *ib_qp)
 
 	qp = container_of(ib_qp, struct usiw_qp, ib_qp);
 	ctx = qp->ctx;
-	if (rte_atomic16_read(&qp->conn_state) == usiw_qp_unbound) {
+	if (rte_atomic16_read(&qp->shm_qp->conn_state) == usiw_qp_unbound) {
 		assert(rte_atomic32_read(&ctx->qp_init_count) != 0);
 		rte_atomic32_dec(&ctx->qp_init_count);
 	}
@@ -1000,7 +1043,7 @@ usiw_destroy_qp(struct ibv_qp *ib_qp)
 	if (qp->send_cq != qp->recv_cq) {
 		qp->send_cq->qp_count--;
 	}
-	rte_atomic16_set(&qp->conn_state, usiw_qp_error);
+	rte_atomic16_set(&qp->shm_qp->conn_state, usiw_qp_error);
 
 	rte_spinlock_lock(&ctx->qp_lock);
 	HASH_DEL(ctx->qp, qp);
@@ -1052,26 +1095,14 @@ usiw_post_send(struct ibv_qp *ib_qp, struct ibv_send_wr *wr,
 	}
 
 	qp = container_of(ib_qp, struct usiw_qp, ib_qp);
-	switch (rte_atomic16_read(&qp->conn_state)) {
+	switch (rte_atomic16_read(&qp->shm_qp->conn_state)) {
 	case usiw_qp_connected:
+	case usiw_qp_running:
 		break;
 	case usiw_qp_shutdown:
 	case usiw_qp_error:
 		ret = EINVAL;
 		goto errout;
-	default:
-		/* This is an ugly hack to get around the fact that
-		 * ibv_modify_qp doesn't get called from userspace to let us
-		 * know about state changes.  We call ibv_modify_qp() ourselves
-		 * with attr_mask==0 to get the udata response that contains
-		 * the addressing information that we need about the
-		 * connection. */
-		sem_wait(&qp->conn_event_sem);
-		if (!qp_connected(qp)) {
-			ret = EINVAL;
-			goto errout;
-		}
-		break;
 	}
 	for (; wr != NULL; wr = wr->next) {
 		sge_limit = (wr->opcode == IBV_WR_RDMA_READ)
@@ -1164,7 +1195,7 @@ usiw_post_recv(struct ibv_qp *ib_qp, struct ibv_recv_wr *wr,
 	int x, ret;
 
 	qp = container_of(ib_qp, struct usiw_qp, ib_qp);
-	if (rte_atomic16_read(&qp->conn_state) == usiw_qp_error) {
+	if (rte_atomic16_read(&qp->shm_qp->conn_state) == usiw_qp_error) {
 		*bad_wr = wr;
 		return EINVAL;
 	}
@@ -1297,30 +1328,6 @@ usiw_destroy_flow(__attribute__((unused)) struct ibv_flow *flow)
 } /* usiw_destroy_flow */
 
 
-static int
-usiw_query_device_ex(struct ibv_context *context,
-		__attribute__((unused))
-		const struct ibv_query_device_ex_input *input,
-		struct ibv_device_attr_ex *attr,
-		__attribute__((unused)) size_t attr_size)
-{
-	int ret;
-
-	/* ignore input and attr_size for now --- the only way that we can get
-	 * here is if the caller supports extended verbs, and the odp_caps was
-	 * added at the same time, so no comp_mask bits are defined yet. */
-	assert(attr_size >= offsetof(struct ibv_device_attr_ex, odp_caps)
-			+ sizeof(attr->odp_caps));
-	ret = usiw_query_device(context, &attr->orig_attr);
-	if (ret < 0) {
-		return ret;
-	}
-	attr->comp_mask = 0;
-	memset(&attr->odp_caps, 0, sizeof(attr->odp_caps));
-	return 0;
-} /* usiw_query_device_ex */
-
-
 static struct ibv_context_ops usiw_ops = {
 	.query_device = usiw_query_device,
 	.query_port = usiw_query_port,
@@ -1387,6 +1394,7 @@ int
 usiw_init_context(struct verbs_device *device, struct ibv_context *context,
 		int cmd_fd)
 {
+	static pthread_once_t progress_thread_once = PTHREAD_ONCE_INIT;
 	struct ibv_get_context cmd;
 	struct {
 		struct ibv_get_context_resp ibv;
@@ -1395,6 +1403,13 @@ usiw_init_context(struct verbs_device *device, struct ibv_context *context,
 	struct usiw_context *ctx;
 	struct usiw_device *dev;
 	int ret;
+
+	/* ibv_open_device requires a valid ibv_device, which can only be
+	 * obtained by calling ibv_get_device_list, which initializes every
+	 * device on the system.  Thus we are guaranteed that we have every
+	 * possible device initialized at this point and can start the progress
+	 * thread. */
+	pthread_once(&progress_thread_once, start_progress_thread);
 
 	context->cmd_fd = cmd_fd;
 	if ((ret = ibv_cmd_get_context(context, &cmd, sizeof(cmd),
@@ -1410,8 +1425,6 @@ usiw_init_context(struct verbs_device *device, struct ibv_context *context,
 	memcpy(&ctx->vcontext.context.ops, &usiw_ops,
 			sizeof(ctx->vcontext.context.ops));
 	ctx->vcontext.context.num_comp_vectors = usiw_num_completion_vectors();
-	verbs_set_ctx_op(&ctx->vcontext, query_device_ex,
-			&usiw_query_device_ex);
 	verbs_set_ctx_op(&ctx->vcontext, ibv_destroy_flow, &usiw_destroy_flow);
 	verbs_set_ctx_op(&ctx->vcontext, ibv_create_flow, &usiw_create_flow);
 	verbs_set_ctx_op(&ctx->vcontext, open_qp, &usiw_open_qp);
@@ -1422,8 +1435,8 @@ usiw_init_context(struct verbs_device *device, struct ibv_context *context,
 	verbs_set_ctx_op(&ctx->vcontext, close_xrcd, &usiw_close_xrcd);
 
 	dev = container_of(device, struct usiw_device, vdev);
-	ctx->port = dev->port;
-	ctx->port->ctx = ctx;
+	ctx->dev = dev;
+	ctx->dev->ctx = ctx;
 
 	rte_atomic32_init(&ctx->qp_init_count);
 	LIST_INIT(&ctx->qp_active);
