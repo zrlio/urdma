@@ -50,11 +50,22 @@ setting the MACHINE_CFLAGS environment variable.
 To run an application with this driver, the KNI and urdma modules must be loaded:
 
 $ sudo modprobe rte_kni
-$ sudo modprobe urdma device_count=2
+$ sudo modprobe urdma
 
-The device count is the number of devices that should be accessible via DPDK.
-These verbs devices are pre-created so libibverbs will call our userspace
-driver to initialize them.
+You will need to create a file ${sysconfdir}/rdma/urdma.json that looks
+like this, with appropriate values substituted in:
+
+{ "ports": { "ipv4_address": "10.2.0.100" },
+  "sock_name": "/run/urdma.sock",
+  "eal_args": { "log-level": 7 }
+}
+
+Finally, the urdmad service must be running:
+
+$ sudo systemctl start urdmad
+
+This will cause devices to appear in your "ip link" output, and cause
+uverbs devices to appear in /sys/class/infiniband_verbs.
 
 Known Issues
 ------------
