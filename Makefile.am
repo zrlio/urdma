@@ -44,6 +44,7 @@ AM_CFLAGS = $(EXTRA_CFLAGS) \
 
 EXTRA_DIST = gpl-2.0.txt config/version.sh
 include_HEADERS = include/urdma_kabi.h \
+		include/urdmad_private.h \
 		include/proto.h \
 		include/proto_memcached.h \
 		include/proto_trp.h \
