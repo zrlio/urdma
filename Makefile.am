@@ -42,7 +42,7 @@ AM_CFLAGS = $(EXTRA_CFLAGS) \
 	    -fno-strict-aliasing \
 	    -fvisibility=hidden
 
-EXTRA_DIST = gpl-2.0.txt config/version.sh
+EXTRA_DIST = gpl-2.0.txt config/version.sh src/urdmad/urdmad.service.in
 include_HEADERS = include/urdma_kabi.h \
 		include/urdmad_private.h \
 		include/proto.h \
@@ -148,5 +148,22 @@ distuninstallcheck:
 
 dist-hook:
 	$(srcdir)/config/version.sh $(srcdir) >$(top_distdir)/.version
+
+src/urdmad/urdmad.service: src/urdmad/urdmad.service.in
+	sed -e 's^\@bindir\@^$(bindir)^' <$^ >$@
+
+all-local: src/urdmad/urdmad.service
+
+MOSTLYCLEANFILES = src/urdmad/urdmad.service
+
+install-data-hook:
+	$(MKDIR_P) $(DESTDIR)$(prefix)/lib/systemd/system
+	$(INSTALL) -m644 src/urdmad/urdmad.service $(DESTDIR)$(prefix)/lib/systemd/system
+	@echo You will need to reload systemd and enable this service
+	@echo systemctl daemon-reload
+	@echo systemctl enable urdmad
+
+uninstall-hook:
+	$(RM) $(DESTDIR)$(prefix)/lib/systemd/system/urdmad.service
 
 SUBDIRS = src/kmod
