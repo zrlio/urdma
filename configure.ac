@@ -177,8 +177,6 @@ LDFLAGS="${CPPFLAGS} ${DPDK_LDFLAGS}"
 AC_CHECK_HEADERS([rte_ethdev.h], [],
 [AC_MSG_ERROR([urdma requires DPDK >= 16.07])])
 
-DPDK_LIBS=
-AC_SUBST([DPDK_LIBS])
 old_LIBS="${LIBS}"
 LIBS="-ldpdk ${LIBS}"
 AC_MSG_CHECKING([for DPDK 16.07 built as shared libraries])
@@ -195,7 +193,8 @@ AC_LINK_IFELSE([AC_LANG_PROGRAM(
 	[AC_MSG_RESULT([no])]
 	[AC_MSG_ERROR([urdma requires DPDK >= 16.07])])
 LIBS=${old_LIBS}
-DPDK_LDFLAGS="${DPDK_LDFLAGS} -Wl,--whole-archive,-ldpdk,--no-whole-archive"
+DPDK_LIBS="-Wl,--whole-archive,-ldpdk,--no-whole-archive"
+AC_SUBST([DPDK_LIBS])
 
 AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <rte_kni.h>]],
 	       [[int main(int argc, char *argv[]) {
