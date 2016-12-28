@@ -4,7 +4,7 @@
 #
 # Authors: Patrick MacArthur <patrick@patrickmacarthur.net>
 #
-# Copyright (c) 2016, University of New Hampshire InterOperability Laboratory
+# Copyright (c) 2016-2017, University of New Hampshire InterOperability Laboratory
 #
 # This software is available to you under a choice of one of two
 # licenses.  You may choose to be licensed under the terms of the GNU
@@ -136,22 +136,25 @@ AC_SUBST([IBV_DEVICE_LIBRARY_EXTENSION])
 AC_SEARCH_LIBS([rdma_create_id], [rdmacm], [], [AC_MSG_ERROR([dnl
 urdma requires librdmacm])])
 PKG_CHECK_MODULES([LIBNL3], [libnl-3.0 libnl-route-3.0])
-AC_MSG_CHECKING([whether netlink/route/link.h includes linux/if.h])
 old_CFLAGS="$CFLAGS"
 old_LIBS="$LIBS"
 CFLAGS="$CFLAGS $LIBNL3_CFLAGS"
 LIBS="$LIBS $LIBNL3_LIBS"
-AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <netlink/route/link.h>]],
-	       [[int main(void) {
-			int x = IFF_UP;
-			return 0;
-		}]])],
-		[AC_MSG_RESULT([yes])]
-		[AVOID_NET_IF_H=1],
-		[AC_MSG_RESULT([no])]
-		[AVOID_NET_IF_H=0])
-AC_DEFINE_UNQUOTED([AVOID_NET_IF_H], [$AVOID_NET_IF_H],
-		   [Define to 1 if netlink/route/link.h includes linux/if.h])
+AC_CACHE_CHECK([whether netlink/route/link.h includes linux/if.h],
+	       [urdma_cv_decl_netlink_iff_up],
+	       [AC_LINK_IFELSE([AC_LANG_PROGRAM(
+			[[#include <netlink/route/link.h>]],
+			[[int main(void) { int x = IFF_UP; return 0; }]])],
+			[urdma_cv_decl_netlink_iff_up=yes],
+			[urdma_cv_decl_netlink_iff_up=no])])
+if test "x$urdma_cv_decl_netlink_iff_up" = xyes; then
+	AC_DEFINE([AVOID_NET_IF_H], [1],
+		  [Define to 1 if netlink/route/link.h defines IFF_UP])
+else
+	AC_CHECK_DECL([IFF_UP], [],
+		      [AC_MSG_ERROR([Your kernel must define IFF_UP])],
+		      [[#include <net/if.h>]])
+fi
 CFLAGS="$old_CFLAGS"
 LIBS="$old_LIBS"
 
