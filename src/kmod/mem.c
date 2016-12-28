@@ -6,6 +6,7 @@
  *          Patrick MacArthur <pam@zurich.ibm.com>
  *
  * Copyright (c) 2008-2016, IBM Corporation
+ * Copyright (c) 2017, University of New Hampshire
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -208,14 +209,14 @@ static void siw_dma_generic_free_coherent(struct device *dev, size_t size,
 #else
 static void *siw_dma_generic_alloc(struct device *dev, size_t size,
 				   dma_addr_t *dma_handle, gfp_t gfp,
-				   struct dma_attrs *attrs)
+				   dma_attrs_t attrs)
 {
 	return siw_dma_alloc_coherent(NULL, size, dma_handle, gfp);
 }
 
 static void siw_dma_generic_free(struct device *dev, size_t size,
 				 void *vaddr, dma_addr_t dma_handle,
-				 struct dma_attrs *attrs)
+				 dma_attrs_t attrs)
 {
 	siw_dma_free_coherent(NULL, size, vaddr, dma_handle);
 }
@@ -226,7 +227,7 @@ static dma_addr_t siw_dma_generic_map_page(struct device *dev,
 					   unsigned long offset,
 					   size_t size,
 					   enum dma_data_direction dir,
-					   struct dma_attrs *attrs)
+					   dma_attrs_t attrs)
 {
 	return siw_dma_map_page(NULL, page, offset, size, dir);
 }
@@ -235,14 +236,14 @@ static void siw_dma_generic_unmap_page(struct device *dev,
 				       dma_addr_t handle,
 				       size_t size,
 				       enum dma_data_direction dir,
-				       struct dma_attrs *attrs)
+				       dma_attrs_t attrs)
 {
 	siw_dma_unmap_page(NULL, handle, size, dir);
 }
 
 static int siw_dma_generic_map_sg(struct device *dev, struct scatterlist *sg,
 				  int nents, enum dma_data_direction dir,
-				  struct dma_attrs *attrs)
+				  dma_attrs_t attrs)
 {
 	return siw_dma_map_sg(NULL, sg, nents, dir);
 }
@@ -251,7 +252,7 @@ static void siw_dma_generic_unmap_sg(struct device *dev,
 				    struct scatterlist *sg,
 				    int nents,
 				    enum dma_data_direction dir,
-				    struct dma_attrs *attrs)
+				    dma_attrs_t attrs)
 {
 	siw_dma_unmap_sg(NULL, sg, nents, dir);
 }
