@@ -6,6 +6,7 @@
  * Authors: Patrick MacArthur <pam@zurich.ibm.com>
  *
  * Copyright (c) 2016, IBM Corporation
+ * Copyright (c) 2016-2017, University of New Hampshire InterOperability Laboratory
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -822,7 +823,7 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 
 	ctx = usiw_get_context(pd->context);
 
-	qp = malloc(sizeof(*qp));
+	qp = calloc(1, sizeof(*qp));
 	if (!qp) {
 		goto errout;
 	}
