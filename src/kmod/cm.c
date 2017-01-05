@@ -6,6 +6,7 @@
  *          Fredy Neeser <nfd@zurich.ibm.com>
  *
  * Copyright (c) 2008-2016, IBM Corporation
+ * Copyright (c) 2017, University of New Hampshire InterOperability Laboratory
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -1242,13 +1243,13 @@ int siw_connect(struct iw_cm_id *id, struct iw_cm_conn_param *params)
 		id, QP_ID(qp), sdev->ofa_dev.name, sdev->netdev->name);
 	pr_debug(DBG_CM "(id=0x%p, QP%d): laddr=(0x%x,%d), raddr=(0x%x,%d)\n",
 		id, QP_ID(qp),
-		ntohl(to_sockaddr_in(id->local_addr).sin_addr.s_addr),
-		ntohs(to_sockaddr_in(id->local_addr).sin_port),
-		ntohl(to_sockaddr_in(id->remote_addr).sin_addr.s_addr),
-		ntohs(to_sockaddr_in(id->remote_addr).sin_port));
+		ntohl(to_sockaddr_in(id->m_local_addr).sin_addr.s_addr),
+		ntohs(to_sockaddr_in(id->m_local_addr).sin_port),
+		ntohl(to_sockaddr_in(id->m_remote_addr).sin_addr.s_addr),
+		ntohs(to_sockaddr_in(id->m_remote_addr).sin_port));
 
-	laddr = (struct sockaddr *)&id->local_addr;
-	raddr = (struct sockaddr *)&id->remote_addr;
+	laddr = (struct sockaddr *)&id->m_local_addr;
+	raddr = (struct sockaddr *)&id->m_remote_addr;
 
 	rv = sock_create(AF_INET, SOCK_DGRAM, IPPROTO_UDP, &s);
 	if (rv)
@@ -1717,7 +1718,7 @@ static int siw_listen_address(struct iw_cm_id *id, int backlog,
 	}
 
 	memcpy(&cep->llp.laddr, laddr, sizeof cep->llp.laddr);
-	memcpy(&cep->llp.raddr, &id->remote_addr, sizeof cep->llp.raddr);
+	memcpy(&cep->llp.raddr, &id->m_remote_addr, sizeof cep->llp.raddr);
 
 	cep->cm_id = id;
 	id->add_ref(id);
@@ -1819,7 +1820,7 @@ static void siw_drop_listeners(struct iw_cm_id *id)
 /*
  * siw_create_listen - Create resources for a listener's IWCM ID @id
  *
- * Listens on the socket addresses id->local_addr and id->remote_addr.
+ * Listens on the socket addresses id->m_local_addr and id->m_remote_addr.
  *
  * If the listener's @id provides a specific local IP address, at most one
  * listening socket is created and associated with @id.
@@ -1847,22 +1848,22 @@ int siw_create_listen(struct iw_cm_id *id, int backlog)
 	 * o For IPv4, use sdev->netdev->ip_ptr
 	 * o For IPv6, use sdev->netdev->ipv6_ptr
 	 */
-	if (to_sockaddr_in(id->local_addr).sin_family == AF_INET) {
+	if (to_sockaddr_in(id->m_local_addr).sin_family == AF_INET) {
 		/* IPv4 */
-		struct sockaddr_in	laddr = to_sockaddr_in(id->local_addr);
+		struct sockaddr_in	laddr = to_sockaddr_in(id->m_local_addr);
 		u8			*l_ip, *r_ip;
 		struct in_device	*in_dev;
 
-		l_ip = (u8 *) &to_sockaddr_in(id->local_addr).sin_addr.s_addr;
-		r_ip = (u8 *) &to_sockaddr_in(id->remote_addr).sin_addr.s_addr;
+		l_ip = (u8 *) &to_sockaddr_in(id->m_local_addr).sin_addr.s_addr;
+		r_ip = (u8 *) &to_sockaddr_in(id->m_remote_addr).sin_addr.s_addr;
 		pr_debug(DBG_CM "(id=0x%p): "
 			"laddr(id)  : ipv4=%d.%d.%d.%d, port=%d; "
 			"raddr(id)  : ipv4=%d.%d.%d.%d, port=%d\n",
 			id,
 			l_ip[0], l_ip[1], l_ip[2], l_ip[3],
-			ntohs(to_sockaddr_in(id->local_addr).sin_port),
+			ntohs(to_sockaddr_in(id->m_local_addr).sin_port),
 			r_ip[0], r_ip[1], r_ip[2], r_ip[3],
-			ntohs(to_sockaddr_in(id->remote_addr).sin_port));
+			ntohs(to_sockaddr_in(id->m_remote_addr).sin_port));
 
 		in_dev = in_dev_get(sdev->netdev);
 		if (!in_dev) {
@@ -1873,13 +1874,13 @@ int siw_create_listen(struct iw_cm_id *id, int backlog)
 
 		for_ifa(in_dev) {
 			/*
-			 * Create a listening socket if id->local_addr
+			 * Create a listening socket if id->m_local_addr
 			 * contains the wildcard IP address OR
 			 * the IP address of the interface.
 			 */
 			if (ipv4_is_zeronet(
-			    to_sockaddr_in(id->local_addr).sin_addr.s_addr) ||
-			    to_sockaddr_in(id->local_addr).sin_addr.s_addr ==
+			    to_sockaddr_in(id->m_local_addr).sin_addr.s_addr) ||
+			    to_sockaddr_in(id->m_local_addr).sin_addr.s_addr ==
 			    ifa->ifa_address) {
 				laddr.sin_addr.s_addr = ifa->ifa_address;
 

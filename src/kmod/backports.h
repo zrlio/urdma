@@ -73,6 +73,14 @@
 #define HAVE_IB_BIND_MW 1
 #endif
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 6, 0)
+/* The iWARP port mapper was added to core in Linux commit b493d91d333e, which
+ * first appeared in Linux 4.6-rc1.  After this commit, we need to use the
+ * mapped local and remote addresses rather than the user-requested ones. */
+#define m_local_addr  local_addr
+#define m_remote_addr remote_addr
+#endif
+
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0)
 /* struct dma_attrs was removed in Linux commit 00085f1efa38 ("dma-mapping: use
  * unsigned long for dma_attrs") which first appeared in Linux 4.8-rc1. */
