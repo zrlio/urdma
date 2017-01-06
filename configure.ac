@@ -4,7 +4,7 @@
 #
 # Authors: Patrick MacArthur <patrick@patrickmacarthur.net>
 #
-# Copyright (c) 2016-2017, University of New Hampshire InterOperability Laboratory
+# Copyright (c) 2016-2017, University of New Hampshire
 #
 # This software is available to you under a choice of one of two
 # licenses.  You may choose to be licensed under the terms of the GNU
