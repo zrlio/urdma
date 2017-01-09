@@ -1,0 +1,9 @@
+[Unit]
+Description=Create and manage virtual urdma devices
+
+[Service]
+Type=simple
+ExecStart=@bindir@/urdmad --proc-type=primary -l0-1 --log-level=8 --base-virtaddr=0x700000000000
+
+[Install]
+WantedBy=multi-user.target
