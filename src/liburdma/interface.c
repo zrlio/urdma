@@ -6,6 +6,7 @@
  * Authors: Patrick MacArthur <pam@zurich.ibm.com>
  *
  * Copyright (c) 2016, IBM Corporation
+ * Copyright (c) 2016-2017, University of New Hampshire
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -333,7 +334,8 @@ enqueue_ether_frame(struct rte_mbuf *sendmsg, unsigned int ether_type,
 	eth->ether_type = rte_cpu_to_be_16(ether_type);
 	sendmsg->l2_len = sizeof(*eth);
 #ifdef DEBUG_PACKET_HEADERS
-	RTE_LOG(DEBUG, USER1, "Enqueue packet to transmit queue:\n");
+	RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Enqueue packet to transmit queue:\n",
+		qp->shm_qp->dev_id, qp->shm_qp->qp_id);
 	rte_pktmbuf_dump(stderr, sendmsg, 128);
 #endif
 
@@ -895,7 +897,8 @@ do_rdmap_send(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 
 		send_ddp_segment(qp, sendmsg, wqe->remote_ep, wqe,
 				payload_length);
-		RTE_LOG(DEBUG, USER1, "SEND transmit msn=%" PRIu32 " [%zu-%zu]\n",
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> SEND transmit msn=%" PRIu32 " [%zu-%zu]\n",
+				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 				wqe->msn,
 				wqe->bytes_sent,
 				wqe->bytes_sent + payload_length);
@@ -951,7 +954,8 @@ do_rdmap_write(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 
 		send_ddp_segment(qp, sendmsg, wqe->remote_ep, wqe,
 				payload_length);
-		RTE_LOG(DEBUG, USER1, "RDMA WRITE transmit bytes %zu through %zu\n",
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> RDMA WRITE transmit bytes %zu through %zu\n",
+				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 				wqe->bytes_sent,
 				wqe->bytes_sent + payload_length);
 
@@ -1159,7 +1163,8 @@ process_send(struct usiw_qp *qp, struct packet_context *orig)
 		} else {
 			/* else, we received this message out of order */
 			assert(serial_greater_32(msn, ee->expected_recv_msn));
-			RTE_LOG(DEBUG, USER1, "Received msn=%" PRIu32 " but expected msn=%" PRIu32 "\n",
+			RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Received msn=%" PRIu32 " but expected msn=%" PRIu32 "\n",
+					qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 					msn, ee->expected_recv_msn);
 		}
 
@@ -1181,7 +1186,8 @@ process_send(struct usiw_qp *qp, struct packet_context *orig)
 	offset = rte_be_to_cpu_32(rdmap->mo);
 	payload_length = orig->ddp_seg_length - sizeof(struct rdmap_untagged_packet);
 	if (offset + payload_length > wqe->total_request_size) {
-		RTE_LOG(DEBUG, USER1, "DROP: offset=%zu + payload_length=%zu > wr_len=%zu\n",
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> DROP: offset=%zu + payload_length=%zu > wr_len=%zu\n",
+				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 				offset, payload_length, wqe->total_request_size);
 		do_rdmap_terminate(qp, orig,
 				ddp_error_untagged_message_too_long);
@@ -1190,7 +1196,8 @@ process_send(struct usiw_qp *qp, struct packet_context *orig)
 
 	if (DDP_GET_L(rdmap->head.ddp_flags)) {
 		if (wqe->input_size != 0) {
-			RTE_LOG(DEBUG, USER1, "silently DROP duplicate last packet.\n");
+			RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> silently DROP duplicate last packet.\n",
+				qp->shm_qp->dev_id, qp->shm_qp->qp_id);
 			return;
 		}
 		wqe->input_size = offset + payload_length;
@@ -1275,7 +1282,8 @@ process_rdma_read_request(struct usiw_qp *qp, struct packet_context *orig)
 
 	msn = rte_be_to_cpu_32(rdmap->untagged.msn);
 	if (msn != orig->src_ep->expected_read_msn) {
-		RTE_LOG(DEBUG, USER1, "RDMA READ failure: expected MSN %" PRIu32 " received %" PRIu32 "\n",
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> RDMA READ failure: expected MSN %" PRIu32 " received %" PRIu32 "\n",
+				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 				orig->src_ep->expected_read_msn, msn);
 		do_rdmap_terminate(qp, orig, ddp_error_untagged_invalid_msn);
 		return;
@@ -1285,7 +1293,8 @@ process_rdma_read_request(struct usiw_qp *qp, struct packet_context *orig)
 	rkey = rte_be_to_cpu_32(rdmap->source_stag);
 	candidate = usiw_mr_lookup(qp->pd, rkey);
 	if (!candidate) {
-		RTE_LOG(DEBUG, USER1, "RDMA READ failure: invalid rkey %" PRIx32 "\n",
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> RDMA READ failure: invalid rkey %" PRIx32 "\n",
+				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 				rkey);
 		do_rdmap_terminate(qp, orig, rdmap_error_stag_invalid);
 		return;
@@ -1296,8 +1305,9 @@ process_rdma_read_request(struct usiw_qp *qp, struct packet_context *orig)
 	uint32_t rdma_length = rte_be_to_cpu_32(rdmap->read_msg_size);
 	if (vaddr < (uintptr_t)mr->mr.addr || vaddr + rdma_length
 			> (uintptr_t)mr->mr.addr + mr->mr.length) {
-		RTE_LOG(DEBUG, USER1, "RDMA READ failure: source [%" PRIxPTR ", %" PRIxPTR
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> RDMA READ failure: source [%" PRIxPTR ", %" PRIxPTR
 				"] outside of memory region [%" PRIxPTR ", %" PRIxPTR "]\n",
+				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 				vaddr, vaddr + rdma_length,
 				(uintptr_t)mr->mr.addr,
 				(uintptr_t)mr->mr.addr + mr->mr.length);
@@ -1308,7 +1318,8 @@ process_rdma_read_request(struct usiw_qp *qp, struct packet_context *orig)
 
 	readresp = qp->readresp_empty.tqh_first;
 	if (!readresp) {
-		RTE_LOG(DEBUG, USER1, "RDMA READ failure: exceeded ord_max %" PRIu8 "\n",
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> RDMA READ failure: exceeded ord_max %" PRIu8 "\n",
+				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 				qp->shm_qp->ord_max);
 		do_rdmap_terminate(qp, orig,
 				rdmap_error_remote_stream_catastrophic);
@@ -1341,7 +1352,8 @@ process_rdma_read_response(struct usiw_qp *qp, struct packet_context *orig)
 			&read_wqe);
 
 	if (ret < 0 || !read_wqe || read_wqe->opcode != usiw_wr_read) {
-		RTE_LOG(DEBUG, USER1, "Unexpected RDMA READ response!\n");
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Unexpected RDMA READ response!\n",
+			qp->shm_qp->dev_id, qp->shm_qp->qp_id);
 		do_rdmap_terminate(qp, orig, rdmap_error_opcode_unexpected);
 		return;
 	}
@@ -1405,7 +1417,8 @@ process_terminate(struct usiw_qp *qp, struct packet_context *orig)
 	rdmap = (struct rdmap_terminate_packet *)orig->rdmap;
 	errcode = rte_be_to_cpu_16(rdmap->error_code);
 	if (!(rdmap->hdrct & rdmap_hdrct_d)) {
-		RTE_LOG(DEBUG, USER1, "Received TERMINATE with error code %#" PRIxFAST16 " and no DDP header\n",
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Received TERMINATE with error code %#" PRIxFAST16 " and no DDP header\n",
+			qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 			errcode);
 		wqe = NULL;
 		goto out;
@@ -1419,7 +1432,8 @@ process_terminate(struct usiw_qp *qp, struct packet_context *orig)
 				rte_be_to_cpu_32(rreq->untagged.head.sink_stag),
 				&wqe);
 		if (ret < 0 || !wqe || wqe->opcode != usiw_wr_read) {
-			RTE_LOG(DEBUG, USER1, "TERMINATE sink_stag=%" PRIu32 " has no matching RDMA Read Request\n",
+			RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> TERMINATE sink_stag=%" PRIu32 " has no matching RDMA Read Request\n",
+				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 				rte_be_to_cpu_32(rreq->untagged.head.sink_stag));
 			return;
 		}
@@ -1440,25 +1454,29 @@ process_terminate(struct usiw_qp *qp, struct packet_context *orig)
 					rte_be_to_cpu_32(t->head.sink_stag),
 					&wqe);
 			if (ret < 0 || !wqe) {
-				RTE_LOG(DEBUG, USER1, "TERMINATE sink_stag=%" PRIu32 " has no matching RDMA WRITE operation\n",
+				RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> TERMINATE sink_stag=%" PRIu32 " has no matching RDMA WRITE operation\n",
+						qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 						rte_be_to_cpu_32(t->head.sink_stag));
 				return;
 			}
 			break;
 		case rdmap_opcode_rdma_read_response:
-			RTE_LOG(DEBUG, USER1, "TERMINATE for RDMA READ Response with sink_stag=%" PRIu32 ": error code %" PRIxFAST16 "\n",
+			RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> TERMINATE for RDMA READ Response with sink_stag=%" PRIu32 ": error code %" PRIxFAST16 "\n",
+						qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 						rte_be_to_cpu_32(t->head.sink_stag),
 						errcode);
 			return;
 		default:
-			RTE_LOG(DEBUG, USER1, "TERMINATE sink_stag=%" PRIu32 " has tagged message error but invalid opcode %u\n",
+			RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> TERMINATE sink_stag=%" PRIu32 " has tagged message error but invalid opcode %u\n",
+					qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 					rte_be_to_cpu_32(t->head.sink_stag),
 					RDMAP_GET_OPCODE(t->head.rdmap_info));
 			return;
 		}
 		break;
 	default:
-		RTE_LOG(DEBUG, USER1, "Received TERMINATE with unhandled error code %#" PRIxFAST16 "\n",
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Received TERMINATE with unhandled error code %#" PRIxFAST16 "\n",
+			qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 			errcode);
 		wqe = NULL;
 		break;
@@ -1580,7 +1598,8 @@ sweep_unacked_packets(struct usiw_qp *qp, uint64_t now)
 		pending = (struct pending_datagram_info *)(sendmsg + 1);
 		if (now > pending->next_retransmit
 				&& resend_ddp_segment(qp, sendmsg, ep) < 0) {
-			RTE_LOG(NOTICE, USER1, "retransmit limit (%d) exceeded psn=%" PRIu32 "\n",
+			RTE_LOG(NOTICE, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> retransmit limit (%d) exceeded psn=%" PRIu32 "\n",
+					qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 					RETRANSMIT_MAX,
 					pending->psn);
 			if (pending->wqe) {
@@ -1620,7 +1639,8 @@ ddp_place_tagged_data(struct usiw_qp *qp, struct packet_context *orig)
 	rkey = rte_be_to_cpu_32(rdmap->head.sink_stag);
 	candidate = usiw_mr_lookup(qp->pd, rkey);
 	if (!candidate) {
-		RTE_LOG(DEBUG, USER1, "received DDP tagged message with invalid stag %" PRIx32 "\n",
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> received DDP tagged message with invalid stag %" PRIx32 "\n",
+				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 				rkey);
 		do_rdmap_terminate(qp, orig, ddp_error_tagged_stag_invalid);
 		return;
@@ -1631,7 +1651,8 @@ ddp_place_tagged_data(struct usiw_qp *qp, struct packet_context *orig)
 	rdma_length = orig->ddp_seg_length - sizeof(*rdmap);
 	if (vaddr < (uintptr_t)mr->mr.addr || vaddr + rdma_length
 			> (uintptr_t)mr->mr.addr + mr->mr.length) {
-		RTE_LOG(DEBUG, USER1, "received DDP tagged message with destination [%" PRIxPTR ", %" PRIxPTR "] outside of memory region [%" PRIxPTR ", %" PRIxPTR "]\n",
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> received DDP tagged message with destination [%" PRIxPTR ", %" PRIxPTR "] outside of memory region [%" PRIxPTR ", %" PRIxPTR "]\n",
+				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 				vaddr, vaddr + rdma_length,
 				(uintptr_t)mr->mr.addr,
 				(uintptr_t)mr->mr.addr + mr->mr.length);
@@ -1641,7 +1662,8 @@ ddp_place_tagged_data(struct usiw_qp *qp, struct packet_context *orig)
 	}
 
 	memcpy((void *)vaddr, PAYLOAD_OF(rdmap), rdma_length);
-	RTE_LOG(DEBUG, USER1, "Wrote %" PRIu32 " bytes to tagged buffer with stag=%" PRIx32 " at %" PRIx64 "\n",
+	RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Wrote %" PRIu32 " bytes to tagged buffer with stag=%" PRIx32 " at %" PRIx64 "\n",
+			qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 			rdma_length, rkey, vaddr);
 
 	opcode = RDMAP_GET_OPCODE(orig->rdmap->rdmap_info);
@@ -1652,7 +1674,8 @@ ddp_place_tagged_data(struct usiw_qp *qp, struct packet_context *orig)
 		process_rdma_read_response(qp, orig);
 		break;
 	default:
-		RTE_LOG(DEBUG, USER1, "received DDP tagged message with invalid opcode %" PRIx8 "\n",
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> received DDP tagged message with invalid opcode %" PRIx8 "\n",
+				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 				opcode);
 		do_rdmap_terminate(qp, orig, rdmap_error_opcode_unexpected);
 	}
@@ -1670,7 +1693,8 @@ process_data_packet(struct usiw_qp *qp, struct rte_mbuf *mbuf)
 	uint16_t trp_opcode;
 
 #ifdef DEBUG_PACKET_HEADERS
-	RTE_LOG(DEBUG, USER1, "Begin processing received packet:\n");
+	RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Begin processing received packet:\n",
+		qp->shm_qp->dev_id, qp->shm_qp->qp_id);
 	rte_pktmbuf_dump(stderr, mbuf, 128);
 #endif
 
@@ -1693,7 +1717,8 @@ process_data_packet(struct usiw_qp *qp, struct rte_mbuf *mbuf)
 				rte_ipv4_udptcp_cksum(ipv4_hdr, udp_hdr),
 				actual_udp_checksum);
 		}
-		RTE_LOG(DEBUG, USER1, "Drop packet with bad UDP/IP checksum\n");
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Drop packet with bad UDP/IP checksum\n",
+			qp->shm_qp->dev_id, qp->shm_qp->qp_id);
 		return;
 	}
 
@@ -1720,7 +1745,8 @@ process_data_packet(struct usiw_qp *qp, struct rte_mbuf *mbuf)
 		break;
 	case trp_sack:
 		/* This is a selective acknowledgement */
-		RTE_LOG(NOTICE, USER1, "receive SACK [%" PRIu32 ", %" PRIu32 "); send_ack_psn %" PRIu32 "\n",
+		RTE_LOG(NOTICE, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> receive SACK [%" PRIu32 ", %" PRIu32 "); send_ack_psn %" PRIu32 "\n",
+				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 				rte_be_to_cpu_32(trp_hdr->psn),
 				rte_be_to_cpu_32(trp_hdr->ack_psn),
 				ctx.src_ep->send_last_acked_psn);
@@ -1732,7 +1758,8 @@ process_data_packet(struct usiw_qp *qp, struct rte_mbuf *mbuf)
 		qp_shutdown(qp);
 		return;
 	default:
-		RTE_LOG(NOTICE, USER1, "receive unexpected opcode %" PRIu16 "; dropping\n",
+		RTE_LOG(NOTICE, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> receive unexpected opcode %" PRIu16 "; dropping\n",
+				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 				trp_opcode >> trp_opcode_shift);
 		return;
 	}
@@ -1745,7 +1772,8 @@ process_data_packet(struct usiw_qp *qp, struct rte_mbuf *mbuf)
 	if (rte_be_to_cpu_16(udp_hdr->dgram_len) <=
 					sizeof(*udp_hdr) + sizeof(*trp_hdr)) {
 		/* No DDP segment attached; ignore PSN */
-		RTE_LOG(DEBUG, USER1, "got ACK psn %" PRIu32 "; now last_acked_psn %" PRIu32 " send_next_psn %" PRIu32 " send_max_psn %" PRIu32 "\n",
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> got ACK psn %" PRIu32 "; now last_acked_psn %" PRIu32 " send_next_psn %" PRIu32 " send_max_psn %" PRIu32 "\n",
+						qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 						ctx.psn,
 						ctx.src_ep->send_last_acked_psn,
 						ctx.src_ep->send_next_psn,
@@ -1768,7 +1796,8 @@ process_data_packet(struct usiw_qp *qp, struct rte_mbuf *mbuf)
 		/* We detected a sequence number gap.  Try to build a
 		 * contiguous range so we can send a SACK to lower the number
 		 * of retransmissions. */
-		RTE_LOG(DEBUG, USER1, "receive psn %" PRIu32 "; next expected psn %" PRIu32 "\n",
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> receive psn %" PRIu32 "; next expected psn %" PRIu32 "\n",
+				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 				ctx.psn,
 				ctx.src_ep->recv_ack_psn);
 		if (ctx.src_ep->trp_flags & trp_recv_missing) {
@@ -1793,7 +1822,8 @@ process_data_packet(struct usiw_qp *qp, struct rte_mbuf *mbuf)
 				 * datagram; drop it and wait for it to be
 				 * retransmitted along with the surrounding
 				 * datagrams. */
-				RTE_LOG(NOTICE, USER1, "got out of range psn %" PRIu32 "; next expected %" PRIu32 " sack range: [%" PRIu32 ",%" PRIu32 "]\n",
+				RTE_LOG(NOTICE, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> got out of range psn %" PRIu32 "; next expected %" PRIu32 " sack range: [%" PRIu32 ",%" PRIu32 "]\n",
+						qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 						ctx.psn, ctx.src_ep->recv_ack_psn,
 						ctx.src_ep->recv_sack_psn.min,
 						ctx.src_ep->recv_sack_psn.max);
@@ -1811,8 +1841,9 @@ process_data_packet(struct usiw_qp *qp, struct rte_mbuf *mbuf)
 	} else {
 		/* This is a retransmission of a packet which we have already
 		 * acknowledged; throw it away. */
-		RTE_LOG(NOTICE, USER1, "got retransmission psn %" PRIu32 "\n",
-						ctx.psn);
+		RTE_LOG(NOTICE, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> got retransmission psn %" PRIu32 "; expected psn %" PRIu32 "\n",
+						qp->shm_qp->dev_id, qp->shm_qp->qp_id,
+						ctx.psn, ctx.src_ep->recv_ack_psn);
 		return;
 	}
 
@@ -2032,7 +2063,8 @@ start_qp(struct usiw_qp *qp)
 	qp->readresp_store = calloc(qp->shm_qp->ird_max,
 			sizeof(*qp->readresp_store));
 	if (!qp->readresp_store) {
-		RTE_LOG(DEBUG, USER1, "Set up readresp_store failed: %s\n",
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Set up readresp_store failed: %s\n",
+						qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 						strerror(errno));
 		rte_atomic16_set(&qp->shm_qp->conn_state, usiw_qp_error);
 		rte_spinlock_unlock(&qp->shm_qp->conn_event_lock);

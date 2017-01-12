@@ -5,6 +5,7 @@
  *          Patrick MacArthur <pam@zurich.ibm.com>
  *
  * Copyright (c) 2008-2016, IBM Corporation
+ * Copyright (c) 2016-2017, University of New Hampshire
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -70,6 +71,22 @@
 /* Removed in Linux commit feb7c1e38bcc, which first appeared in
  * Linux 4.5-rc1. */
 #define HAVE_IB_BIND_MW 1
+#endif
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 6, 0)
+/* The iWARP port mapper was added to core in Linux commit b493d91d333e, which
+ * first appeared in Linux 4.6-rc1.  After this commit, we need to use the
+ * mapped local and remote addresses rather than the user-requested ones. */
+#define m_local_addr  local_addr
+#define m_remote_addr remote_addr
+#endif
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0)
+/* struct dma_attrs was removed in Linux commit 00085f1efa38 ("dma-mapping: use
+ * unsigned long for dma_attrs") which first appeared in Linux 4.8-rc1. */
+typedef struct dma_attrs *dma_attrs_t;
+#else
+typedef unsigned long dma_attrs_t;
 #endif
 
 #endif

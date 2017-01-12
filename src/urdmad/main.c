@@ -5,7 +5,7 @@
  *
  * Author: Patrick MacArthur <patrick@patrickmacarthur.net>
  *
- * Copyright (c) 2016, University of New Hampshire
+ * Copyright (c) 2016-2017, University of New Hampshire
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -849,6 +849,11 @@ setup_socket(const char *path)
 	}
 	addr.sun_family = AF_UNIX;
 	strncpy(addr.sun_path, path, sizeof(addr.sun_path));
+
+	if (unlink(path) < 0 && errno != ENOENT) {
+		rte_exit(EXIT_FAILURE, "Could not unlink previous socket %s: %s\n",
+				path, strerror(errno));
+	}
 
 	driver->listen.fd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
 	if (driver->listen.fd < 0) {
