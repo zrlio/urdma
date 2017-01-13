@@ -47,6 +47,8 @@
 #include <rdma/iw_cm.h>
 
 
+#define URDMA_PDATA_LEN_MAX 512
+
 enum siw_cep_state {
 	SIW_EPSTATE_IDLE = 1,
 	SIW_EPSTATE_LISTENING,
@@ -62,7 +64,8 @@ enum siw_cep_state {
 
 struct siw_mpa_info {
 	struct mpa_rr	hdr;	/* peer mpa hdr in host byte order */
-	char		*pdata;
+	char		pdata[URDMA_PDATA_LEN_MAX];
+				/* private data, plus up to four pad bytes */
 	int		bytes_rcvd;
 	char		*send_pdata;
 	int		send_pdata_size;
