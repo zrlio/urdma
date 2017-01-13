@@ -281,15 +281,10 @@ int siw_query_device(struct ib_device *ofa_dev, struct ib_device_attr *attr,
 #endif
 {
 	struct siw_dev *sdev = siw_dev_ofa2siw(ofa_dev);
-	/*
-	 * A process context is needed to report avail memory resources.
-	 */
-	if (in_interrupt())
-		return -EINVAL;
 
 	memset(attr, 0, sizeof *attr);
 
-	attr->max_mr_size = rlimit(RLIMIT_MEMLOCK); /* per process */
+	attr->max_mr_size = -1ULL;
 	attr->sys_image_guid = sdev->ofa_dev.node_guid;
 	attr->vendor_id = sdev->attrs.vendor_id;
 	attr->vendor_part_id = sdev->attrs.vendor_part_id;
