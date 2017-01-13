@@ -44,7 +44,7 @@ SOURCES = ae.c backports.h cm.c cm.h debug.c debug.h iwarp.h main.c mem.c \
 all:
 	for i in $(SOURCES); do if [ ! -e $${i} ]; then ln -s @srcdir@/$${i} $${i}; fi; done
 	if [ ! -e urdma_kabi.h ]; then ln -s @top_srcdir@/include/urdma_kabi.h .; fi
-	make -C @KERNELDIR@ M=`pwd` top_srcdir=$(realpath @top_srcdir@) modules
+	make -C @KERNELDIR@ M=`pwd` top_srcdir=$(realpath @top_srcdir@) modules EXTRA_CFLAGS="-g -DDEBUG"
 
 Makefile: @srcdir@/Makefile.in
 	cd @top_builddir@; ./config.status
