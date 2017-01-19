@@ -1437,7 +1437,6 @@ usiw_init_context(struct verbs_device *device, struct ibv_context *context,
 
 	dev = container_of(device, struct usiw_device, vdev);
 	ctx->dev = dev;
-	ctx->dev->ctx = ctx;
 
 	rte_atomic32_init(&ctx->qp_init_count);
 	LIST_INIT(&ctx->qp_active);
@@ -1445,12 +1444,16 @@ usiw_init_context(struct verbs_device *device, struct ibv_context *context,
 	ctx->qp = NULL;
 	rte_spinlock_init(&ctx->qp_lock);
 
+	driver_add_context(ctx);
 	return 0;
 } /* usiw_init_context */
 
 
 void
-usiw_uninit_context(__attribute__((unused)) struct verbs_device *device,
-		__attribute__((unused)) struct ibv_context *ib_ctx)
+usiw_uninit_context(struct verbs_device *device, struct ibv_context *ib_ctx)
 {
+	struct usiw_context *ctx = usiw_get_context(ib_ctx);
+	RTE_LOG(INFO, USER1, "close context %p for device %p\n",
+			(void *)ib_ctx, (void *)device);
+	LIST_REMOVE(ctx, driver_entry);
 } /* usiw_uninit_context */

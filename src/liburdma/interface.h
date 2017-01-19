@@ -313,6 +313,7 @@ struct usiw_context {
 	struct verbs_context vcontext;
 	struct usiw_device *dev;
 	int event_fd;
+	LIST_ENTRY(usiw_context) driver_entry;
 	LIST_HEAD(usiw_qp_head, usiw_qp) qp_active;
 	rte_atomic32_t qp_init_count;
 		/**< The number of queue pairs in the INIT state. */
@@ -332,7 +333,6 @@ usiw_get_context(struct ibv_context *ctx)
 
 struct usiw_device {
 	struct verbs_device vdev;
-	LIST_ENTRY(usiw_device) driver_entry;
 	struct rte_mempool *rx_mempool;
 	struct rte_mempool *tx_ddp_mempool;
 	struct rte_mempool *tx_hdr_mempool;
@@ -352,7 +352,7 @@ struct usiw_driver {
 	struct nl_sock *sock;
 	struct nl_cache *link_cache;
 	struct nl_cache *addr_cache;
-	LIST_HEAD(usiw_device_list_head, usiw_device) devs;
+	LIST_HEAD(usiw_context_list_head, usiw_context) ctxs;
 	int urdmad_fd;
 	uint32_t lcore_mask[RTE_MAX_LCORE / 32];
 };
@@ -360,6 +360,11 @@ struct usiw_driver {
 /** Starts the progress thread. */
 void
 start_progress_thread(void);
+
+/** Adds an IB user context to the list of contexts to be managed by the
+ * progress thread. */
+void
+driver_add_context(struct usiw_context *ctx);
 
 struct usiw_mr **
 usiw_mr_lookup(struct usiw_mr_table *tbl, uint32_t rkey);
