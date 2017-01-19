@@ -2037,22 +2037,6 @@ usiw_do_destroy_qp(struct usiw_qp *qp)
 } /* usiw_do_destroy_qp */
 
 
-static struct usiw_qp *
-lookup_qp_id(struct usiw_context *ctx, uint32_t qp_id)
-{
-	struct usiw_qp *qp;
-
-	rte_spinlock_lock(&ctx->qp_lock);
-	HASH_FIND(hh, ctx->qp, &qp_id, sizeof(qp_id), qp);
-	rte_spinlock_unlock(&ctx->qp_lock);
-	if (qp) {
-		rte_atomic32_inc(&qp->refcnt);
-		return qp;
-	}
-	return NULL;
-} /* lookup_qp_id */
-
-
 static void
 start_qp(struct usiw_qp *qp)
 {
