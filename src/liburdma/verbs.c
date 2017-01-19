@@ -908,8 +908,12 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 
 	ee->tx_head = ee->tx_pending;
 
+	/* Queue pairs start with two references; one for the internal qp_active
+	 * list that gets decremented when the progress thread notices that the
+	 * QP has reached the error state, and the other for the reference
+	 * returned to the user which will be freed by ibv_destroy_qp().  */
 	rte_atomic32_init(&qp->refcnt);
-	rte_atomic32_set(&qp->refcnt, 1);
+	rte_atomic32_set(&qp->refcnt, 2);
 
 	rte_spinlock_lock(&ctx->qp_lock);
 	rte_atomic32_inc(&ctx->qp_init_count);
