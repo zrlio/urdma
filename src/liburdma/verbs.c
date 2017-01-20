@@ -1459,7 +1459,5 @@ void
 usiw_uninit_context(struct verbs_device *device, struct ibv_context *ib_ctx)
 {
 	struct usiw_context *ctx = usiw_get_context(ib_ctx);
-	RTE_LOG(INFO, USER1, "close context %p for device %p\n",
-			(void *)ib_ctx, (void *)device);
 	LIST_REMOVE(ctx, driver_entry);
 } /* usiw_uninit_context */
