@@ -62,7 +62,7 @@
 MODULE_AUTHOR("Bernard Metzler");
 MODULE_DESCRIPTION("Userspace Software iWARP Driver");
 MODULE_LICENSE("Dual BSD/GPL");
-MODULE_VERSION("0.3");
+MODULE_VERSION(PACKAGE_VERSION);
 
 static struct list_head urdma_devlist;
 DEFINE_SPINLOCK(siw_dev_lock);
