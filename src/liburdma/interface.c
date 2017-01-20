@@ -2037,22 +2037,6 @@ usiw_do_destroy_qp(struct usiw_qp *qp)
 } /* usiw_do_destroy_qp */
 
 
-static struct usiw_qp *
-lookup_qp_id(struct usiw_context *ctx, uint32_t qp_id)
-{
-	struct usiw_qp *qp;
-
-	rte_spinlock_lock(&ctx->qp_lock);
-	HASH_FIND(hh, ctx->qp, &qp_id, sizeof(qp_id), qp);
-	rte_spinlock_unlock(&ctx->qp_lock);
-	if (qp) {
-		rte_atomic32_inc(&qp->refcnt);
-		return qp;
-	}
-	return NULL;
-} /* lookup_qp_id */
-
-
 static void
 start_qp(struct usiw_qp *qp)
 {
@@ -2117,7 +2101,7 @@ int
 kni_loop(void *arg)
 {
 	struct usiw_driver *driver = arg;
-	struct usiw_device *dev, **dev_prev;
+	struct usiw_context *ctx, **ctx_prev;
 	struct usiw_qp *qp, **qp_prev;
 	struct rte_mbuf *rxmbuf[RX_BURST_SIZE];
 	unsigned int count;
@@ -2125,13 +2109,8 @@ kni_loop(void *arg)
 
 	sem_wait(&driver->go);
 	while (1) {
-		LIST_FOR_EACH(dev, &driver->devs, driver_entry, dev_prev) {
-			if (!dev->ctx) {
-				continue;
-			}
-
-			LIST_FOR_EACH(qp, &dev->ctx->qp_active,
-							ctx_entry, qp_prev) {
+		LIST_FOR_EACH(ctx, &driver->ctxs, driver_entry, ctx_prev) {
+			LIST_FOR_EACH(qp, &ctx->qp_active, ctx_entry, qp_prev) {
 				switch (rte_atomic16_read(&qp->shm_qp->conn_state)) {
 				case usiw_qp_connected:
 					/* start_qp() transitions to

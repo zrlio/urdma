@@ -908,8 +908,12 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 
 	ee->tx_head = ee->tx_pending;
 
+	/* Queue pairs start with two references; one for the internal qp_active
+	 * list that gets decremented when the progress thread notices that the
+	 * QP has reached the error state, and the other for the reference
+	 * returned to the user which will be freed by ibv_destroy_qp().  */
 	rte_atomic32_init(&qp->refcnt);
-	rte_atomic32_set(&qp->refcnt, 1);
+	rte_atomic32_set(&qp->refcnt, 2);
 
 	rte_spinlock_lock(&ctx->qp_lock);
 	rte_atomic32_inc(&ctx->qp_init_count);
@@ -1437,7 +1441,6 @@ usiw_init_context(struct verbs_device *device, struct ibv_context *context,
 
 	dev = container_of(device, struct usiw_device, vdev);
 	ctx->dev = dev;
-	ctx->dev->ctx = ctx;
 
 	rte_atomic32_init(&ctx->qp_init_count);
 	LIST_INIT(&ctx->qp_active);
@@ -1445,12 +1448,16 @@ usiw_init_context(struct verbs_device *device, struct ibv_context *context,
 	ctx->qp = NULL;
 	rte_spinlock_init(&ctx->qp_lock);
 
+	driver_add_context(ctx);
 	return 0;
 } /* usiw_init_context */
 
 
 void
-usiw_uninit_context(__attribute__((unused)) struct verbs_device *device,
-		__attribute__((unused)) struct ibv_context *ib_ctx)
+usiw_uninit_context(struct verbs_device *device, struct ibv_context *ib_ctx)
 {
+	struct usiw_context *ctx = usiw_get_context(ib_ctx);
+	RTE_LOG(INFO, USER1, "close context %p for device %p\n",
+			(void *)ib_ctx, (void *)device);
+	LIST_REMOVE(ctx, driver_entry);
 } /* usiw_uninit_context */

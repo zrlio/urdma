@@ -80,6 +80,12 @@
 static struct usiw_driver *driver;
 
 void
+driver_add_context(struct usiw_context *ctx)
+{
+	LIST_INSERT_HEAD(&driver->ctxs, ctx, driver_entry);
+} /* driver_add_context */
+
+void
 start_progress_thread(void)
 {
 	sem_post(&driver->go);
@@ -232,7 +238,6 @@ usiw_driver_init(int portid)
 
 	dev->urdmad_fd = driver->urdmad_fd;
 
-	LIST_INSERT_HEAD(&driver->devs, dev, driver_entry);
 	return &dev->vdev.device;
 } /* usiw_driver_init */
 
@@ -471,7 +476,7 @@ do_init_driver(void)
 	driver = calloc(1, sizeof(*driver));
 	if (!driver)
 		goto err;
-	LIST_INIT(&driver->devs);
+	LIST_INIT(&driver->ctxs);
 
 	driver->urdmad_fd = setup_socket(sock_name);
 	if (driver->urdmad_fd < 0)
