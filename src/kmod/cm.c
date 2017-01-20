@@ -228,8 +228,6 @@ static void __siw_cep_dealloc(struct kref *ref)
 
 	WARN_ON(cep->listen_cep);
 
-	/* kfree(NULL) is save */
-	kfree(cep->mpa.pdata);
 	spin_lock_bh(&cep->lock);
 	if (!list_empty(&cep->work_freelist))
 		siw_cm_free_work(cep);
@@ -425,25 +423,6 @@ void siw_cep_get(struct siw_cep *cep)
 }
 
 
-
-static inline int ksock_recv(struct socket *sock, char *buf, size_t size,
-			     int flags, struct sockaddr_storage *addr)
-{
-	struct kvec iov = {buf, size};
-	struct msghdr msg = {.msg_name = addr, .msg_namelen = sizeof *addr,
-			     .msg_flags = flags};
-
-	int rv = kernel_recvmsg(sock, &msg, &iov, 1, size, flags);
-	if (rv >= 0 && addr) {
-		u8	*r_ip = (u8 *) &to_sockaddr_in(*addr).sin_addr.s_addr;
-
-		pr_debug(DBG_CM "raddr : ipv4=%d.%d.%d.%d, port=%d\n",
-			r_ip[0], r_ip[1], r_ip[2], r_ip[3],
-			ntohs(to_sockaddr_in(*addr).sin_port));
-	}
-	return rv;
-}
-
 /*
  * Expects params->pd_len in host byte order
  *
@@ -509,102 +488,39 @@ static int siw_send_mpareqrep(struct siw_cep *cep, const void *pdata,
  */
 static int siw_recv_mpa_rr(struct siw_cep *cep)
 {
-	struct mpa_rr	*hdr = &cep->mpa.hdr;
-	struct socket	*s = cep->llp.sock;
-	u16		pd_len;
-	int		rcvd, to_rcv;
+	struct sockaddr_storage peer_addr;
+	struct msghdr		msg;
+	struct kvec		iov[2];
+	u16			pd_len;
+	int			rv;
 
-	if (cep->mpa.bytes_rcvd < sizeof(struct mpa_rr)) {
-		struct sockaddr_storage *peer, peer_addr;
+	memset(&msg, 0, sizeof(msg));
+	memset(&peer_addr, 0, sizeof(peer_addr));
+	msg.msg_name = &peer_addr;
+	msg.msg_namelen = sizeof(peer_addr);
+	msg.msg_flags = MSG_DONTWAIT;
 
-		/* Get peer address if first byes of MPA message */
-		if (cep->mpa.bytes_rcvd == 0) {
-			peer = &peer_addr;
-			memset(peer, 0, sizeof *peer);
-		} else
-			peer = NULL;
+	memset(&iov, 0, sizeof(iov));
+	iov[0].iov_base = &cep->mpa.hdr;
+	iov[0].iov_len = sizeof(cep->mpa.hdr);
+	iov[1].iov_base = cep->mpa.pdata;
+	iov[1].iov_len = URDMA_PDATA_LEN_MAX;
 
-		rcvd = ksock_recv(s, (char *)hdr + cep->mpa.bytes_rcvd,
-				  sizeof(struct mpa_rr) -
-				  cep->mpa.bytes_rcvd, MSG_DONTWAIT, peer);
-
-		if (rcvd <= 0)
-			return -ECONNABORTED;
-
-		if (peer) {
-			/* Save peer address */
-			memcpy(&cep->llp.raddr, peer, sizeof cep->llp.raddr);
-			peer = NULL;
-		}
-		cep->mpa.bytes_rcvd += rcvd;
-
-		if (cep->mpa.bytes_rcvd < sizeof(struct mpa_rr))
-			return -EAGAIN;
-
-		if (be16_to_cpu(hdr->params.pd_len) > MPA_MAX_PRIVDATA)
-			return -EPROTO;
-	}
-	pd_len = be16_to_cpu(hdr->params.pd_len);
-
-	/*
-	 * At least the MPA Request/Reply header (frame not including
-	 * private data) has been received.
-	 * Receive (or continue receiving) any private data.
-	 */
-	to_rcv = pd_len - (cep->mpa.bytes_rcvd - sizeof(struct mpa_rr));
-
-	if (!to_rcv) {
-		/*
-		 * We must have hdr->params.pd_len == 0 and thus received a
-		 * complete MPA Request/Reply frame.
-		 * Check against peer protocol violation.
-		 */
-		u32 word;
-
-		rcvd = ksock_recv(s, (char *)&word, sizeof word,
-				  MSG_DONTWAIT, NULL);
-		if (rcvd == -EAGAIN)
-			return 0;
-
-		if (rcvd == 0) {
-			pr_debug(DBG_CM " peer EOF\n");
-			return -EPIPE;
-		}
-		if (rcvd < 0) {
-			pr_debug(DBG_CM " ERROR: %d:\n", rcvd);
-			return rcvd;
-		}
-		pr_debug(DBG_CM " peer sent extra data: %d\n", rcvd);
+	rv = kernel_recvmsg(cep->llp.sock, &msg, iov, 2,
+			    iov[0].iov_len + iov[1].iov_len,
+			    MSG_DONTWAIT);
+	if (rv < sizeof(struct mpa_rr)) {
 		return -EPROTO;
 	}
-
-	/*
-	 * At this point, we must have hdr->params.pd_len != 0.
-	 * A private data buffer gets allocated if hdr->params.pd_len != 0.
-	 */
-	if (!cep->mpa.pdata) {
-		cep->mpa.pdata = kmalloc(pd_len + 4, GFP_KERNEL);
-		if (!cep->mpa.pdata)
-			return -ENOMEM;
-	}
-	rcvd = ksock_recv(s, cep->mpa.pdata + cep->mpa.bytes_rcvd
-			  - sizeof(struct mpa_rr), to_rcv + 4,
-			  MSG_DONTWAIT, NULL);
-
-	if (rcvd < 0)
-		return rcvd;
-
-	if (rcvd > to_rcv)
+	pd_len = be16_to_cpu(cep->mpa.hdr.params.pd_len);
+	if (pd_len > MPA_MAX_PRIVDATA
+			|| rv != sizeof(struct mpa_rr) + pd_len)
 		return -EPROTO;
 
-	cep->mpa.bytes_rcvd += rcvd;
+	pr_debug(DBG_CM " %d bytes private_data received\n", pd_len);
 
-	if (to_rcv == rcvd) {
-		pr_debug(DBG_CM " %d bytes private_data received\n", pd_len);
-
-		return 0;
-	}
-	return -EAGAIN;
+	memcpy(&cep->llp.raddr, &peer_addr, sizeof(cep->llp.raddr));
+	return 0;
 }
 
 
@@ -620,8 +536,7 @@ static int siw_proc_mpareq(struct siw_cep *cep)
 	int		rv;
 
 	rv = siw_recv_mpa_rr(cep);
-	if (rv != -EAGAIN)
-		siw_cancel_timer(cep);
+	siw_cancel_timer(cep);
 	if (rv)
 		goto out;
 
@@ -664,9 +579,6 @@ static int siw_proc_mpareq(struct siw_cep *cep)
 		if (!mpa_crc_required && mpa_crc_strict)
 			req->params.bits &= ~MPA_RR_FLAG_CRC;
 
-		kfree(cep->mpa.pdata);
-		cep->mpa.pdata = NULL;
-
 		(void)siw_send_mpareqrep(cep, NULL, 0);
 		rv = -EOPNOTSUPP;
 		goto out;
@@ -702,8 +614,7 @@ static int siw_proc_mpareply(struct siw_cep *cep)
 	int			rv;
 
 	rv = siw_recv_mpa_rr(cep);
-	if (rv != -EAGAIN)
-		siw_cancel_timer(cep);
+	siw_cancel_timer(cep);
 	if (rv)
 		goto out_err;
 
@@ -1481,8 +1392,6 @@ int siw_accept(struct iw_cm_id *id, struct iw_cm_conn_param *params)
 	/* Free lingering inbound private data */
 	if (cep->mpa.hdr.params.pd_len) {
 		cep->mpa.hdr.params.pd_len = 0;
-		kfree(cep->mpa.pdata);
-		cep->mpa.pdata = NULL;
 	}
 	if (cep->state != SIW_EPSTATE_RECVD_MPAREQ) {
 		if (cep->state == SIW_EPSTATE_CLOSED) {
