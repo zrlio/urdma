@@ -8,7 +8,8 @@ Requirements
  - libibverbs >= 1.2.0 (versions less than 1.1.8 do not support verbs extensions
    and version 1.1.8 has a broken extensions ABI)
  - librdmacm >= 1.0.21
- - DPDK >= 16.07 built as shared libraries (CONFIG_RTE_BUILD_SHARED_LIB=y)
+ - DPDK >= 16.07 built as shared libraries (CONFIG_RTE_BUILD_SHARED_LIB=y),
+   and the rte_kni kernel module built for the currently running kernel
  - libnl-3 and libnl-route-3
  - json-c
  - uthash (included in Fedora, Ubuntu, openSUSE, and EPEL for RHEL
@@ -17,22 +18,31 @@ Requirements
 Setup instructions
 ------------------
 
-I am assuming a default installation of CentOS 7.
+I am assuming a default installation of Ubuntu 16.10.  Other modern
+distributions should also work, but you will need to install DPDK
+yourself in order to build the required rte_kni kernel modules which
+most other distributions do not ship in their repositories.
 
-To build this package, RTE_SDK and RTE_TARGET need to be exported into the environment:
+To build this package, RTE_SDK and RTE_TARGET need to be exported into
+the environment.  Using the packages in the Ubuntu 16.10 repositories,
+you can run the following:
 
-$ export RTE_SDK=${prefix}/share/dpdk
-$ export RTE_TARGET=x86_64-native-linuxapp-gcc
+    $ source /usr/share/dpdk/dpdk-sdk-env.sh
+
+Or for a manual DPDK installation:
+
+    $ export RTE_SDK=${prefix}/share/dpdk
+    $ export RTE_TARGET=x86_64-native-linuxapp-gcc
 
 If you are pulling this from a fresh git clone, first run:
 
-$ autoreconf -i
+    $ autoreconf -i
 
 Then this follows the normal autotools-style build:
 
-$ ./configure --sysconfdir /etc
-$ make
-$ sudo make install
+    $ ./configure --sysconfdir /etc
+    $ make
+    $ sudo make install
 
 Note that sysconfdir must match that of your libibverbs installation, in
 order for the verbs library to find the urdma driver.
@@ -43,32 +53,38 @@ set the KERNELDIR environment variable to specify a different location;
 for example, if you are building against a different kernel version than
 what it installed locally.
 
-By default, this package is compiled with -march=native as this enables
-machine instructions that are required by DPDK.  You can adjust this by
-setting the MACHINE_CFLAGS environment variable.
-
 To run an application with this driver, the KNI and urdma modules must be loaded:
 
-$ sudo modprobe rte_kni
-$ sudo modprobe urdma
+    $ sudo modprobe rte_kni
+    $ sudo modprobe urdma
 
 You will need to create a file ${sysconfdir}/rdma/urdma.json that looks
 like this, with appropriate values substituted in:
 
-{ "ports": { "ipv4_address": "10.2.0.100" },
-  "sock_name": "/run/urdma.sock",
-  "eal_args": { "log-level": 7 }
-}
+    { "ports": { "ipv4_address": "10.2.0.100" },
+      "sock_name": "/run/urdma.sock",
+      "eal_args": { "log-level": 7 }
+    }
 
 Finally, the urdmad service must be running:
 
-$ sudo systemctl start urdmad
+    $ sudo systemctl start urdmad
 
 This will cause devices to appear in your "ip link" output, and cause
 uverbs devices to appear in /sys/class/infiniband_verbs.
 
 Known Issues
 ------------
+
+ - Shared receive queues (SRQs) are currently not supported.  In order
+   to run openmpi over urdma, you will need to specify the following
+   command line options to prevent openmpi from using shared receive
+   queues, and to disable a warning that it doesn't know about the
+   device vendor ID:
+
+       $ mpirun --mca btl_openib_warn_no_device_params_found 0 \
+                --mca btl_openib_receive_queues P,65536,256,192,128 \
+		${mpi_app} ${mpi_app_args}...
 
  - There is a potential race condition with completion channels, where a
    completion event can get lost, and thus a thread waiting on
