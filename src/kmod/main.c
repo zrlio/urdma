@@ -232,7 +232,6 @@ static ssize_t do_read_established_event(struct urdma_chardev_data *file,
 	spin_unlock_irq(&file->lock);
 
 	/* Must not have IRQs disabled when querying routing tables. */
-	/* FIXME: do something with rv */
 	rv = fetch_dest_hwaddr(netdev, event.src_ipv4, event.dst_ipv4,
 		&event.dst_ether);
 	if (copy_to_user(buf, &event, sizeof(event))) {
@@ -241,7 +240,7 @@ static ssize_t do_read_established_event(struct urdma_chardev_data *file,
 
 	dev_put(netdev);
 
-	return sizeof(event);
+	return (rv >= 0) ? sizeof(event) : rv;
 } /* do_read_established_event */
 
 static ssize_t urdma_chardev_read(struct file *filp, char *buf,
