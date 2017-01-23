@@ -730,6 +730,7 @@ static int siw_netdev_event(struct notifier_block *nb, unsigned long event,
 
 		if (in_dev->ifa_list) {
 			sdev->state = IB_PORT_ACTIVE;
+			siw_device_assign_guid(sdev, netdev);
 			siw_device_register(sdev);
 		} else {
 			pr_debug(DBG_DM ": %s: no ifa\n", netdev->name);
