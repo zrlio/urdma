@@ -327,7 +327,7 @@ usiw_query_device(struct ibv_context *context,
 		struct ibv_device_attr *device_attr)
 {
 	struct ibv_query_device cmd;
-	uint64_t raw_fw_ver;
+	__attribute__((unused)) uint64_t raw_fw_ver;
 	int ret;
 
 	if (!context || !device_attr) {
@@ -337,7 +337,8 @@ usiw_query_device(struct ibv_context *context,
 	ret = ibv_cmd_query_device(context, device_attr,
 			&raw_fw_ver, &cmd, sizeof(cmd));
 
-	snprintf(device_attr->fw_ver, 64, "%" PRIu64, raw_fw_ver);
+	strncpy(device_attr->fw_ver, PACKAGE_VERSION,
+		sizeof(device_attr->fw_ver));
 	device_attr->max_mr_size = MAX_MR_SIZE;
 	device_attr->page_size_cap = 4096;
 	device_attr->vendor_id = URDMA_VENDOR_ID;
@@ -615,6 +616,7 @@ convert_cqes(struct usiw_wc *cqe, int num_entries, struct ibv_wc *wc)
 		wc[x].opcode = cqe[x].opcode;
 		wc[x].byte_len = cqe[x].byte_len;
 		wc[x].qp_num = cqe[x].qp_num;
+		wc[x].wc_flags = 0;
 	}
 } /* convert_cqes */
 
@@ -1457,7 +1459,5 @@ void
 usiw_uninit_context(struct verbs_device *device, struct ibv_context *ib_ctx)
 {
 	struct usiw_context *ctx = usiw_get_context(ib_ctx);
-	RTE_LOG(INFO, USER1, "close context %p for device %p\n",
-			(void *)ib_ctx, (void *)device);
 	LIST_REMOVE(ctx, driver_entry);
 } /* usiw_uninit_context */
