@@ -491,7 +491,7 @@ do_init_driver(void)
 	if (do_hello() < 0) {
 		fprintf(stderr, "Could not setup socket: %s\n",
 				strerror(errno));
-		goto free_ring;
+		goto close_fd;
 	}
 	eal_argv[eal_argc - 1] = format_coremask(driver->lcore_mask,
 						 RTE_DIM(driver->lcore_mask));
