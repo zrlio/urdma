@@ -5,6 +5,7 @@ Requirements
 ------------
 
  - Linux kernel >= 3.17.8
+ - gcc >= 4.9 or a compiler which supports the C11 standard
  - libibverbs >= 1.2.0 (versions less than 1.1.8 do not support verbs extensions
    and version 1.1.8 has a broken extensions ABI)
  - librdmacm >= 1.0.21

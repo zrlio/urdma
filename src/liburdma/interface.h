@@ -42,6 +42,7 @@
 #ifndef INTERFACE_H
 #define INTERFACE_H
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <semaphore.h>
 
@@ -254,7 +255,7 @@ DECLARE_TAILQ_HEAD(read_response_state);
  * verbs interface.  This will be used for transition to the reliable connected
  * queue pairs and the libibverbs interface. */
 struct usiw_qp {
-	rte_atomic32_t refcnt;
+	atomic_uint refcnt;
 	struct urdmad_qp *shm_qp;
 	uint16_t qp_flags;
 
@@ -300,7 +301,7 @@ struct usiw_cq {
 	size_t capacity;
 	size_t qp_count;
 	uint32_t cq_id;
-	rte_atomic32_t notify_count;
+	atomic_uint notify_count;
 	rte_spinlock_t lock;
 };
 
@@ -315,7 +316,7 @@ struct usiw_context {
 	int event_fd;
 	LIST_ENTRY(usiw_context) driver_entry;
 	LIST_HEAD(usiw_qp_head, usiw_qp) qp_active;
-	rte_atomic32_t qp_init_count;
+	atomic_uint qp_init_count;
 		/**< The number of queue pairs in the INIT state. */
 	struct usiw_qp *qp;
 		/**< Hash table of all non-destroyed queue pairs in any

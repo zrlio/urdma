@@ -178,7 +178,7 @@ urdma_accl_post_send(struct ibv_qp *ib_qp, void *addr, size_t length,
 static bool
 qp_connected(struct usiw_qp *qp)
 {
-	uint16_t tmp = rte_atomic16_read(&qp->shm_qp->conn_state);
+	uint16_t tmp = atomic_load(&qp->shm_qp->conn_state);
 	return tmp == usiw_qp_connected || tmp == usiw_qp_running;
 } /* qp_connected */
 
@@ -575,7 +575,7 @@ usiw_create_cq(struct ibv_context *context, int size,
 		rte_ring_enqueue(cq->free_ring, &cq->storage[x]);
 	}
 	cq->qp_count = 0;
-	rte_atomic32_init(&cq->notify_count);
+	atomic_init(&cq->notify_count, 0);
 	rte_spinlock_init(&cq->lock);
 	return &cq->ib_cq;
 } /* usiw_create_cq */
@@ -661,7 +661,7 @@ usiw_req_notify_cq(struct ibv_cq *ib_cq, int solicited_only)
 	if (solicited_only)
 		return 0;
 
-	rte_atomic32_inc(&cq->notify_count);
+	atomic_fetch_add(&cq->notify_count, 1);
 
 	return 0;
 } /* usiw_req_notify_cq */
@@ -850,7 +850,7 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 
 	qp->qp_flags = qp_init_attr->sq_sig_all
 		? usiw_qp_sig_all : 0;
-	rte_atomic16_set(&qp->shm_qp->conn_state, usiw_qp_unbound);
+	atomic_store(&qp->shm_qp->conn_state, usiw_qp_unbound);
 	qp->ctx = ctx;
 	qp->dev = ctx->dev;
 	qp->stats.recv_max_burst_size = RX_BURST_SIZE;
@@ -914,11 +914,10 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 	 * list that gets decremented when the progress thread notices that the
 	 * QP has reached the error state, and the other for the reference
 	 * returned to the user which will be freed by ibv_destroy_qp().  */
-	rte_atomic32_init(&qp->refcnt);
-	rte_atomic32_set(&qp->refcnt, 2);
+	atomic_init(&qp->refcnt, 2);
 
 	rte_spinlock_lock(&ctx->qp_lock);
-	rte_atomic32_inc(&ctx->qp_init_count);
+	atomic_fetch_add(&ctx->qp_init_count, 1);
 	HASH_ADD(hh, ctx->qp, ib_qp.qp_num,
 			sizeof(qp->ib_qp.qp_num), qp);
 	rte_spinlock_unlock(&ctx->qp_lock);
@@ -953,7 +952,7 @@ usiw_query_qp(struct ibv_qp *ib_qp, struct ibv_qp_attr *attr, int attr_mask,
 	}
 
 	qp = container_of(ib_qp, struct usiw_qp, ib_qp);
-	switch (rte_atomic16_read(&qp->shm_qp->conn_state)) {
+	switch (atomic_load(&qp->shm_qp->conn_state)) {
 	case usiw_qp_unbound:
 		attr->qp_state = IBV_QPS_INIT;
 		break;
@@ -1022,7 +1021,7 @@ usiw_modify_qp(struct ibv_qp *ib_qp, struct ibv_qp_attr *attr, int attr_mask)
 	switch (attr->qp_state) {
 	case IBV_QPS_SQD:
 	case IBV_QPS_ERR:
-		rte_atomic16_set(&qp->shm_qp->conn_state, usiw_qp_shutdown);
+		atomic_store(&qp->shm_qp->conn_state, usiw_qp_shutdown);
 		break;
 	default:
 		break;
@@ -1042,21 +1041,21 @@ usiw_destroy_qp(struct ibv_qp *ib_qp)
 
 	qp = container_of(ib_qp, struct usiw_qp, ib_qp);
 	ctx = qp->ctx;
-	if (rte_atomic16_read(&qp->shm_qp->conn_state) == usiw_qp_unbound) {
-		assert(rte_atomic32_read(&ctx->qp_init_count) != 0);
-		rte_atomic32_dec(&ctx->qp_init_count);
+	if (atomic_load(&qp->shm_qp->conn_state) == usiw_qp_unbound) {
+		assert(atomic_load(&ctx->qp_init_count) != 0);
+		atomic_fetch_sub(&ctx->qp_init_count, 1);
 	}
 	qp->recv_cq->qp_count--;
 	if (qp->send_cq != qp->recv_cq) {
 		qp->send_cq->qp_count--;
 	}
-	rte_atomic16_set(&qp->shm_qp->conn_state, usiw_qp_error);
+	atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
 
 	rte_spinlock_lock(&ctx->qp_lock);
 	HASH_DEL(ctx->qp, qp);
 	rte_spinlock_unlock(&ctx->qp_lock);
 
-	if (rte_atomic32_sub_return(&qp->refcnt, 1) == 0) {
+	if (atomic_fetch_sub(&qp->refcnt, 1) == 1) {
 		usiw_do_destroy_qp(qp);
 	}
 
@@ -1102,7 +1101,7 @@ usiw_post_send(struct ibv_qp *ib_qp, struct ibv_send_wr *wr,
 	}
 
 	qp = container_of(ib_qp, struct usiw_qp, ib_qp);
-	switch (rte_atomic16_read(&qp->shm_qp->conn_state)) {
+	switch (atomic_load(&qp->shm_qp->conn_state)) {
 	case usiw_qp_connected:
 	case usiw_qp_running:
 		break;
@@ -1202,7 +1201,7 @@ usiw_post_recv(struct ibv_qp *ib_qp, struct ibv_recv_wr *wr,
 	int x, ret;
 
 	qp = container_of(ib_qp, struct usiw_qp, ib_qp);
-	if (rte_atomic16_read(&qp->shm_qp->conn_state) == usiw_qp_error) {
+	if (atomic_load(&qp->shm_qp->conn_state) == usiw_qp_error) {
 		*bad_wr = wr;
 		return EINVAL;
 	}
@@ -1444,7 +1443,7 @@ usiw_init_context(struct verbs_device *device, struct ibv_context *context,
 	dev = container_of(device, struct usiw_device, vdev);
 	ctx->dev = dev;
 
-	rte_atomic32_init(&ctx->qp_init_count);
+	atomic_init(&ctx->qp_init_count, 0);
 	LIST_INIT(&ctx->qp_active);
 
 	ctx->qp = NULL;

@@ -702,8 +702,8 @@ finish_post_cqe(struct usiw_cq *cq, struct usiw_wc *cqe)
 	assert(ret == 0);
 	ctx = usiw_get_context(cq->ib_cq.context);
 	assert(ctx != NULL);
-	if (ctx && rte_atomic32_read(&cq->notify_count)) {
-		rte_atomic32_dec(&cq->notify_count);
+	if (ctx && atomic_load(&cq->notify_count)) {
+		atomic_fetch_sub(&cq->notify_count, 1);
 		event.event_type = SIW_EVENT_COMP_POSTED;
 		event.cq_id = cq->cq_id;
 		ret = write(ctx->event_fd, &event, sizeof(event));
@@ -1001,7 +1001,7 @@ do_rdmap_read_request(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 			rkey);
 	if (!temp_mr) {
 		/* FIXME: issue error completion */
-		rte_atomic16_set(&qp->shm_qp->conn_state, usiw_qp_error);
+		atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
 		return;
 	}
 	qp->ird_active++;
@@ -1391,7 +1391,7 @@ qp_shutdown(struct usiw_qp *qp)
 
 	send_trp_fin(qp);
 
-	rte_atomic16_set(&qp->shm_qp->conn_state, usiw_qp_error);
+	atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
 	memset(&qp_attr, 0, sizeof(qp_attr));
 	qp_attr.qp_state = IBV_QPS_ERR;
 	ibv_cmd_modify_qp(&qp->ib_qp, &qp_attr, IBV_QP_STATE,
@@ -1607,7 +1607,7 @@ sweep_unacked_packets(struct usiw_qp *qp, uint64_t now)
 				post_send_cqe(qp, pending->wqe, IBV_WC_RETRY_EXC_ERR);
 				rte_spinlock_unlock(&qp->sq.lock);
 			}
-			rte_atomic16_set(&qp->shm_qp->conn_state, usiw_qp_error);
+			atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
 			if (p == ep->tx_head) {
 				*ep->tx_head = NULL;
 				if (++ep->tx_head == end) {
@@ -2050,7 +2050,7 @@ start_qp(struct usiw_qp *qp)
 		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Set up readresp_store failed: %s\n",
 						qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 						strerror(errno));
-		rte_atomic16_set(&qp->shm_qp->conn_state, usiw_qp_error);
+		atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
 		rte_spinlock_unlock(&qp->shm_qp->conn_event_lock);
 		return;
 	}
@@ -2060,8 +2060,8 @@ start_qp(struct usiw_qp *qp)
 				qp_entry);
 	}
 
-	rte_atomic16_set(&qp->shm_qp->conn_state, usiw_qp_running);
-	rte_atomic32_dec(&qp->ctx->qp_init_count);
+	atomic_store(&qp->shm_qp->conn_state, usiw_qp_running);
+	atomic_fetch_sub(&qp->ctx->qp_init_count, 1);
 	rte_spinlock_unlock(&qp->shm_qp->conn_event_lock);
 } /* start_qp */
 
@@ -2111,7 +2111,7 @@ kni_loop(void *arg)
 	while (1) {
 		LIST_FOR_EACH(ctx, &driver->ctxs, driver_entry, ctx_prev) {
 			LIST_FOR_EACH(qp, &ctx->qp_active, ctx_entry, qp_prev) {
-				switch (rte_atomic16_read(&qp->shm_qp->conn_state)) {
+				switch (atomic_load(&qp->shm_qp->conn_state)) {
 				case usiw_qp_connected:
 					/* start_qp() transitions to
 					 * usiw_qp_running */
@@ -2125,8 +2125,8 @@ kni_loop(void *arg)
 					 * usiw_qp_error */
 				case usiw_qp_error:
 					LIST_REMOVE(qp, ctx_entry);
-					if (rte_atomic32_sub_return(&qp->refcnt,
-								1) == 0) {
+					if (atomic_fetch_sub(&qp->refcnt,
+								1) == 1) {
 						usiw_do_destroy_qp(qp);
 					}
 					break;

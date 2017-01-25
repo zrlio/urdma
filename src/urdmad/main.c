@@ -299,14 +299,14 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 		if (!qp->rx_queue) {
 			RTE_LOG(DEBUG, USER1, "Set up rx ring failed: %s\n",
 						rte_strerror(ret));
-			rte_atomic16_set(&qp->shm_qp->conn_state, usiw_qp_error);
+			atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
 			rte_spinlock_unlock(&qp->shm_qp->conn_event_lock);
 			return;
 		}
 #endif
 	}
 
-	rte_atomic16_set(&qp->conn_state, usiw_qp_connected);
+	atomic_store(&qp->conn_state, usiw_qp_connected);
 	rte_spinlock_unlock(&qp->conn_event_lock);
 
 	rtr_event.event_type = SIW_EVENT_QP_RTR;
@@ -741,7 +741,7 @@ usiw_port_init(struct usiw_port *iface)
 		iface->qp[q].qp_id = q;
 		iface->qp[q].tx_queue = q;
 		iface->qp[q].rx_queue = q;
-		rte_atomic16_init(&iface->qp[q].conn_state);
+		atomic_init(&iface->qp[q].conn_state, 0);
 		rte_spinlock_init(&iface->qp[q].conn_event_lock);
 		LIST_INSERT_HEAD(&iface->avail_qp, &iface->qp[q],
 				urdmad__entry);

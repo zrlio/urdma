@@ -43,9 +43,9 @@
  * SOFTWARE.
  */
 
+#include <stdatomic.h>
 #include <stdint.h>
 
-#include <rte_atomic.h>
 #include <rte_ether.h>
 #include <rte_spinlock.h>
 
@@ -66,7 +66,7 @@ enum urdma_qp_state {
 /** Fields of the queue pair that must be accessible from urdmad and verbs
  * processes. */
 struct urdmad_qp {
-	rte_atomic16_t conn_state;
+	atomic_uint conn_state;
 		/**< The state of the queue pair's connection. */
 	uint8_t ord_max;
 		/**< Negotiated maximum number of outstanding RDMA READ
