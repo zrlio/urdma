@@ -74,6 +74,9 @@
 #define USIW_IRD_MAX 128
 #define USIW_ORD_MAX 128
 
+/* MUST be a power of 2 minus 1 */
+#define NEW_CTX_MAX 31
+
 #define STAG_TYPE_MASK      UINT32_C(0xFF000000)
 #define STAG_MASK           UINT32_C(0x00FFFFFF)
 #define STAG_TYPE_MR        (UINT32_C(0x00) << 24)
@@ -310,11 +313,22 @@ enum usiw_device_flags {
 	port_fdir = 2,
 };
 
+/* A context handle which provides an indirection for accessing the actual
+ * context from the progress thread.  The reason we need this is that the
+ * context may be freed by the verbs layer while we still have a reference to
+ * it.  When the user calls ibv_close_device(3), we atomically set the pointer
+ * in this handle to 0.  The progress thread then removes the entry from the
+ * list and frees it. */
+struct usiw_context_handle {
+	LIST_ENTRY(usiw_context_handle) driver_entry;
+	atomic_uintptr_t ctxp;
+};
+
 struct usiw_context {
 	struct verbs_context vcontext;
 	struct usiw_device *dev;
 	int event_fd;
-	LIST_ENTRY(usiw_context) driver_entry;
+	struct usiw_context_handle *h;
 	LIST_HEAD(usiw_qp_head, usiw_qp) qp_active;
 	atomic_uint qp_init_count;
 		/**< The number of queue pairs in the INIT state. */
@@ -352,7 +366,8 @@ struct usiw_driver {
 	struct nl_sock *sock;
 	struct nl_cache *link_cache;
 	struct nl_cache *addr_cache;
-	LIST_HEAD(usiw_context_list_head, usiw_context) ctxs;
+	LIST_HEAD(usiw_context_handle_list_head, usiw_context_handle) ctxs;
+	struct rte_ring *new_ctxs;
 	int urdmad_fd;
 	uint32_t lcore_mask[RTE_MAX_LCORE / 32];
 };
@@ -363,7 +378,7 @@ start_progress_thread(void);
 
 /** Adds an IB user context to the list of contexts to be managed by the
  * progress thread. */
-void
+int
 driver_add_context(struct usiw_context *ctx);
 
 struct usiw_mr **

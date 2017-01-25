@@ -2100,16 +2100,32 @@ find_matching_qp(struct usiw_context *ctx, struct rte_mbuf *pkt)
 int
 kni_loop(void *arg)
 {
-	struct usiw_driver *driver = arg;
-	struct usiw_context *ctx, **ctx_prev;
+	struct usiw_context_handle *h, **h_prev;
+	struct usiw_context *ctx;
+	struct usiw_driver *driver;
 	struct usiw_qp *qp, **qp_prev;
 	struct rte_mbuf *rxmbuf[RX_BURST_SIZE];
-	unsigned int count;
+	void *ctxs_to_add[NEW_CTX_MAX];
+	unsigned int i, count;
 	int portid, ret;
 
+	driver = arg;
 	sem_wait(&driver->go);
 	while (1) {
-		LIST_FOR_EACH(ctx, &driver->ctxs, driver_entry, ctx_prev) {
+		count = rte_ring_dequeue_burst(driver->new_ctxs, ctxs_to_add,
+					     NEW_CTX_MAX);
+		for (i = 0; i < count; ++i) {
+			h = (struct usiw_context_handle *)ctxs_to_add[i];
+			LIST_INSERT_HEAD(&driver->ctxs, h, driver_entry);
+		}
+
+		LIST_FOR_EACH(h, &driver->ctxs, driver_entry, h_prev) {
+			ctx = (void *)atomic_load(&h->ctxp);
+			if (unlikely(!ctx)) {
+				LIST_REMOVE(h, driver_entry);
+				free(h);
+				continue;
+			}
 			LIST_FOR_EACH(qp, &ctx->qp_active, ctx_entry, qp_prev) {
 				switch (atomic_load(&qp->shm_qp->conn_state)) {
 				case usiw_qp_connected:

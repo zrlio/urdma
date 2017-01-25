@@ -1423,7 +1423,8 @@ usiw_init_context(struct verbs_device *device, struct ibv_context *context,
 		RTE_LOG(DEBUG, USER1, "ibv_cmd_get_context failed: %s\n",
 				strerror(ret));
 		errno = ret;
-		return -1;
+		ret = -1;
+		goto out;
 	}
 
 	ctx = usiw_get_context(context);
@@ -1449,8 +1450,32 @@ usiw_init_context(struct verbs_device *device, struct ibv_context *context,
 	ctx->qp = NULL;
 	rte_spinlock_init(&ctx->qp_lock);
 
-	driver_add_context(ctx);
+	/* Context handle is used to deal with freed contexts after they have
+	 * been destroyed. */
+	ctx->h = malloc(sizeof(*ctx->h));
+	if (!ctx->h) {
+		RTE_LOG(ERR, USER1, "handle for context %p allocation failed: %s\n",
+				(void *)&ctx->vcontext.context,
+				strerror(errno));
+		ret = -1;
+		goto out;
+	}
+	atomic_init(&ctx->h->ctxp, (uintptr_t)ctx);
+
+	ret = driver_add_context(ctx);
+	if (unlikely(ret < 0)) {
+		if (ret != -EDQUOT) {
+			errno = ret;
+			ret = -1;
+			goto free_ctx;
+		}
+	}
 	return 0;
+
+free_ctx:
+	free(ctx->h);
+out:
+	return ret;
 } /* usiw_init_context */
 
 
@@ -1458,5 +1483,5 @@ void
 usiw_uninit_context(struct verbs_device *device, struct ibv_context *ib_ctx)
 {
 	struct usiw_context *ctx = usiw_get_context(ib_ctx);
-	LIST_REMOVE(ctx, driver_entry);
+	atomic_store(&ctx->h->ctxp, 0);
 } /* usiw_uninit_context */

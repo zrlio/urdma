@@ -79,10 +79,15 @@
 
 static struct usiw_driver *driver;
 
-void
+int
 driver_add_context(struct usiw_context *ctx)
 {
-	LIST_INSERT_HEAD(&driver->ctxs, ctx, driver_entry);
+	int i, ret;
+	ret = rte_ring_enqueue(driver->new_ctxs, ctx->h);
+	for (i = 0; ret == -ENOBUFS && i < 1000; ++i) {
+		ret = rte_ring_enqueue(driver->new_ctxs, ctx->h);
+	}
+	return ret;
 } /* driver_add_context */
 
 void
@@ -473,7 +478,8 @@ do_init_driver(void)
 		return;
 	}
 
-	driver = calloc(1, sizeof(*driver));
+	driver = calloc(1, sizeof(*driver) + rte_ring_get_memsize(
+							NEW_CTX_MAX + 1));
 	if (!driver)
 		goto err;
 	LIST_INIT(&driver->ctxs);
@@ -485,7 +491,7 @@ do_init_driver(void)
 	if (do_hello() < 0) {
 		fprintf(stderr, "Could not setup socket: %s\n",
 				strerror(errno));
-		goto err;
+		goto free_ring;
 	}
 	eal_argv[eal_argc - 1] = format_coremask(driver->lcore_mask,
 						 RTE_DIM(driver->lcore_mask));
@@ -514,8 +520,17 @@ do_init_driver(void)
 	}
 	free(eal_argv);
 
-	if (sem_init(&driver->go, 0, 0))
+	driver->new_ctxs = (struct rte_ring *)(driver + 1);
+	ret = rte_ring_init(driver->new_ctxs, "new_ctx_ring", NEW_CTX_MAX + 1,
+			    RING_F_SC_DEQ);
+	if (ret < 0) {
+		RTE_LOG(ERR, USER1, "cannot allocate new context ring: %s\n",
+				rte_strerror(ret));
 		goto close_fd;
+	}
+
+	if (sem_init(&driver->go, 0, 0))
+		goto free_ring;
 	ret = rte_eal_remote_launch(kni_loop, driver,
 			rte_get_next_lcore(rte_get_master_lcore(), 1, 1));
 	if (ret) {
@@ -525,6 +540,8 @@ do_init_driver(void)
 
 destroy_sem:
 	sem_destroy(&driver->go);
+free_ring:
+	rte_ring_free(driver->new_ctxs);
 close_fd:
 	close(driver->urdmad_fd);
 err:
