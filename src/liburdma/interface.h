@@ -338,7 +338,6 @@ struct usiw_device {
 	struct rte_mempool *tx_ddp_mempool;
 	struct rte_mempool *tx_hdr_mempool;
 	struct urdmad_queue_range *queue_ranges;
-	struct usiw_context *ctx;
 	uint16_t portid;
 	uint16_t rx_desc_count;
 	uint16_t max_qp;
