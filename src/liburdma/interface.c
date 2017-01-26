@@ -172,6 +172,7 @@ usiw_send_wqe_queue_destroy(struct usiw_send_wqe_queue *q)
 {
 	free(q->bitmask);
 	rte_free(q->ring);
+	free(q->storage);
 } /* usiw_send_wqe_queue_destroy */
 
 static void
@@ -260,6 +261,7 @@ usiw_recv_wqe_queue_destroy(struct usiw_recv_wqe_queue *q)
 {
 	free(q->bitmask);
 	rte_free(q->ring);
+	free(q->storage);
 } /* usiw_recv_wqe_queue_destroy */
 
 static void
