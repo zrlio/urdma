@@ -140,8 +140,9 @@ int
 usiw_send_wqe_queue_init(uint32_t qpn, struct usiw_send_wqe_queue *q,
 		uint32_t max_send_wr, uint32_t max_send_sge)
 {
+	size_t wqe_size;
 	char name[RTE_RING_NAMESIZE];
-	int ret;
+	int i, ret;
 
 	snprintf(name, RTE_RING_NAMESIZE, "qpn%" PRIu32 "_send", qpn);
 	q->ring = rte_malloc(NULL, rte_ring_get_memsize(max_send_wr + 1),
@@ -153,12 +154,25 @@ usiw_send_wqe_queue_init(uint32_t qpn, struct usiw_send_wqe_queue *q,
 	if (ret)
 		return ret;
 
-	q->storage = calloc(max_send_wr + 1, sizeof(struct usiw_send_wqe)
-			+ max_send_sge * sizeof(struct iovec));
-	q->bitmask = malloc((max_send_wr + 1) / 8);
-	if (!q->bitmask || !q->storage)
+	snprintf(name, RTE_RING_NAMESIZE, "qpn%" PRIu32 "_send_free", qpn);
+	q->free_ring = rte_malloc(NULL, rte_ring_get_memsize(max_send_wr + 1),
+				  RTE_CACHE_LINE_SIZE);
+	if (!q->free_ring)
+		return -rte_errno;
+	ret = rte_ring_init(q->free_ring, name, max_send_wr + 1,
+			RING_F_SP_ENQ|RING_F_SC_DEQ);
+	if (ret)
+		return ret;
+
+	wqe_size = sizeof(struct usiw_send_wqe)
+					+ max_send_sge * sizeof(struct iovec);
+	q->storage = calloc(max_send_wr, wqe_size);
+	if (!q->storage)
 		return -errno;
-	memset(q->bitmask, INT_MAX, (max_send_wr + 1) / 8);
+
+	for (i = 0; i < max_send_wr; i++) {
+		rte_ring_enqueue(q->free_ring, q->storage + i * wqe_size);
+	}
 
 	TAILQ_INIT(&q->active_head);
 	rte_spinlock_init(&q->lock);
@@ -170,8 +184,8 @@ usiw_send_wqe_queue_init(uint32_t qpn, struct usiw_send_wqe_queue *q,
 void
 usiw_send_wqe_queue_destroy(struct usiw_send_wqe_queue *q)
 {
-	free(q->bitmask);
 	rte_free(q->ring);
+	rte_free(q->free_ring);
 	free(q->storage);
 } /* usiw_send_wqe_queue_destroy */
 
@@ -229,8 +243,9 @@ int
 usiw_recv_wqe_queue_init(uint32_t qpn, struct usiw_recv_wqe_queue *q,
 		uint32_t max_recv_wr, uint32_t max_recv_sge)
 {
+	size_t wqe_size;
 	char name[RTE_RING_NAMESIZE];
-	int ret;
+	int i, ret;
 
 	snprintf(name, RTE_RING_NAMESIZE, "qpn%" PRIu32 "_recv", qpn);
 	q->ring = rte_malloc(NULL, rte_ring_get_memsize(max_recv_wr + 1),
@@ -242,12 +257,25 @@ usiw_recv_wqe_queue_init(uint32_t qpn, struct usiw_recv_wqe_queue *q,
 	if (ret)
 		return ret;
 
-	q->storage = calloc(max_recv_wr + 1, sizeof(struct usiw_recv_wqe)
-			+ max_recv_sge * sizeof(struct iovec));
-	q->bitmask = malloc((max_recv_wr + 1) / 8);
-	if (!q->bitmask || !q->storage)
+	snprintf(name, RTE_RING_NAMESIZE, "qpn%" PRIu32 "_recv_free", qpn);
+	q->free_ring = rte_malloc(NULL, rte_ring_get_memsize(max_recv_wr + 1),
+				  RTE_CACHE_LINE_SIZE);
+	if (!q->free_ring)
+		return -rte_errno;
+	ret = rte_ring_init(q->free_ring, name, max_recv_wr + 1,
+			RING_F_SP_ENQ|RING_F_SC_DEQ);
+	if (ret)
+		return ret;
+
+	wqe_size = sizeof(struct usiw_recv_wqe)
+					+ max_recv_sge * sizeof(struct iovec);
+	q->storage = calloc(max_recv_wr + 1, wqe_size);
+	if (!q->storage)
 		return -errno;
-	memset(q->bitmask, INT_MAX, (max_recv_wr + 1) / 8);
+
+	for (i = 0; i < max_recv_wr; ++i) {
+		rte_ring_enqueue(q->free_ring, q->storage + i * wqe_size);
+	}
 
 	TAILQ_INIT(&q->active_head);
 	rte_spinlock_init(&q->lock);
@@ -259,8 +287,8 @@ usiw_recv_wqe_queue_init(uint32_t qpn, struct usiw_recv_wqe_queue *q,
 void
 usiw_recv_wqe_queue_destroy(struct usiw_recv_wqe_queue *q)
 {
-	free(q->bitmask);
 	rte_free(q->ring);
+	rte_free(q->free_ring);
 	free(q->storage);
 } /* usiw_recv_wqe_queue_destroy */
 
@@ -594,12 +622,6 @@ send_trp_ack(struct usiw_qp *qp)
 } /* send_trp_ack */
 
 
-#define FREE_WQE_BODY(queue) \
-	do { \
-		qp-> queue .bitmask[wqe->index >> 6] \
-			|= UINT64_C(1) << (wqe->index & 63); \
-	} while (0)
-
 /** Returns the given send WQE back to the free pool.  It is removed from the
  * active set if still_active is true.  The sq lock MUST be locked when
  * calling this function. */
@@ -610,7 +632,7 @@ qp_free_send_wqe(struct usiw_qp *qp, struct usiw_send_wqe *wqe,
 	if (still_active) {
 		usiw_send_wqe_queue_del_active(&qp->sq, wqe);
 	}
-	FREE_WQE_BODY(sq);
+	rte_ring_enqueue(qp->sq.free_ring, wqe);
 } /* qp_free_send_wqe */
 
 /** Returns the given receive WQE back to the free pool.  It is removed from
@@ -620,10 +642,9 @@ static void
 qp_free_recv_wqe(struct usiw_qp *qp, struct usiw_recv_wqe *wqe)
 {
 	usiw_recv_wqe_queue_del_active(&qp->rq0, wqe);
-	FREE_WQE_BODY(rq0);
+	rte_ring_enqueue(qp->rq0.free_ring, wqe);
 } /* qp_free_recv_wqe */
 
-#undef FREE_WQE_BODY
 
 int
 qp_get_next_send_wqe(struct usiw_qp *qp, struct usiw_send_wqe **wqe)
@@ -633,18 +654,10 @@ qp_get_next_send_wqe(struct usiw_qp *qp, struct usiw_send_wqe **wqe)
 	int x, ret;
 
 	rte_spinlock_lock(&qp->sq.lock);
-	ret = -ENOSPC;
-	for (x = 0; x < qp->sq.max_wr; ++x) {
-		if (qp->sq.bitmask[x >> 6] & (UINT64_C(1) << (x & 63))) {
-			*wqe = (struct usiw_send_wqe *)(qp->sq.storage
-					+ x * send_wqe_size);
-			(*wqe)->index = x;
-			qp->sq.bitmask[x >> 6] &= ~(UINT64_C(1) << (x & 63));
-			ret = 0;
-			break;
-		}
-	}
+	ret = rte_ring_dequeue(qp->sq.free_ring, (void **)wqe);
 	rte_spinlock_unlock(&qp->sq.lock);
+	if (ret == -ENOENT)
+		ret = -ENOSPC;
 	return ret;
 } /* qp_get_next_send_wqe */
 
@@ -656,18 +669,10 @@ qp_get_next_recv_wqe(struct usiw_qp *qp, struct usiw_recv_wqe **wqe)
 	int x, ret;
 
 	rte_spinlock_lock(&qp->rq0.lock);
-	ret = -ENOSPC;
-	for (x = 0; x < qp->rq0.max_wr; ++x) {
-		if (qp->rq0.bitmask[x >> 6] & (UINT64_C(1) << (x & 63))) {
-			*wqe = (struct usiw_recv_wqe *)(qp->rq0.storage
-					+ x * recv_wqe_size);
-			(*wqe)->index = x;
-			qp->rq0.bitmask[x >> 6] &= ~(UINT64_C(1) << (x & 63));
-			ret = 0;
-			break;
-		}
-	}
+	ret = rte_ring_dequeue(qp->rq0.free_ring, (void **)wqe);
 	rte_spinlock_unlock(&qp->rq0.lock);
+	if (ret == -ENOENT)
+		ret = -ENOSPC;
 	return ret;
 } /* qp_get_next_recv_wqe */
 
