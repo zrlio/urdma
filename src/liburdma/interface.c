@@ -709,8 +709,14 @@ finish_post_cqe(struct usiw_cq *cq, struct usiw_wc *cqe)
 	assert(ret == 0);
 	ctx = usiw_get_context(cq->ib_cq.context);
 	assert(ctx != NULL);
-	if (ctx && atomic_load(&cq->notify_count)) {
-		atomic_fetch_sub(&cq->notify_count, 1);
+
+	/* This is non-atomic, but that is fine since we are the only thread
+	 * that can possibly set notify_flag to false. If another thread sets
+	 * it to true immediately after we check it, then it would have missed
+	 * this notification anyways. We do this not-atomically to avoid the
+	 * overhead of a potential atomic store on every single CQ post. */
+	if (ctx && atomic_load(&cq->notify_flag)) {
+		atomic_store(&cq->notify_flag, false);
 		event.event_type = SIW_EVENT_COMP_POSTED;
 		event.cq_id = cq->cq_id;
 		ret = write(ctx->event_fd, &event, sizeof(event));

@@ -575,7 +575,7 @@ usiw_create_cq(struct ibv_context *context, int size,
 		rte_ring_enqueue(cq->free_ring, &cq->storage[x]);
 	}
 	cq->qp_count = 0;
-	atomic_init(&cq->notify_count, 0);
+	atomic_init(&cq->notify_flag, false);
 	rte_spinlock_init(&cq->lock);
 	return &cq->ib_cq;
 } /* usiw_create_cq */
@@ -661,7 +661,7 @@ usiw_req_notify_cq(struct ibv_cq *ib_cq, int solicited_only)
 	if (solicited_only)
 		return 0;
 
-	atomic_fetch_add(&cq->notify_count, 1);
+	atomic_store(&cq->notify_flag, true);
 
 	return 0;
 } /* usiw_req_notify_cq */

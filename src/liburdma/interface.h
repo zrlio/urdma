@@ -304,7 +304,7 @@ struct usiw_cq {
 	size_t capacity;
 	size_t qp_count;
 	uint32_t cq_id;
-	atomic_uint notify_count;
+	atomic_bool notify_flag;
 	rte_spinlock_t lock;
 };
 
