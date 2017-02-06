@@ -56,6 +56,37 @@ AC_COMPILE_IFELSE([AC_LANG_SOURCE([[
 #include <assert.h>
 static_assert(1, "compiler supports static_assert");]])],
 [], AC_MSG_ERROR([Compiler does not support static_assert]))
+AC_CHECK_DECLS([atomic_store, atomic_load], [],
+	       [AC_MSG_ERROR([Compiler does not support ISO C 2011 atomics])],
+	       [[#include <stdatomic.h>]])
+
+# The C11 standard states that lock-free atomic types should be address-free,
+# which we require since the connection state is stored as an atomic_uint shared
+# between urdmad and the secondary liburdma processes.  Note that the
+# *_LOCK_FREE macros do not distinguish between signed and unsigned types.
+AC_CACHE_CHECK([whether atomic_int is lock-free],
+	       [urdma_cv_c_atomic_int_lock_free],
+	       [[dummy=if$$
+		cat <<_URDMA_EOF > $dummy.c
+#include <stdatomic.h>
+#if !defined(ATOMIC_INT_LOCK_FREE)
+not defined
+#elif ATOMIC_INT_LOCK_FREE == 2
+yes
+#elif ATOMIC_INT_LOCK_FREE == 1
+sometimes
+#elif ATOMIC_INT_LOCK_FREE == 0
+no
+#else
+unexpected value ATOMIC_INT_LOCK_FREE
+#endif
+_URDMA_EOF
+		urdma_cv_c_atomic_int_lock_free=`$CC $CPPFLAGS -E $dummy.c 2> /dev/null | tail -1`
+		rm -f $dummy.c]])
+if test "x$urdma_cv_c_atomic_int_lock_free" != xyes; then
+      AC_MSG_ERROR([you must use a compiler that makes atomic_int lock free])
+fi
+
 AC_PROG_INSTALL
 AC_PROG_MAKE_SET
 AM_PROG_CC_C_O

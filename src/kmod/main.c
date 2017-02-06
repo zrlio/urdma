@@ -177,6 +177,7 @@ static ssize_t do_read_disconnect_event(struct urdma_chardev_data *file,
 	struct urdma_qp_disconnected_event event;
 
 	if (count < sizeof(event)) {
+		spin_unlock_irq(&file->lock);
 		return -EINVAL;
 	}
 
@@ -189,6 +190,8 @@ static ssize_t do_read_disconnect_event(struct urdma_chardev_data *file,
 	}
 
 	list_del(&cep->disconnect_entry);
+	spin_unlock_irq(&file->lock);
+
 	siw_cep_put(cep);
 
 	return sizeof(event);
@@ -203,6 +206,7 @@ static ssize_t do_read_established_event(struct urdma_chardev_data *file,
 	ssize_t rv;
 
 	if (count < sizeof(event)) {
+		spin_unlock_irq(&file->lock);
 		return -EINVAL;
 	}
 
@@ -222,23 +226,21 @@ static ssize_t do_read_established_event(struct urdma_chardev_data *file,
 
 	netdev = cep->sdev->netdev;
 	dev_hold(netdev);
+
+	list_del(&cep->established_entry);
+	list_add_tail(&cep->rtr_wait_entry, &file->rtr_wait_list);
 	spin_unlock_irq(&file->lock);
 
 	/* Must not have IRQs disabled when querying routing tables. */
-	/* FIXME: do something with rv */
 	rv = fetch_dest_hwaddr(netdev, event.src_ipv4, event.dst_ipv4,
 		&event.dst_ether);
 	if (copy_to_user(buf, &event, sizeof(event))) {
-		spin_lock_irq(&file->lock);
 		return -EFAULT;
 	}
 
-	spin_lock_irq(&file->lock);
 	dev_put(netdev);
-	list_del(&cep->established_entry);
-	list_add_tail(&cep->rtr_wait_entry, &file->rtr_wait_list);
 
-	return sizeof(event);
+	return (rv >= 0) ? sizeof(event) : rv;
 } /* do_read_established_event */
 
 static ssize_t urdma_chardev_read(struct file *filp, char *buf,
@@ -252,14 +254,14 @@ static ssize_t urdma_chardev_read(struct file *filp, char *buf,
 	spin_lock_irq(&file->lock);
 	if (!file->dev) {
 		rv = -EINVAL;
-		goto out;
+		goto unlock;
 	}
 
 	while (list_empty(&file->established_list)
 			&& list_empty(&file->disconnect_list)) {
 		if (filp->f_flags & O_NONBLOCK) {
 			rv = -EAGAIN;
-			goto out;
+			goto unlock;
 		}
 		spin_unlock_irq(&file->lock);
 
@@ -273,7 +275,7 @@ static ssize_t urdma_chardev_read(struct file *filp, char *buf,
 		spin_lock_irq(&file->lock);
 		if (!file->dev) {
 			rv = -EINVAL;
-			goto out;
+			goto unlock;
 		}
 	}
 
@@ -281,14 +283,17 @@ static ssize_t urdma_chardev_read(struct file *filp, char *buf,
 		cep = list_first_entry(&file->established_list,
 				struct siw_cep, established_entry);
 		rv = do_read_established_event(file, cep, buf, count);
+		goto out;
 	} else {
 		cep = list_first_entry(&file->disconnect_list,
 				struct siw_cep, disconnect_entry);
 		rv = do_read_disconnect_event(file, cep, buf, count);
+		goto out;
 	}
 
-out:
+unlock:
 	spin_unlock_irq(&file->lock);
+out:
 	return rv;
 }
 
@@ -724,6 +729,7 @@ static int siw_netdev_event(struct notifier_block *nb, unsigned long event,
 
 		if (in_dev->ifa_list) {
 			sdev->state = IB_PORT_ACTIVE;
+			siw_device_assign_guid(sdev, netdev);
 			siw_device_register(sdev);
 		} else {
 			pr_debug(DBG_DM ": %s: no ifa\n", netdev->name);

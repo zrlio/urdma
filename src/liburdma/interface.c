@@ -140,8 +140,9 @@ int
 usiw_send_wqe_queue_init(uint32_t qpn, struct usiw_send_wqe_queue *q,
 		uint32_t max_send_wr, uint32_t max_send_sge)
 {
+	size_t wqe_size;
 	char name[RTE_RING_NAMESIZE];
-	int ret;
+	int i, ret;
 
 	snprintf(name, RTE_RING_NAMESIZE, "qpn%" PRIu32 "_send", qpn);
 	q->ring = rte_malloc(NULL, rte_ring_get_memsize(max_send_wr + 1),
@@ -153,12 +154,25 @@ usiw_send_wqe_queue_init(uint32_t qpn, struct usiw_send_wqe_queue *q,
 	if (ret)
 		return ret;
 
-	q->storage = calloc(max_send_wr + 1, sizeof(struct usiw_send_wqe)
-			+ max_send_sge * sizeof(struct iovec));
-	q->bitmask = malloc((max_send_wr + 1) / 8);
-	if (!q->bitmask || !q->storage)
+	snprintf(name, RTE_RING_NAMESIZE, "qpn%" PRIu32 "_send_free", qpn);
+	q->free_ring = rte_malloc(NULL, rte_ring_get_memsize(max_send_wr + 1),
+				  RTE_CACHE_LINE_SIZE);
+	if (!q->free_ring)
+		return -rte_errno;
+	ret = rte_ring_init(q->free_ring, name, max_send_wr + 1,
+			RING_F_SP_ENQ|RING_F_SC_DEQ);
+	if (ret)
+		return ret;
+
+	wqe_size = sizeof(struct usiw_send_wqe)
+					+ max_send_sge * sizeof(struct iovec);
+	q->storage = calloc(max_send_wr, wqe_size);
+	if (!q->storage)
 		return -errno;
-	memset(q->bitmask, INT_MAX, (max_send_wr + 1) / 8);
+
+	for (i = 0; i < max_send_wr; i++) {
+		rte_ring_enqueue(q->free_ring, q->storage + i * wqe_size);
+	}
 
 	TAILQ_INIT(&q->active_head);
 	rte_spinlock_init(&q->lock);
@@ -170,8 +184,9 @@ usiw_send_wqe_queue_init(uint32_t qpn, struct usiw_send_wqe_queue *q,
 void
 usiw_send_wqe_queue_destroy(struct usiw_send_wqe_queue *q)
 {
-	free(q->bitmask);
 	rte_free(q->ring);
+	rte_free(q->free_ring);
+	free(q->storage);
 } /* usiw_send_wqe_queue_destroy */
 
 static void
@@ -228,8 +243,9 @@ int
 usiw_recv_wqe_queue_init(uint32_t qpn, struct usiw_recv_wqe_queue *q,
 		uint32_t max_recv_wr, uint32_t max_recv_sge)
 {
+	size_t wqe_size;
 	char name[RTE_RING_NAMESIZE];
-	int ret;
+	int i, ret;
 
 	snprintf(name, RTE_RING_NAMESIZE, "qpn%" PRIu32 "_recv", qpn);
 	q->ring = rte_malloc(NULL, rte_ring_get_memsize(max_recv_wr + 1),
@@ -241,12 +257,25 @@ usiw_recv_wqe_queue_init(uint32_t qpn, struct usiw_recv_wqe_queue *q,
 	if (ret)
 		return ret;
 
-	q->storage = calloc(max_recv_wr + 1, sizeof(struct usiw_recv_wqe)
-			+ max_recv_sge * sizeof(struct iovec));
-	q->bitmask = malloc((max_recv_wr + 1) / 8);
-	if (!q->bitmask || !q->storage)
+	snprintf(name, RTE_RING_NAMESIZE, "qpn%" PRIu32 "_recv_free", qpn);
+	q->free_ring = rte_malloc(NULL, rte_ring_get_memsize(max_recv_wr + 1),
+				  RTE_CACHE_LINE_SIZE);
+	if (!q->free_ring)
+		return -rte_errno;
+	ret = rte_ring_init(q->free_ring, name, max_recv_wr + 1,
+			RING_F_SP_ENQ|RING_F_SC_DEQ);
+	if (ret)
+		return ret;
+
+	wqe_size = sizeof(struct usiw_recv_wqe)
+					+ max_recv_sge * sizeof(struct iovec);
+	q->storage = calloc(max_recv_wr + 1, wqe_size);
+	if (!q->storage)
 		return -errno;
-	memset(q->bitmask, INT_MAX, (max_recv_wr + 1) / 8);
+
+	for (i = 0; i < max_recv_wr; ++i) {
+		rte_ring_enqueue(q->free_ring, q->storage + i * wqe_size);
+	}
 
 	TAILQ_INIT(&q->active_head);
 	rte_spinlock_init(&q->lock);
@@ -258,8 +287,9 @@ usiw_recv_wqe_queue_init(uint32_t qpn, struct usiw_recv_wqe_queue *q,
 void
 usiw_recv_wqe_queue_destroy(struct usiw_recv_wqe_queue *q)
 {
-	free(q->bitmask);
 	rte_free(q->ring);
+	rte_free(q->free_ring);
+	free(q->storage);
 } /* usiw_recv_wqe_queue_destroy */
 
 static void
@@ -592,12 +622,6 @@ send_trp_ack(struct usiw_qp *qp)
 } /* send_trp_ack */
 
 
-#define FREE_WQE_BODY(queue) \
-	do { \
-		qp-> queue .bitmask[wqe->index >> 6] \
-			|= UINT64_C(1) << (wqe->index & 63); \
-	} while (0)
-
 /** Returns the given send WQE back to the free pool.  It is removed from the
  * active set if still_active is true.  The sq lock MUST be locked when
  * calling this function. */
@@ -608,7 +632,7 @@ qp_free_send_wqe(struct usiw_qp *qp, struct usiw_send_wqe *wqe,
 	if (still_active) {
 		usiw_send_wqe_queue_del_active(&qp->sq, wqe);
 	}
-	FREE_WQE_BODY(sq);
+	rte_ring_enqueue(qp->sq.free_ring, wqe);
 } /* qp_free_send_wqe */
 
 /** Returns the given receive WQE back to the free pool.  It is removed from
@@ -618,10 +642,9 @@ static void
 qp_free_recv_wqe(struct usiw_qp *qp, struct usiw_recv_wqe *wqe)
 {
 	usiw_recv_wqe_queue_del_active(&qp->rq0, wqe);
-	FREE_WQE_BODY(rq0);
+	rte_ring_enqueue(qp->rq0.free_ring, wqe);
 } /* qp_free_recv_wqe */
 
-#undef FREE_WQE_BODY
 
 int
 qp_get_next_send_wqe(struct usiw_qp *qp, struct usiw_send_wqe **wqe)
@@ -631,18 +654,10 @@ qp_get_next_send_wqe(struct usiw_qp *qp, struct usiw_send_wqe **wqe)
 	int x, ret;
 
 	rte_spinlock_lock(&qp->sq.lock);
-	ret = -ENOSPC;
-	for (x = 0; x < qp->sq.max_wr; ++x) {
-		if (qp->sq.bitmask[x >> 6] & (UINT64_C(1) << (x & 63))) {
-			*wqe = (struct usiw_send_wqe *)(qp->sq.storage
-					+ x * send_wqe_size);
-			(*wqe)->index = x;
-			qp->sq.bitmask[x >> 6] &= ~(UINT64_C(1) << (x & 63));
-			ret = 0;
-			break;
-		}
-	}
+	ret = rte_ring_dequeue(qp->sq.free_ring, (void **)wqe);
 	rte_spinlock_unlock(&qp->sq.lock);
+	if (ret == -ENOENT)
+		ret = -ENOSPC;
 	return ret;
 } /* qp_get_next_send_wqe */
 
@@ -654,18 +669,10 @@ qp_get_next_recv_wqe(struct usiw_qp *qp, struct usiw_recv_wqe **wqe)
 	int x, ret;
 
 	rte_spinlock_lock(&qp->rq0.lock);
-	ret = -ENOSPC;
-	for (x = 0; x < qp->rq0.max_wr; ++x) {
-		if (qp->rq0.bitmask[x >> 6] & (UINT64_C(1) << (x & 63))) {
-			*wqe = (struct usiw_recv_wqe *)(qp->rq0.storage
-					+ x * recv_wqe_size);
-			(*wqe)->index = x;
-			qp->rq0.bitmask[x >> 6] &= ~(UINT64_C(1) << (x & 63));
-			ret = 0;
-			break;
-		}
-	}
+	ret = rte_ring_dequeue(qp->rq0.free_ring, (void **)wqe);
 	rte_spinlock_unlock(&qp->rq0.lock);
+	if (ret == -ENOENT)
+		ret = -ENOSPC;
 	return ret;
 } /* qp_get_next_recv_wqe */
 
@@ -702,8 +709,8 @@ finish_post_cqe(struct usiw_cq *cq, struct usiw_wc *cqe)
 	assert(ret == 0);
 	ctx = usiw_get_context(cq->ib_cq.context);
 	assert(ctx != NULL);
-	if (ctx && rte_atomic32_read(&cq->notify_count)) {
-		rte_atomic32_dec(&cq->notify_count);
+	if (ctx && atomic_load(&cq->notify_count)) {
+		atomic_fetch_sub(&cq->notify_count, 1);
 		event.event_type = SIW_EVENT_COMP_POSTED;
 		event.cq_id = cq->cq_id;
 		ret = write(ctx->event_fd, &event, sizeof(event));
@@ -1001,7 +1008,7 @@ do_rdmap_read_request(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 			rkey);
 	if (!temp_mr) {
 		/* FIXME: issue error completion */
-		rte_atomic16_set(&qp->shm_qp->conn_state, usiw_qp_error);
+		atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
 		return;
 	}
 	qp->ird_active++;
@@ -1391,7 +1398,7 @@ qp_shutdown(struct usiw_qp *qp)
 
 	send_trp_fin(qp);
 
-	rte_atomic16_set(&qp->shm_qp->conn_state, usiw_qp_error);
+	atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
 	memset(&qp_attr, 0, sizeof(qp_attr));
 	qp_attr.qp_state = IBV_QPS_ERR;
 	ibv_cmd_modify_qp(&qp->ib_qp, &qp_attr, IBV_QP_STATE,
@@ -1607,7 +1614,7 @@ sweep_unacked_packets(struct usiw_qp *qp, uint64_t now)
 				post_send_cqe(qp, pending->wqe, IBV_WC_RETRY_EXC_ERR);
 				rte_spinlock_unlock(&qp->sq.lock);
 			}
-			rte_atomic16_set(&qp->shm_qp->conn_state, usiw_qp_error);
+			atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
 			if (p == ep->tx_head) {
 				*ep->tx_head = NULL;
 				if (++ep->tx_head == end) {
@@ -2050,7 +2057,7 @@ start_qp(struct usiw_qp *qp)
 		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Set up readresp_store failed: %s\n",
 						qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 						strerror(errno));
-		rte_atomic16_set(&qp->shm_qp->conn_state, usiw_qp_error);
+		atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
 		rte_spinlock_unlock(&qp->shm_qp->conn_event_lock);
 		return;
 	}
@@ -2060,8 +2067,8 @@ start_qp(struct usiw_qp *qp)
 				qp_entry);
 	}
 
-	rte_atomic16_set(&qp->shm_qp->conn_state, usiw_qp_running);
-	rte_atomic32_dec(&qp->ctx->qp_init_count);
+	atomic_store(&qp->shm_qp->conn_state, usiw_qp_running);
+	atomic_fetch_sub(&qp->ctx->qp_init_count, 1);
 	rte_spinlock_unlock(&qp->shm_qp->conn_event_lock);
 } /* start_qp */
 
@@ -2100,18 +2107,34 @@ find_matching_qp(struct usiw_context *ctx, struct rte_mbuf *pkt)
 int
 kni_loop(void *arg)
 {
-	struct usiw_driver *driver = arg;
-	struct usiw_context *ctx, **ctx_prev;
+	struct usiw_context_handle *h, **h_prev;
+	struct usiw_context *ctx;
+	struct usiw_driver *driver;
 	struct usiw_qp *qp, **qp_prev;
 	struct rte_mbuf *rxmbuf[RX_BURST_SIZE];
-	unsigned int count;
+	void *ctxs_to_add[NEW_CTX_MAX];
+	unsigned int i, count;
 	int portid, ret;
 
+	driver = arg;
 	sem_wait(&driver->go);
 	while (1) {
-		LIST_FOR_EACH(ctx, &driver->ctxs, driver_entry, ctx_prev) {
+		count = rte_ring_dequeue_burst(driver->new_ctxs, ctxs_to_add,
+					     NEW_CTX_MAX);
+		for (i = 0; i < count; ++i) {
+			h = (struct usiw_context_handle *)ctxs_to_add[i];
+			LIST_INSERT_HEAD(&driver->ctxs, h, driver_entry);
+		}
+
+		LIST_FOR_EACH(h, &driver->ctxs, driver_entry, h_prev) {
+			ctx = (void *)atomic_load(&h->ctxp);
+			if (unlikely(!ctx)) {
+				LIST_REMOVE(h, driver_entry);
+				free(h);
+				continue;
+			}
 			LIST_FOR_EACH(qp, &ctx->qp_active, ctx_entry, qp_prev) {
-				switch (rte_atomic16_read(&qp->shm_qp->conn_state)) {
+				switch (atomic_load(&qp->shm_qp->conn_state)) {
 				case usiw_qp_connected:
 					/* start_qp() transitions to
 					 * usiw_qp_running */
@@ -2125,8 +2148,8 @@ kni_loop(void *arg)
 					 * usiw_qp_error */
 				case usiw_qp_error:
 					LIST_REMOVE(qp, ctx_entry);
-					if (rte_atomic32_sub_return(&qp->refcnt,
-								1) == 0) {
+					if (atomic_fetch_sub(&qp->refcnt,
+								1) == 1) {
 						usiw_do_destroy_qp(qp);
 					}
 					break;
