@@ -589,9 +589,13 @@ kni_process_burst(struct usiw_port *port,
 		count -= j;
 	}
 #endif
+#ifdef DEBUG_PACKET_HEADERS
 	int i;
+	RTE_LOG(DEBUG, USER1, "port %d: receive %d packets\n",
+			port->portid, count);
 	for (i = 0; i < count; ++i)
 		rte_pktmbuf_dump(stderr, rxmbuf[i], 128);
+#endif
 	rte_kni_tx_burst(port->kni, rxmbuf, count);
 } /* kni_process_burst */
 
