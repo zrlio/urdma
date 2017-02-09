@@ -703,9 +703,7 @@ finish_post_cqe(struct usiw_cq *cq, struct usiw_wc *cqe)
 	struct usiw_context *ctx;
 	ssize_t ret;
 
-	rte_spinlock_lock(&cq->lock);
 	ret = rte_ring_enqueue(cq->cqe_ring, cqe);
-	rte_spinlock_unlock(&cq->lock);
 	assert(ret == 0);
 	ctx = usiw_get_context(cq->ib_cq.context);
 	assert(ctx != NULL);

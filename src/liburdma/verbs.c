@@ -576,7 +576,6 @@ usiw_create_cq(struct ibv_context *context, int size,
 	}
 	cq->qp_count = 0;
 	atomic_init(&cq->notify_flag, false);
-	rte_spinlock_init(&cq->lock);
 	return &cq->ib_cq;
 } /* usiw_create_cq */
 
@@ -587,9 +586,7 @@ do_poll_cq(struct usiw_cq *cq, int num_entries, struct usiw_wc *wc)
 	void *cqe[num_entries];
 	int count, x, ret;
 
-	rte_spinlock_lock(&cq->lock);
 	count = rte_ring_dequeue_burst(cq->cqe_ring, cqe, num_entries);
-	rte_spinlock_unlock(&cq->lock);
 	if (count >= 0) {
 		for (x = 0; x < count; ++x) {
 			memcpy(&wc[x], cqe[x], sizeof(struct usiw_wc));

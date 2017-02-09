@@ -305,7 +305,6 @@ struct usiw_cq {
 	size_t qp_count;
 	uint32_t cq_id;
 	atomic_bool notify_flag;
-	rte_spinlock_t lock;
 };
 
 enum usiw_device_flags {
