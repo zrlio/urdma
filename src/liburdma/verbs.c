@@ -591,13 +591,13 @@ do_poll_cq(struct usiw_cq *cq, int num_entries, struct usiw_wc *wc)
 	count = rte_ring_dequeue_burst(cq->cqe_ring, cqe, num_entries);
 	rte_spinlock_unlock(&cq->lock);
 	if (count >= 0) {
+		for (x = 0; x < count; ++x) {
+			memcpy(&wc[x], cqe[x], sizeof(struct usiw_wc));
+		}
 		ret = rte_ring_enqueue_burst(cq->free_ring, cqe, count);
 		assert(ret == count);
 		if (ret < 0) {
 			count = ret;
-		}
-		for (x = 0; x < count; ++x) {
-			memcpy(&wc[x], cqe[x], sizeof(struct usiw_wc));
 		}
 	}
 
