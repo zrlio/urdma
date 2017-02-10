@@ -56,11 +56,14 @@
 #include "config_file.h"
 #include "util.h"
 
+#define DEFAULT_MTU 1500
+#define JUMBO_MTU 9000
+
 int
 urdma__config_file_get_ports(struct usiw_config *config,
 			     struct usiw_port_config **port_config)
 {
-	struct json_object *ports, *port, *ipv4;
+	struct json_object *ports, *port, *ipv4, *mtu;
 	int port_count, i;
 
 	if (!json_object_object_get_ex(config->root, "ports", &ports)) {
@@ -96,6 +99,24 @@ urdma__config_file_get_ports(struct usiw_config *config,
 		strncpy((*port_config)[i].ipv4_address,
 				json_object_get_string(ipv4),
 				ipv4_addr_len_max);
+
+		if (json_object_object_get_ex(port, "mtu", &mtu)) {
+			if (!json_object_is_type(mtu, json_type_int)
+					&& !json_object_is_type(mtu,
+						json_type_string)) {
+				fprintf(stderr, "Configuration error: port %d mtu is not integer\n", i);
+				return -EINVAL;
+			}
+			(*port_config)[i].mtu = json_object_get_int(mtu);
+			if ((*port_config)[i].mtu != DEFAULT_MTU
+					&& (*port_config)[i].mtu != JUMBO_MTU) {
+				fprintf(stderr, "Configuration error: port %d mtu %u invalid; expected 1500 or 9000\n",
+						i, (*port_config)[i].mtu);
+				return -EINVAL;
+			}
+		} else {
+			(*port_config)[i].mtu = DEFAULT_MTU;
+		}
 	}
 
 	return port_count;

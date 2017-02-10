@@ -207,16 +207,27 @@ unref_addr:
 static int
 usiw_port_change_mtu(uint8_t port_id, unsigned int new_mtu)
 {
-	RTE_LOG(NOTICE, USER1, "got request to change port %" PRIu8 " MTU to %u\n",
+	RTE_LOG(NOTICE, USER1, "got KNI request to change port %" PRIu8 " MTU to %u\n",
 			port_id, new_mtu);
-	return 0;
+	return rte_eth_dev_set_mtu(port_id, new_mtu);
 } /* usiw_port_change_mtu */
 
 static int
 usiw_port_change_state(uint8_t port_id, uint8_t if_up)
 {
-	RTE_LOG(NOTICE, USER1, "got request to change port %" PRIu8 " state to %" PRIu8 "\n",
-			port_id, if_up);
+	uint16_t mtu;
+	int ret;
+
+	if (!if_up) {
+		RTE_LOG(NOTICE, USER1, "port %" PRIu8 " state change to down\n",
+			port_id);
+		return -EBUSY;
+	}
+
+	ret = rte_eth_dev_get_mtu(port_id, &mtu);
+	assert(ret == 0);
+	RTE_LOG(NOTICE, USER1, "port %" PRIu8 " up mtu=%" PRIu16 "\n",
+			port_id, mtu);
 	return 0;
 } /* usiw_port_change_mtu */
 

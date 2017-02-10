@@ -672,7 +672,7 @@ setup_base_filters(struct usiw_port *iface)
 
 
 static int
-usiw_port_init(struct usiw_port *iface)
+usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 {
 	static const uint32_t rx_checksum_offloads
 		= DEV_RX_OFFLOAD_UDP_CKSUM|DEV_RX_OFFLOAD_IPV4_CKSUM;
@@ -846,6 +846,13 @@ usiw_port_init(struct usiw_port *iface)
 		return retval;
 	}
 
+	retval = rte_eth_dev_set_mtu(iface->portid, port_config->mtu);
+	if (retval < 0) {
+		rte_exit(EXIT_FAILURE, "Could not set port %u MTU to %u: %s\n",
+				iface->portid, port_config->mtu,
+				strerror(-retval));
+	}
+
 	return rte_eth_dev_start(iface->portid);
 } /* usiw_port_init */
 
@@ -968,7 +975,8 @@ do_init_driver(void)
 				&driver->ports[portid].ether_addr);
 		rte_eth_dev_info_get(portid, &driver->ports[portid].dev_info);
 
-		retval = usiw_port_init(&driver->ports[portid]);
+		retval = usiw_port_init(&driver->ports[portid],
+					&port_config[portid]);
 		if (retval < 0) {
 			rte_exit(EXIT_FAILURE, "Could not initialize port %u: %s\n",
 					portid, strerror(-retval));
