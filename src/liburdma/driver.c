@@ -74,9 +74,6 @@
 #include "urdma_kabi.h"
 #include "util.h"
 
-#define RX_DESC_COUNT_MAX 512
-#define TX_DESC_COUNT_MAX 512
-
 static struct usiw_driver *driver;
 
 int
@@ -211,10 +208,6 @@ usiw_driver_init(int portid)
 		return NULL;
 	}
 	rte_eth_dev_info_get(dev->portid, &info);
-	dev->rx_desc_count = info.rx_desc_lim.nb_max;
-	if (dev->rx_desc_count > RX_DESC_COUNT_MAX) {
-		dev->rx_desc_count = RX_DESC_COUNT_MAX;
-	}
 
 	if ((info.tx_offload_capa & tx_checksum_offloads)
 						== tx_checksum_offloads) {

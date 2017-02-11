@@ -217,6 +217,7 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 {
 	struct urdma_qp_rtr_event rtr_event;
 	struct rte_eth_fdir_filter fdirf;
+	struct rte_eth_rxq_info rxq_info;
 	struct usiw_port *dev;
 	struct urdmad_qp *qp;
 	ssize_t ret;
@@ -249,6 +250,13 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 	qp->remote_ipv4_addr = event->dst_ipv4;
 	qp->ord_max = event->ord_max;
 	qp->ird_max = event->ird_max;
+	ret = rte_eth_rx_queue_info_get(event->urdmad_dev_id,
+			event->urdmad_qp_id, &rxq_info);
+	if (ret < 0) {
+		qp->rx_desc_count = dev->rx_desc_count;
+	} else {
+		qp->rx_desc_count = rxq_info.nb_desc;
+	}
 	memcpy(&qp->remote_ether_addr, event->dst_ether, ETHER_ADDR_LEN);
 	if (dev->flags & port_fdir) {
 		memset(&fdirf, 0, sizeof(fdirf));
@@ -728,6 +736,7 @@ usiw_port_init(struct usiw_port *iface)
 	if (iface->rx_desc_count > RX_DESC_COUNT_MAX) {
 		iface->rx_desc_count = RX_DESC_COUNT_MAX;
 	}
+	fprintf(stderr, "rx_desc_count %" PRIu16 "\n", iface->rx_desc_count);
 	iface->tx_desc_count = iface->dev_info.tx_desc_lim.nb_max;
 	if (iface->tx_desc_count > TX_DESC_COUNT_MAX) {
 		iface->tx_desc_count = TX_DESC_COUNT_MAX;

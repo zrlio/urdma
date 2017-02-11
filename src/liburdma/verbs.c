@@ -892,20 +892,12 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 	qp->ird_active = 0;
 
 	ee = &qp->remote_ep;
-	/* FIXME: Get this from the peer */
-	ee->send_max_psn = ee->tx_pending_size = qp->dev->rx_desc_count / 2;
-	ee->tx_pending = calloc(ee->send_max_psn, sizeof(*ee->tx_pending));
-	if (!ee->tx_pending) {
-		goto free_kernel_qp;
-	}
 	ee->expected_recv_msn = 1;
 	ee->expected_read_msn = 1;
 	ee->expected_ack_msn = 1;
 	ee->next_send_msn = 1;
 	ee->next_read_msn = 1;
 	ee->next_ack_msn = 1;
-
-	ee->tx_head = ee->tx_pending;
 
 	/* Queue pairs start with two references; one for the internal qp_active
 	 * list that gets decremented when the progress thread notices that the

@@ -2071,6 +2071,22 @@ start_qp(struct usiw_qp *qp)
 				qp_entry);
 	}
 
+	/* FIXME: Get this from the peer */
+	qp->remote_ep.send_max_psn = qp->shm_qp->rx_desc_count / 2;
+	qp->remote_ep.tx_pending_size = qp->shm_qp->rx_desc_count / 2;
+	qp->remote_ep.tx_pending = calloc(qp->remote_ep.tx_pending_size,
+			sizeof(*qp->remote_ep.tx_pending));
+	if (!qp->remote_ep.tx_pending) {
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Set up tx_pending failed: %s\n",
+						qp->shm_qp->dev_id, qp->shm_qp->qp_id,
+						strerror(errno));
+		atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
+		free(qp->readresp_store);
+		rte_spinlock_unlock(&qp->shm_qp->conn_event_lock);
+		return;
+	}
+	qp->remote_ep.tx_head = qp->remote_ep.tx_pending;
+
 	atomic_store(&qp->shm_qp->conn_state, usiw_qp_running);
 	atomic_fetch_sub(&qp->ctx->qp_init_count, 1);
 	rte_spinlock_unlock(&qp->shm_qp->conn_event_lock);

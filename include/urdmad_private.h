@@ -96,6 +96,9 @@ struct urdmad_qp {
 	struct ether_addr remote_ether_addr;
 		/**< MAC address of remote endpoint. */
 
+	uint16_t rx_desc_count;
+		/**< Hardware receive descriptors on this RX queue. */
+
 	LIST_ENTRY(urdmad_qp) urdmad__entry;
 		/**< Private field used only by urdmad to thread onto list. */
 };
