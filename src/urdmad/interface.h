@@ -48,8 +48,8 @@
 
 #define PENDING_DATAGRAM_INFO_SIZE 32
 #define RX_BURST_SIZE 32
-#define RX_DESC_COUNT_MAX 512
-#define TX_DESC_COUNT_MAX 512
+#define RX_DESC_COUNT_MAX 1024
+#define TX_DESC_COUNT_MAX 1024
 #define URDMA_MAX_QP 63
 
 #ifndef container_of
