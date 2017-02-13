@@ -50,7 +50,7 @@
 #define RX_BURST_SIZE 32
 #define RX_DESC_COUNT_MAX 1024
 #define TX_DESC_COUNT_MAX 1024
-#define URDMA_MAX_QP 63
+#define URDMA_MAX_QP 31
 
 #ifndef container_of
 #define container_of(ptr, type, field) \
@@ -84,6 +84,7 @@ struct usiw_port {
 	struct ether_addr ether_addr;
 	uint32_t ipv4_addr;
 	int ipv4_prefix_len;
+	uint16_t mtu;
 
 	char kni_name[RTE_KNI_NAMESIZE];
 	struct rte_eth_dev_info dev_info;

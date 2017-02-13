@@ -250,6 +250,13 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 	qp->remote_ipv4_addr = event->dst_ipv4;
 	qp->ord_max = event->ord_max;
 	qp->ird_max = event->ird_max;
+	switch (dev->mtu) {
+	case 9000:
+		qp->mtu = 8192;
+		break;
+	default:
+		qp->mtu = 1024;
+	}
 	ret = rte_eth_rx_queue_info_get(event->urdmad_dev_id,
 			event->urdmad_qp_id, &rxq_info);
 	if (ret < 0) {
@@ -764,7 +771,7 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 			"port_%u_rx_mempool", iface->portid);
 	iface->rx_mempool = rte_pktmbuf_pool_create(name,
 		2 * iface->max_qp * iface->rx_desc_count,
-		0, 0, RTE_MBUF_DEFAULT_BUF_SIZE, socket_id);
+		0, 0, RTE_PKTMBUF_HEADROOM + port_config->mtu, socket_id);
 	if (iface->rx_mempool == NULL)
 		rte_exit(EXIT_FAILURE, "Cannot create rx mempool with %u mbufs: %s\n",
 				2 * iface->max_qp * iface->rx_desc_count,
@@ -775,7 +782,7 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 	iface->tx_ddp_mempool = rte_pktmbuf_pool_create(name,
 		2 * iface->max_qp * iface->tx_desc_count,
 		0, PENDING_DATAGRAM_INFO_SIZE,
-		RTE_MBUF_DEFAULT_BUF_SIZE, socket_id);
+		RTE_PKTMBUF_HEADROOM + port_config->mtu, socket_id);
 	if (iface->tx_ddp_mempool == NULL)
 		rte_exit(EXIT_FAILURE, "Cannot create tx mempool with %u mbufs: %s\n",
 				2 * iface->max_qp * iface->tx_desc_count,
@@ -852,6 +859,7 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 				iface->portid, port_config->mtu,
 				strerror(-retval));
 	}
+	iface->mtu = port_config->mtu;
 
 	return rte_eth_dev_start(iface->portid);
 } /* usiw_port_init */

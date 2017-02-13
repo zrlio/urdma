@@ -872,10 +872,7 @@ do_rdmap_send(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 	struct rte_mbuf *sendmsg;
 	unsigned int packet_length;
 	size_t payload_length;
-	uint16_t mtu;
-
-	rte_eth_dev_get_mtu(qp->dev->portid, &mtu);
-	mtu = RDMAP_MAX_PAYLOAD(mtu, struct rdmap_untagged_packet);
+	uint16_t mtu = qp->shm_qp->mtu;
 
 	while (wqe->bytes_sent < wqe->total_length
 			&& serial_less_32(wqe->remote_ep->send_next_psn,
@@ -930,10 +927,7 @@ do_rdmap_write(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 	struct rte_mbuf *sendmsg;
 	unsigned int packet_length;
 	size_t payload_length;
-	uint16_t mtu;
-
-	rte_eth_dev_get_mtu(qp->dev->portid, &mtu);
-	mtu = RDMAP_MAX_PAYLOAD(mtu, struct rdmap_tagged_packet);
+	uint16_t mtu = qp->shm_qp->mtu;
 
 	while (wqe->bytes_sent < wqe->total_length
 			&& serial_less_32(wqe->remote_ep->send_next_psn,
@@ -987,7 +981,6 @@ do_rdmap_read_request(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 	struct ibv_mr *temp_mr;
 	unsigned int packet_length;
 	uint32_t rkey;
-	uint16_t mtu;
 
 	if (wqe->state != SEND_WQE_TRANSFER) {
 		return;
@@ -1016,8 +1009,6 @@ do_rdmap_read_request(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 		return;
 	}
 	qp->ird_active++;
-
-	rte_eth_dev_get_mtu(qp->dev->portid, &mtu);
 
 	sendmsg = rte_pktmbuf_alloc(qp->dev->tx_ddp_mempool);
 
@@ -1235,11 +1226,8 @@ respond_rdma_read(struct usiw_qp *qp)
 	struct rte_mbuf *sendmsg;
 	size_t dgram_length;
 	size_t payload_length;
-	uint16_t mtu;
+	uint16_t mtu = qp->shm_qp->mtu;
 	int count;
-
-	rte_eth_dev_get_mtu(qp->dev->portid, &mtu);
-	mtu = RDMAP_MAX_PAYLOAD(mtu, struct rdmap_tagged_packet);
 
 	count = 0;
 	TAILQ_FOR_EACH(readresp, &qp->readresp_active, qp_entry, prev) {

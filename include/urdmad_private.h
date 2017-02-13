@@ -98,6 +98,8 @@ struct urdmad_qp {
 
 	uint16_t rx_desc_count;
 		/**< Hardware receive descriptors on this RX queue. */
+	uint16_t mtu;
+		/**< Device MTU. */
 
 	LIST_ENTRY(urdmad_qp) urdmad__entry;
 		/**< Private field used only by urdmad to thread onto list. */
