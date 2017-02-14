@@ -310,8 +310,10 @@ setup_socket(const char *sock_name)
 	strncpy(addr.sun_path, sock_name, sizeof(addr.sun_path));
 	ret = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
 	if (ret < 0) {
-		fprintf(stderr, "Could not connect to %s: %s\n",
-				addr.sun_path, strerror(errno));
+		if (getenv("IBV_SHOW_WARNINGS")) {
+			fprintf(stderr, "Could not connect to %s: %s\n",
+					addr.sun_path, strerror(errno));
+		}
 		goto err;
 	}
 
