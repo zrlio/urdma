@@ -703,14 +703,18 @@ finish_post_cqe(struct usiw_cq *cq, struct usiw_wc *cqe)
 	struct usiw_context *ctx;
 	ssize_t ret;
 
-	rte_spinlock_lock(&cq->lock);
 	ret = rte_ring_enqueue(cq->cqe_ring, cqe);
-	rte_spinlock_unlock(&cq->lock);
 	assert(ret == 0);
 	ctx = usiw_get_context(cq->ib_cq.context);
 	assert(ctx != NULL);
-	if (ctx && atomic_load(&cq->notify_count)) {
-		atomic_fetch_sub(&cq->notify_count, 1);
+
+	/* This is non-atomic, but that is fine since we are the only thread
+	 * that can possibly set notify_flag to false. If another thread sets
+	 * it to true immediately after we check it, then it would have missed
+	 * this notification anyways. We do this not-atomically to avoid the
+	 * overhead of a potential atomic store on every single CQ post. */
+	if (ctx && atomic_load(&cq->notify_flag)) {
+		atomic_store(&cq->notify_flag, false);
 		event.event_type = SIW_EVENT_COMP_POSTED;
 		event.cq_id = cq->cq_id;
 		ret = write(ctx->event_fd, &event, sizeof(event));
@@ -868,10 +872,7 @@ do_rdmap_send(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 	struct rte_mbuf *sendmsg;
 	unsigned int packet_length;
 	size_t payload_length;
-	uint16_t mtu;
-
-	rte_eth_dev_get_mtu(qp->dev->portid, &mtu);
-	mtu = RDMAP_MAX_PAYLOAD(mtu, struct rdmap_untagged_packet);
+	uint16_t mtu = qp->shm_qp->mtu;
 
 	while (wqe->bytes_sent < wqe->total_length
 			&& serial_less_32(wqe->remote_ep->send_next_psn,
@@ -926,10 +927,7 @@ do_rdmap_write(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 	struct rte_mbuf *sendmsg;
 	unsigned int packet_length;
 	size_t payload_length;
-	uint16_t mtu;
-
-	rte_eth_dev_get_mtu(qp->dev->portid, &mtu);
-	mtu = RDMAP_MAX_PAYLOAD(mtu, struct rdmap_tagged_packet);
+	uint16_t mtu = qp->shm_qp->mtu;
 
 	while (wqe->bytes_sent < wqe->total_length
 			&& serial_less_32(wqe->remote_ep->send_next_psn,
@@ -983,7 +981,6 @@ do_rdmap_read_request(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 	struct ibv_mr *temp_mr;
 	unsigned int packet_length;
 	uint32_t rkey;
-	uint16_t mtu;
 
 	if (wqe->state != SEND_WQE_TRANSFER) {
 		return;
@@ -1012,8 +1009,6 @@ do_rdmap_read_request(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 		return;
 	}
 	qp->ird_active++;
-
-	rte_eth_dev_get_mtu(qp->dev->portid, &mtu);
 
 	sendmsg = rte_pktmbuf_alloc(qp->dev->tx_ddp_mempool);
 
@@ -1231,11 +1226,8 @@ respond_rdma_read(struct usiw_qp *qp)
 	struct rte_mbuf *sendmsg;
 	size_t dgram_length;
 	size_t payload_length;
-	uint16_t mtu;
+	uint16_t mtu = qp->shm_qp->mtu;
 	int count;
-
-	rte_eth_dev_get_mtu(qp->dev->portid, &mtu);
-	mtu = RDMAP_MAX_PAYLOAD(mtu, struct rdmap_tagged_packet);
 
 	count = 0;
 	TAILQ_FOR_EACH(readresp, &qp->readresp_active, qp_entry, prev) {
@@ -2066,6 +2058,22 @@ start_qp(struct usiw_qp *qp)
 				&qp->readresp_store[x],
 				qp_entry);
 	}
+
+	/* FIXME: Get this from the peer */
+	qp->remote_ep.send_max_psn = qp->shm_qp->rx_desc_count / 2;
+	qp->remote_ep.tx_pending_size = qp->shm_qp->rx_desc_count / 2;
+	qp->remote_ep.tx_pending = calloc(qp->remote_ep.tx_pending_size,
+			sizeof(*qp->remote_ep.tx_pending));
+	if (!qp->remote_ep.tx_pending) {
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Set up tx_pending failed: %s\n",
+						qp->shm_qp->dev_id, qp->shm_qp->qp_id,
+						strerror(errno));
+		atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
+		free(qp->readresp_store);
+		rte_spinlock_unlock(&qp->shm_qp->conn_event_lock);
+		return;
+	}
+	qp->remote_ep.tx_head = qp->remote_ep.tx_pending;
 
 	atomic_store(&qp->shm_qp->conn_state, usiw_qp_running);
 	atomic_fetch_sub(&qp->ctx->qp_init_count, 1);

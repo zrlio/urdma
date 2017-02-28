@@ -44,6 +44,7 @@ enum { ipv4_addr_len_max = 20 };
 struct json_object;
 
 struct usiw_port_config {
+	unsigned int mtu;
 	char ipv4_address[ipv4_addr_len_max];
 };
 

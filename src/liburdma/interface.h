@@ -304,8 +304,7 @@ struct usiw_cq {
 	size_t capacity;
 	size_t qp_count;
 	uint32_t cq_id;
-	atomic_uint notify_count;
-	rte_spinlock_t lock;
+	atomic_bool notify_flag;
 };
 
 enum usiw_device_flags {
@@ -353,7 +352,6 @@ struct usiw_device {
 	struct rte_mempool *tx_hdr_mempool;
 	struct urdmad_queue_range *queue_ranges;
 	uint16_t portid;
-	uint16_t rx_desc_count;
 	uint16_t max_qp;
 	uint64_t flags;
 	struct ether_addr ether_addr;

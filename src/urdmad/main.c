@@ -217,6 +217,7 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 {
 	struct urdma_qp_rtr_event rtr_event;
 	struct rte_eth_fdir_filter fdirf;
+	struct rte_eth_rxq_info rxq_info;
 	struct usiw_port *dev;
 	struct urdmad_qp *qp;
 	ssize_t ret;
@@ -249,6 +250,20 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 	qp->remote_ipv4_addr = event->dst_ipv4;
 	qp->ord_max = event->ord_max;
 	qp->ird_max = event->ird_max;
+	switch (dev->mtu) {
+	case 9000:
+		qp->mtu = 8192;
+		break;
+	default:
+		qp->mtu = 1024;
+	}
+	ret = rte_eth_rx_queue_info_get(event->urdmad_dev_id,
+			event->urdmad_qp_id, &rxq_info);
+	if (ret < 0) {
+		qp->rx_desc_count = dev->rx_desc_count;
+	} else {
+		qp->rx_desc_count = rxq_info.nb_desc;
+	}
 	memcpy(&qp->remote_ether_addr, event->dst_ether, ETHER_ADDR_LEN);
 	if (dev->flags & port_fdir) {
 		memset(&fdirf, 0, sizeof(fdirf));
@@ -589,9 +604,13 @@ kni_process_burst(struct usiw_port *port,
 		count -= j;
 	}
 #endif
+#ifdef DEBUG_PACKET_HEADERS
 	int i;
+	RTE_LOG(DEBUG, USER1, "port %d: receive %d packets\n",
+			port->portid, count);
 	for (i = 0; i < count; ++i)
 		rte_pktmbuf_dump(stderr, rxmbuf[i], 128);
+#endif
 	rte_kni_tx_burst(port->kni, rxmbuf, count);
 } /* kni_process_burst */
 
@@ -660,7 +679,7 @@ setup_base_filters(struct usiw_port *iface)
 
 
 static int
-usiw_port_init(struct usiw_port *iface)
+usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 {
 	static const uint32_t rx_checksum_offloads
 		= DEV_RX_OFFLOAD_UDP_CKSUM|DEV_RX_OFFLOAD_IPV4_CKSUM;
@@ -724,6 +743,7 @@ usiw_port_init(struct usiw_port *iface)
 	if (iface->rx_desc_count > RX_DESC_COUNT_MAX) {
 		iface->rx_desc_count = RX_DESC_COUNT_MAX;
 	}
+	fprintf(stderr, "rx_desc_count %" PRIu16 "\n", iface->rx_desc_count);
 	iface->tx_desc_count = iface->dev_info.tx_desc_lim.nb_max;
 	if (iface->tx_desc_count > TX_DESC_COUNT_MAX) {
 		iface->tx_desc_count = TX_DESC_COUNT_MAX;
@@ -751,7 +771,7 @@ usiw_port_init(struct usiw_port *iface)
 			"port_%u_rx_mempool", iface->portid);
 	iface->rx_mempool = rte_pktmbuf_pool_create(name,
 		2 * iface->max_qp * iface->rx_desc_count,
-		0, 0, RTE_MBUF_DEFAULT_BUF_SIZE, socket_id);
+		0, 0, RTE_PKTMBUF_HEADROOM + port_config->mtu, socket_id);
 	if (iface->rx_mempool == NULL)
 		rte_exit(EXIT_FAILURE, "Cannot create rx mempool with %u mbufs: %s\n",
 				2 * iface->max_qp * iface->rx_desc_count,
@@ -762,7 +782,7 @@ usiw_port_init(struct usiw_port *iface)
 	iface->tx_ddp_mempool = rte_pktmbuf_pool_create(name,
 		2 * iface->max_qp * iface->tx_desc_count,
 		0, PENDING_DATAGRAM_INFO_SIZE,
-		RTE_MBUF_DEFAULT_BUF_SIZE, socket_id);
+		RTE_PKTMBUF_HEADROOM + port_config->mtu, socket_id);
 	if (iface->tx_ddp_mempool == NULL)
 		rte_exit(EXIT_FAILURE, "Cannot create tx mempool with %u mbufs: %s\n",
 				2 * iface->max_qp * iface->tx_desc_count,
@@ -832,6 +852,14 @@ usiw_port_init(struct usiw_port *iface)
 	if (retval < 0) {
 		return retval;
 	}
+
+	retval = rte_eth_dev_set_mtu(iface->portid, port_config->mtu);
+	if (retval < 0) {
+		rte_exit(EXIT_FAILURE, "Could not set port %u MTU to %u: %s\n",
+				iface->portid, port_config->mtu,
+				strerror(-retval));
+	}
+	iface->mtu = port_config->mtu;
 
 	return rte_eth_dev_start(iface->portid);
 } /* usiw_port_init */
@@ -955,7 +983,8 @@ do_init_driver(void)
 				&driver->ports[portid].ether_addr);
 		rte_eth_dev_info_get(portid, &driver->ports[portid].dev_info);
 
-		retval = usiw_port_init(&driver->ports[portid]);
+		retval = usiw_port_init(&driver->ports[portid],
+					&port_config[portid]);
 		if (retval < 0) {
 			rte_exit(EXIT_FAILURE, "Could not initialize port %u: %s\n",
 					portid, strerror(-retval));

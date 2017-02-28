@@ -575,8 +575,7 @@ usiw_create_cq(struct ibv_context *context, int size,
 		rte_ring_enqueue(cq->free_ring, &cq->storage[x]);
 	}
 	cq->qp_count = 0;
-	atomic_init(&cq->notify_count, 0);
-	rte_spinlock_init(&cq->lock);
+	atomic_init(&cq->notify_flag, false);
 	return &cq->ib_cq;
 } /* usiw_create_cq */
 
@@ -587,17 +586,15 @@ do_poll_cq(struct usiw_cq *cq, int num_entries, struct usiw_wc *wc)
 	void *cqe[num_entries];
 	int count, x, ret;
 
-	rte_spinlock_lock(&cq->lock);
 	count = rte_ring_dequeue_burst(cq->cqe_ring, cqe, num_entries);
-	rte_spinlock_unlock(&cq->lock);
 	if (count >= 0) {
+		for (x = 0; x < count; ++x) {
+			memcpy(&wc[x], cqe[x], sizeof(struct usiw_wc));
+		}
 		ret = rte_ring_enqueue_burst(cq->free_ring, cqe, count);
 		assert(ret == count);
 		if (ret < 0) {
 			count = ret;
-		}
-		for (x = 0; x < count; ++x) {
-			memcpy(&wc[x], cqe[x], sizeof(struct usiw_wc));
 		}
 	}
 
@@ -661,7 +658,7 @@ usiw_req_notify_cq(struct ibv_cq *ib_cq, int solicited_only)
 	if (solicited_only)
 		return 0;
 
-	atomic_fetch_add(&cq->notify_count, 1);
+	atomic_store(&cq->notify_flag, true);
 
 	return 0;
 } /* usiw_req_notify_cq */
@@ -895,20 +892,12 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 	qp->ird_active = 0;
 
 	ee = &qp->remote_ep;
-	/* FIXME: Get this from the peer */
-	ee->send_max_psn = ee->tx_pending_size = qp->dev->rx_desc_count / 2;
-	ee->tx_pending = calloc(ee->send_max_psn, sizeof(*ee->tx_pending));
-	if (!ee->tx_pending) {
-		goto free_kernel_qp;
-	}
 	ee->expected_recv_msn = 1;
 	ee->expected_read_msn = 1;
 	ee->expected_ack_msn = 1;
 	ee->next_send_msn = 1;
 	ee->next_read_msn = 1;
 	ee->next_ack_msn = 1;
-
-	ee->tx_head = ee->tx_pending;
 
 	/* Queue pairs start with two references; one for the internal qp_active
 	 * list that gets decremented when the progress thread notices that the
