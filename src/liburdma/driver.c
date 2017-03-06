@@ -416,7 +416,7 @@ do_hello(void)
 
 	memset(&req, 0, sizeof(req));
 	req.hdr.opcode = rte_cpu_to_be_32(urdma_sock_hello_req);
-	req.req_lcore_count = rte_cpu_to_be_32(2);
+	req.req_lcore_count = rte_cpu_to_be_32(1);
 	ret = send(driver->urdmad_fd, &req, sizeof(req), 0);
 	if (ret != sizeof(req)) {
 		return -1;
@@ -530,19 +530,17 @@ our_eal_master_thread(void *sem)
 		goto close_fd;
 	}
 
+	/* Here we create a semaphore "go" which is used to start the progress
+	 * thread once a uverbs context is established, and then post on our
+	 * initialization semaphore to let the "parent" thread know that we have
+	 * completed initialization. */
 	if (sem_init(&driver->go, 0, 0))
 		goto free_ring;
-	ret = rte_eal_remote_launch(kni_loop, driver,
-			rte_get_next_lcore(rte_get_master_lcore(), 1, 1));
+	ret = sem_post(sem);
 	if (ret) {
 		goto destroy_sem;
 	}
-
-	ret = sem_post(sem);
-
-	while (1) {
-		pause();
-	}
+	kni_loop(driver);
 
 	return NULL;
 
