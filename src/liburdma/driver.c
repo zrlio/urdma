@@ -460,8 +460,11 @@ format_coremask(uint32_t *coremask, size_t array_size)
 } /* format_coremask */
 
 
-static void
-do_init_driver(void)
+/** Initialize the DPDK in a separate thread; this way we do not affect the
+ * affinity of the user thread which first calls ibv_get_device_list, whether
+ * directly or indirectly. */
+static void *
+our_eal_master_thread(void *sem)
 {
 	char **eal_argv;
 	char **argv_copy;
@@ -470,7 +473,10 @@ do_init_driver(void)
 	int eal_argc, ret;
 
 	if (!do_config(&sock_name, &eal_argc, &eal_argv)) {
-		return;
+		/* driver will be NULL either because this previously failed or
+		 * because it is a global variable which is initialized from 0'd
+		 * memory, so it is safe to call free() on it regardless */
+		goto err;
 	}
 
 	driver = calloc(1, sizeof(*driver) + rte_ring_get_memsize(
@@ -531,7 +537,14 @@ do_init_driver(void)
 	if (ret) {
 		goto destroy_sem;
 	}
-	return;
+
+	ret = sem_post(sem);
+
+	while (1) {
+		pause();
+	}
+
+	return NULL;
 
 destroy_sem:
 	sem_destroy(&driver->go);
@@ -542,6 +555,48 @@ close_fd:
 err:
 	free(driver);
 	driver = NULL;
+	ret = sem_post(sem);
+	return NULL;
+} /* our_eal_master_thread */
+
+
+static void
+do_init_driver(void)
+{
+	pthread_t thread;
+	sem_t sem;
+	int ret;
+
+	if (sem_init(&sem, 0, 0)) {
+		if (getenv("IBV_SHOW_WARNINGS")) {
+			fprintf(stderr, "Could not initialize semaphore: %s\n",
+					strerror(ret));
+		}
+		return;
+	}
+
+	ret = pthread_create(&thread, NULL, &our_eal_master_thread, &sem);
+	if (ret) {
+		if (getenv("IBV_SHOW_WARNINGS")) {
+			fprintf(stderr,
+				"Could not create urdma progress thread: %s\n",
+				strerror(ret));
+		}
+		return;
+	}
+
+	do {
+		ret = sem_wait(&sem);
+	} while (ret < 0 && errno == EINTR);
+	if (ret < 0) {
+		if (getenv("IBV_SHOW_WARNINGS")) {
+			fprintf(stderr,
+				"Error waiting on initialization semaphore: %s\n",
+				strerror(ret));
+		}
+		return;
+	}
+	sem_destroy(&sem);
 }
 
 
