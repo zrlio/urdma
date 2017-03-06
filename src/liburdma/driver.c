@@ -556,12 +556,6 @@ usiw_verbs_driver_init(const char *uverbs_sys_path, int abi_version)
 	char value[16];
 	int portid;
 
-	pthread_once(&driver_init_once, &do_init_driver);
-	if (!driver) {
-		/* driver initialization failed */
-		return NULL;
-	}
-
 	if (ibv_read_sysfs_file(uverbs_sys_path, "ibdev",
 				value, sizeof value) < 0)
 		return NULL;
@@ -585,6 +579,12 @@ usiw_verbs_driver_init(const char *uverbs_sys_path, int abi_version)
 
 	if (abi_version < URDMA_ABI_VERSION_MIN
 			|| abi_version > URDMA_ABI_VERSION_MAX) {
+		return NULL;
+	}
+
+	pthread_once(&driver_init_once, &do_init_driver);
+	if (!driver) {
+		/* driver initialization failed */
 		return NULL;
 	}
 
