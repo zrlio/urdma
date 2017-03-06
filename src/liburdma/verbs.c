@@ -539,8 +539,7 @@ usiw_create_cq(struct ibv_context *context, int size,
 		free(cq);
 		return NULL;
 	}
-	ret = rte_ring_init(cq->cqe_ring, name, size + 1,
-			RING_F_SP_ENQ|RING_F_SC_DEQ);
+	ret = rte_ring_init(cq->cqe_ring, name, size + 1, RING_F_SP_ENQ);
 	if (ret) {
 		errno = -ret;
 		rte_free(cq->cqe_ring);
@@ -558,8 +557,7 @@ usiw_create_cq(struct ibv_context *context, int size,
 		free(cq);
 		return NULL;
 	}
-	ret = rte_ring_init(cq->free_ring, name, size + 1,
-			RING_F_SP_ENQ|RING_F_SC_DEQ);
+	ret = rte_ring_init(cq->free_ring, name, size + 1, RING_F_SC_DEQ);
 	if (!cq->free_ring) {
 		errno = ret;
 		rte_free(cq->free_ring);
