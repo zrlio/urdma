@@ -76,7 +76,7 @@ next_pow2(int in)
 {
 	int out;
 	assert(in < SIZE_POW2_MAX);
-	for (out = 1; out < 2 * in; out <<= 1)
+	for (out = 1; out < in; out <<= 1)
 		;
 	return out;
 } /* next_pow2 */
@@ -799,9 +799,9 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 		goto errout;
 	}
 	qp_init_attr->cap.max_send_wr
-		= RTE_MAX(next_pow2(qp_init_attr->cap.max_send_wr) - 1, 63);
+		= RTE_MAX(next_pow2(qp_init_attr->cap.max_send_wr + 1) - 1, 63);
 	qp_init_attr->cap.max_recv_wr
-		= RTE_MAX(next_pow2(qp_init_attr->cap.max_recv_wr) - 1, 63);
+		= RTE_MAX(next_pow2(qp_init_attr->cap.max_recv_wr + 1) - 1, 63);
 
 	/* By default provide one cache line of scatter-gather elements (the
 	 * cache line includes the count at the start) */
