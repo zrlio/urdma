@@ -817,6 +817,7 @@ static __init int siw_init_module(void)
 		rv = -ENOMEM;
 		goto out_nochardev;
 	}
+	chardev_data->dev = &usiw_generic_dma_device;
 	spin_lock_init(&chardev_data->lock);
 	INIT_LIST_HEAD(&chardev_data->established_list);
 	INIT_LIST_HEAD(&chardev_data->disconnect_list);
