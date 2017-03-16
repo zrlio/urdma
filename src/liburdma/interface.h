@@ -297,6 +297,7 @@ struct usiw_qp {
 };
 
 struct usiw_cq {
+	atomic_uint refcnt;
 	struct ibv_cq ib_cq;
 	struct rte_ring *cqe_ring;
 	struct rte_ring *free_ring;
@@ -422,6 +423,9 @@ usiw_recv_wqe_queue_init(uint32_t qpn, struct usiw_recv_wqe_queue *q,
 
 void
 usiw_recv_wqe_queue_destroy(struct usiw_recv_wqe_queue *q);
+
+void
+urdma_do_destroy_cq(struct usiw_cq *cq);
 
 void
 usiw_do_destroy_qp(struct usiw_qp *qp);

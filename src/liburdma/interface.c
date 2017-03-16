@@ -2012,9 +2012,27 @@ progress_qp(struct usiw_qp *qp)
 
 
 void
+urdma_do_destroy_cq(struct usiw_cq *cq)
+{
+	rte_free(cq->cqe_ring);
+	rte_free(cq->free_ring);
+	free(cq);
+} /* urdma_do_destroy_cq */
+
+
+void
 usiw_do_destroy_qp(struct usiw_qp *qp)
 {
 	struct urdmad_sock_qp_msg msg;
+
+	if (atomic_fetch_sub(&qp->recv_cq->refcnt, 1) == 1) {
+		urdma_do_destroy_cq(qp->recv_cq);
+	}
+	if (qp->send_cq != qp->recv_cq) {
+		if (atomic_fetch_sub(&qp->send_cq->refcnt, 1) == 1) {
+			urdma_do_destroy_cq(qp->send_cq);
+		}
+	}
 
 	usiw_recv_wqe_queue_destroy(&qp->rq0);
 	usiw_send_wqe_queue_destroy(&qp->sq);

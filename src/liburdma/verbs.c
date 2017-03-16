@@ -516,6 +516,7 @@ usiw_create_cq(struct ibv_context *context, int size,
 	cq = malloc(sizeof(*cq) + size * sizeof(*cq->storage));
 	if (!cq)
 		return NULL;
+	atomic_init(&cq->refcnt, 1);
 
 	/* Do not pass comp_vector to kernel space, since the kernel space
 	 * implementation is just a dummy to support connection management and
@@ -641,9 +642,10 @@ usiw_destroy_cq(struct ibv_cq *cq)
 		return -1;
 	}
 	ret = ibv_cmd_destroy_cq(cq);
-	rte_free(ourcq->cqe_ring);
-	rte_free(ourcq->free_ring);
-	free(ourcq);
+
+	if (atomic_fetch_sub(&ourcq->refcnt, 1) == 1) {
+		urdma_do_destroy_cq(ourcq);
+	}
 	return ret;
 } /* usiw_destroy_cq */
 
@@ -858,9 +860,11 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 	qp->send_cq = container_of(qp_init_attr->send_cq,
 			struct usiw_cq, ib_cq);
 	qp->send_cq->qp_count++;
+	atomic_fetch_add(&qp->send_cq->refcnt, 1);
 	qp->recv_cq = container_of(qp_init_attr->recv_cq,
 			struct usiw_cq, ib_cq);
 	if (qp->send_cq != qp->recv_cq) {
+		atomic_fetch_add(&qp->recv_cq->refcnt, 1);
 		qp->recv_cq->qp_count++;
 	}
 	qp->txq_end = qp->txq;
