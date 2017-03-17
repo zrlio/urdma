@@ -46,7 +46,7 @@
 #include <rte_kni.h>
 #include <rte_spinlock.h>
 
-#define PENDING_DATAGRAM_INFO_SIZE 32
+#define PENDING_DATAGRAM_INFO_SIZE 64
 #define RX_BURST_SIZE 32
 #define RX_DESC_COUNT_MAX 1024
 #define TX_DESC_COUNT_MAX 1024
