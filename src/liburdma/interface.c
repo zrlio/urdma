@@ -922,6 +922,7 @@ do_rdmap_write(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 	unsigned int packet_length;
 	size_t payload_length;
 	uint16_t mtu = qp->shm_qp->mtu;
+	void *payload;
 
 	while (wqe->bytes_sent < wqe->total_length
 			&& serial_less_32(wqe->remote_ep->send_next_psn,
@@ -931,8 +932,8 @@ do_rdmap_write(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 		payload_length = RTE_MIN(mtu, wqe->total_length
 				- wqe->bytes_sent);
 		packet_length = RDMAP_TAGGED_ALLOC_SIZE(payload_length);
-		new_rdmap = (struct rdmap_tagged_packet *)rte_pktmbuf_append(
-					sendmsg, packet_length);
+		new_rdmap = (struct rdmap_tagged_packet *)rte_pktmbuf_prepend(
+					sendmsg, sizeof(*new_rdmap));
 		new_rdmap->head.ddp_flags = (wqe->total_length
 				- wqe->bytes_sent <= mtu)
 			? DDP_V1_TAGGED_LAST_DF
@@ -941,12 +942,12 @@ do_rdmap_write(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 		new_rdmap->head.sink_stag = rte_cpu_to_be_32(wqe->rkey);
 		new_rdmap->offset = rte_cpu_to_be_64(wqe->remote_addr
 				 + wqe->bytes_sent);
+		payload = rte_pktmbuf_append(sendmsg, payload_length);
 		if (wqe->flags & usiw_send_inline) {
-			memcpy(PAYLOAD_OF(new_rdmap),
-					(char *)wqe->iov + wqe->bytes_sent,
+			memcpy(payload, (char *)wqe->iov + wqe->bytes_sent,
 					payload_length);
 		} else {
-			memcpy_from_iov(PAYLOAD_OF(new_rdmap), payload_length,
+			memcpy_from_iov(payload, payload_length,
 					wqe->iov, wqe->iov_count,
 					wqe->bytes_sent);
 		}
