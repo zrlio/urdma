@@ -849,7 +849,7 @@ memcpy_from_iov(char * restrict dest, size_t dest_size,
 			cur = RTE_MIN(prev + src[y].iov_len - offset,
 					dest_size - pos);
 			src_iov_base = src[y].iov_base;
-			memcpy(dest + pos, src_iov_base + offset - prev,
+			rte_memcpy(dest + pos, src_iov_base + offset - prev,
 					cur);
 			pos += cur;
 			offset += cur;
@@ -1121,7 +1121,7 @@ memcpy_to_iov(struct iovec * restrict dest, size_t iov_count,
 			cur = RTE_MIN(prev + dest[y].iov_len - offset,
 					src_size - pos);
 			dest_iov_base = dest[y].iov_base;
-			memcpy(dest_iov_base + offset - prev, src + pos,
+			rte_memcpy(dest_iov_base + offset - prev, src + pos,
 					cur);
 			pos += cur;
 			offset += cur;
@@ -1654,7 +1654,7 @@ ddp_place_tagged_data(struct usiw_qp *qp, struct packet_context *orig)
 		return;
 	}
 
-	memcpy((void *)vaddr, PAYLOAD_OF(rdmap), rdma_length);
+	rte_memcpy((void *)vaddr, PAYLOAD_OF(rdmap), rdma_length);
 	RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Wrote %" PRIu32 " bytes to tagged buffer with stag=%" PRIx32 " at %" PRIx64 "\n",
 			qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 			rdma_length, rkey, vaddr);
