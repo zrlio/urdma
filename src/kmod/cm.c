@@ -1493,6 +1493,8 @@ int siw_accept(struct iw_cm_id *id, struct iw_cm_conn_param *params)
 		rv = -ENOMEM;
 		goto error;
 	}
+	memcpy(cep->mpa.send_pdata, params->private_data,
+			params->private_data_len);
 
 	cep->state = SIW_EPSTATE_ACCEPTING;
 	if (!WARN_ON(cep->timer)) {

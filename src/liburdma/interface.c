@@ -708,13 +708,7 @@ finish_post_cqe(struct usiw_cq *cq, struct usiw_wc *cqe)
 	ctx = usiw_get_context(cq->ib_cq.context);
 	assert(ctx != NULL);
 
-	/* This is non-atomic, but that is fine since we are the only thread
-	 * that can possibly set notify_flag to false. If another thread sets
-	 * it to true immediately after we check it, then it would have missed
-	 * this notification anyways. We do this not-atomically to avoid the
-	 * overhead of a potential atomic store on every single CQ post. */
-	if (ctx && atomic_load(&cq->notify_flag)) {
-		atomic_store(&cq->notify_flag, false);
+	if (ctx && atomic_exchange(&cq->notify_flag, false)) {
 		event.event_type = SIW_EVENT_COMP_POSTED;
 		event.cq_id = cq->cq_id;
 		ret = write(ctx->event_fd, &event, sizeof(event));
@@ -855,7 +849,7 @@ memcpy_from_iov(char * restrict dest, size_t dest_size,
 			cur = RTE_MIN(prev + src[y].iov_len - offset,
 					dest_size - pos);
 			src_iov_base = src[y].iov_base;
-			memcpy(dest + pos, src_iov_base + offset - prev,
+			rte_memcpy(dest + pos, src_iov_base + offset - prev,
 					cur);
 			pos += cur;
 			offset += cur;
@@ -928,6 +922,7 @@ do_rdmap_write(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 	unsigned int packet_length;
 	size_t payload_length;
 	uint16_t mtu = qp->shm_qp->mtu;
+	void *payload;
 
 	while (wqe->bytes_sent < wqe->total_length
 			&& serial_less_32(wqe->remote_ep->send_next_psn,
@@ -937,8 +932,8 @@ do_rdmap_write(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 		payload_length = RTE_MIN(mtu, wqe->total_length
 				- wqe->bytes_sent);
 		packet_length = RDMAP_TAGGED_ALLOC_SIZE(payload_length);
-		new_rdmap = (struct rdmap_tagged_packet *)rte_pktmbuf_append(
-					sendmsg, packet_length);
+		new_rdmap = (struct rdmap_tagged_packet *)rte_pktmbuf_prepend(
+					sendmsg, sizeof(*new_rdmap));
 		new_rdmap->head.ddp_flags = (wqe->total_length
 				- wqe->bytes_sent <= mtu)
 			? DDP_V1_TAGGED_LAST_DF
@@ -947,12 +942,12 @@ do_rdmap_write(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 		new_rdmap->head.sink_stag = rte_cpu_to_be_32(wqe->rkey);
 		new_rdmap->offset = rte_cpu_to_be_64(wqe->remote_addr
 				 + wqe->bytes_sent);
+		payload = rte_pktmbuf_append(sendmsg, payload_length);
 		if (wqe->flags & usiw_send_inline) {
-			memcpy(PAYLOAD_OF(new_rdmap),
-					(char *)wqe->iov + wqe->bytes_sent,
+			memcpy(payload, (char *)wqe->iov + wqe->bytes_sent,
 					payload_length);
 		} else {
-			memcpy_from_iov(PAYLOAD_OF(new_rdmap), payload_length,
+			memcpy_from_iov(payload, payload_length,
 					wqe->iov, wqe->iov_count,
 					wqe->bytes_sent);
 		}
@@ -1127,7 +1122,7 @@ memcpy_to_iov(struct iovec * restrict dest, size_t iov_count,
 			cur = RTE_MIN(prev + dest[y].iov_len - offset,
 					src_size - pos);
 			dest_iov_base = dest[y].iov_base;
-			memcpy(dest_iov_base + offset - prev, src + pos,
+			rte_memcpy(dest_iov_base + offset - prev, src + pos,
 					cur);
 			pos += cur;
 			offset += cur;
@@ -1660,7 +1655,7 @@ ddp_place_tagged_data(struct usiw_qp *qp, struct packet_context *orig)
 		return;
 	}
 
-	memcpy((void *)vaddr, PAYLOAD_OF(rdmap), rdma_length);
+	rte_memcpy((void *)vaddr, PAYLOAD_OF(rdmap), rdma_length);
 	RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Wrote %" PRIu32 " bytes to tagged buffer with stag=%" PRIx32 " at %" PRIx64 "\n",
 			qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 			rdma_length, rkey, vaddr);
@@ -2018,9 +2013,27 @@ progress_qp(struct usiw_qp *qp)
 
 
 void
+urdma_do_destroy_cq(struct usiw_cq *cq)
+{
+	rte_free(cq->cqe_ring);
+	rte_free(cq->free_ring);
+	free(cq);
+} /* urdma_do_destroy_cq */
+
+
+void
 usiw_do_destroy_qp(struct usiw_qp *qp)
 {
 	struct urdmad_sock_qp_msg msg;
+
+	if (atomic_fetch_sub(&qp->recv_cq->refcnt, 1) == 1) {
+		urdma_do_destroy_cq(qp->recv_cq);
+	}
+	if (qp->send_cq != qp->recv_cq) {
+		if (atomic_fetch_sub(&qp->send_cq->refcnt, 1) == 1) {
+			urdma_do_destroy_cq(qp->send_cq);
+		}
+	}
 
 	usiw_recv_wqe_queue_destroy(&qp->rq0);
 	usiw_send_wqe_queue_destroy(&qp->sq);
