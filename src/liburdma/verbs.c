@@ -353,11 +353,11 @@ usiw_query_device(struct ibv_context *context,
 	device_attr->max_cqe = RTE_MIN(INT_MAX, SIZE_POW2_MAX);
 	device_attr->max_mr = INT_MAX;
 	device_attr->max_pd = INT_MAX;
-	device_attr->max_qp_rd_atom = 1;
+	device_attr->max_qp_rd_atom = USIW_ORD_MAX;
 	device_attr->max_ee_rd_atom = 1;
-	device_attr->max_res_rd_atom = 1;
-	device_attr->max_qp_init_rd_atom = 1;
-	device_attr->max_ee_init_rd_atom = 1;
+	device_attr->max_res_rd_atom = USIW_ORD_MAX;
+	device_attr->max_qp_init_rd_atom = USIW_IRD_MAX;
+	device_attr->max_ee_init_rd_atom = USIW_IRD_MAX;
 	device_attr->atomic_cap = IBV_ATOMIC_NONE;
 	device_attr->max_ee = 0;
 	device_attr->max_rdd = 0;
