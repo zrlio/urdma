@@ -67,8 +67,8 @@ struct siw_devinfo {
 	u32			vendor_part_id;
 	u32			sw_version;
 	int			max_qp;
-	int			max_ord; /* max. outbound read queue depth */
-	int			max_ird; /* max. inbound read queue depth */
+	u16			max_ord; /* max. outbound read queue depth */
+	u16			max_ird; /* max. inbound read queue depth */
 
 	enum ib_device_cap_flags	cap_flags;
 	int			max_cq;

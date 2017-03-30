@@ -118,8 +118,8 @@ struct siw_cep {
 	struct siw_mpa_info	mpa;
 	uint16_t		urdmad_dev_id;
 	uint16_t		urdmad_qp_id;
-	int			ord;
-	int			ird;
+	uint16_t		ord;
+	uint16_t		ird;
 	int			sk_error; /* not (yet) used XXX */
 };
 

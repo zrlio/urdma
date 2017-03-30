@@ -534,14 +534,16 @@ static int siw_proc_trpreq(struct siw_cep *cep)
 
 	rv = siw_recv_trp_rr(cep);
 	siw_cancel_timer(cep);
-	if (rv)
+	if (rv == -EPROTO)
+		goto reject;
+	else if (rv)
 		goto out;
 
 	req = &cep->mpa.hdr;
 
-	if (htons(req->hdr.opcode) != trp_req) {
+	if (ntohs(req->hdr.opcode) != trp_req) {
 		rv = -EPROTO;
-		goto out;
+		goto reject;
 	}
 
 	cep->state = SIW_EPSTATE_RECVD_MPAREQ;
@@ -550,12 +552,26 @@ static int siw_proc_trpreq(struct siw_cep *cep)
 	pr_debug(DBG_CM "(cep=0x%p): recved TRP Request ORD: %d (max: %d), IRD: %d (max: %d)\n",
 			cep, cep->ord, cep->sdev->attrs.max_ord,
 			cep->ird, cep->sdev->attrs.max_ird);
+	if (cep->ird > cep->sdev->attrs.max_ird
+			|| cep->ord > cep->sdev->attrs.max_ord) {
+		cep->ird = htons(min(cep->ird, cep->sdev->attrs.max_ird));
+		cep->ord = htons(min(cep->ord, cep->sdev->attrs.max_ord));
+		rv = -EPROTO;
+		goto reject;
+	}
 
 	/* Keep reference until IWCM accepts/rejects */
 	siw_cep_get(cep);
 	rv = siw_cm_upcall(cep, IW_CM_EVENT_CONNECT_REQUEST, 0);
 	if (rv)
 		siw_cep_put(cep);
+	goto out;
+
+reject:
+	cep->mpa.hdr.hdr.psn = htons(0);
+	cep->mpa.hdr.hdr.ack_psn = htons(0);
+	cep->mpa.hdr.hdr.opcode = htons(trp_reject);
+	(void)siw_send_trpreqrep(cep, NULL, 0);
 out:
 	return rv;
 }
@@ -588,6 +604,11 @@ static int siw_proc_trpreply(struct siw_cep *cep)
 	pr_debug(DBG_CM "(cep=0x%p): recved TRP Accept ORD: %d (our IRD: %d), IRD: %d (our ORD: %d)\n",
 			cep, htons(rep->params.ord), cep->ird,
 			htons(rep->params.ird), cep->ord);
+	if (htons(rep->params.ord) > cep->sdev->attrs.max_ird
+			|| htons(rep->params.ird) > cep->sdev->attrs.max_ord) {
+		rv = -ECONNRESET;
+		goto out;
+	}
 
 	memset(&qp_attrs, 0, sizeof qp_attrs);
 	qp_attrs.irq_size = min(htons(rep->params.ord), qp->attrs.irq_size);
@@ -1359,12 +1380,11 @@ int siw_accept(struct iw_cm_id *id, struct iw_cm_conn_param *params)
 		id, QP_ID(qp), sdev->ofa_dev.name);
 
 	if (params->ord > cep->ord ||
-	    params->ird > cep->ird) {
-		pr_debug(DBG_CM "(id=0x%p, QP%d): "
-			"ORD: %d (max: %d), IRD: %d (max: %d)\n",
+	    params->ird > cep->sdev->attrs.max_ird) {
+		pr_debug(DBG_CM "(id=0x%p, QP%d): ORD: %d (remote: %d), IRD: %d (max: %d)\n",
 			id, QP_ID(qp),
 			params->ord, cep->ord,
-			params->ird, cep->ird);
+			params->ird, cep->sdev->attrs.max_ird);
 		rv = -EINVAL;
 		up_write(&qp->state_lock);
 		goto error;
