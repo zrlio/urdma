@@ -46,6 +46,7 @@
 
 #include <rdma/iw_cm.h>
 
+#include "proto_trp.h"
 
 #define URDMA_PDATA_LEN_MAX 512
 
@@ -63,7 +64,7 @@ enum siw_cep_state {
 };
 
 struct siw_mpa_info {
-	struct mpa_rr	hdr;	/* peer mpa hdr in host byte order */
+	struct trp_rr	hdr;	/* peer mpa hdr in host byte order */
 	char		pdata[URDMA_PDATA_LEN_MAX];
 				/* private data, plus up to four pad bytes */
 	int		bytes_rcvd;

@@ -58,9 +58,6 @@
 #include "cm.h"
 #include "obj.h"
 
-static bool mpa_crc_strict = 1;
-static bool mpa_crc_required = 0;
-
 static void siw_cm_llp_state_change(struct sock *);
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 15, 0)
 static void siw_cm_llp_data_ready(struct sock *sk, int flags);
@@ -137,6 +134,8 @@ static struct siw_cep *siw_cep_alloc(struct siw_dev  *sdev)
 		init_waitqueue_head(&cep->waitq);
 		spin_lock_init(&cep->lock);
 		cep->sdev = sdev;
+		cep->ird = sdev->attrs.max_ird;
+		cep->ord = sdev->attrs.max_ord;
 
 		spin_lock_irqsave(&sdev->idr_lock, flags);
 		list_add_tail(&cep->devq, &sdev->cep_list);
@@ -297,7 +296,7 @@ static int siw_cm_upcall(struct siw_cep *cep, enum iw_cm_event_type reason,
 
 		if (pd_len) {
 			/*
-			 * hand over MPA private data
+			 * hand over TRP private data
 			 */
 			event.private_data_len = pd_len;
 			event.private_data = cep->mpa.pdata;
@@ -307,10 +306,8 @@ static int siw_cm_upcall(struct siw_cep *cep, enum iw_cm_event_type reason,
 	}
 	if (reason == IW_CM_EVENT_CONNECT_REQUEST) {
 #if HAVE_RFC_6581
-		/* FIXME: This needs to actually come from the other side of
-		 * the connection. */
-		event.ird = cep->sdev->attrs.max_ird;
-		event.ord = cep->sdev->attrs.max_ord;
+		event.ird = cep->ird;
+		event.ord = cep->ord;
 #endif
 		event.provider_data = cep;
 		cm_id = cep->listen_cep->cm_id;
@@ -430,11 +427,11 @@ void siw_cep_get(struct siw_cep *cep)
  * pointer to a struct siw_mpa_info as defined in siw_cm.h.
  * This way, all private data parameters would be in a common struct.
  */
-static int siw_send_mpareqrep(struct siw_cep *cep, const void *pdata,
+static int siw_send_trpreqrep(struct siw_cep *cep, const void *pdata,
 			      u8 pd_len)
 {
 	struct socket	*s = cep->llp.sock;
-	struct mpa_rr	*rr = &cep->mpa.hdr;
+	struct trp_rr	*rr = &cep->mpa.hdr;
 	struct kvec	iov[2];
 	struct msghdr	msg;
 	int		rv;
@@ -478,15 +475,15 @@ static int siw_send_mpareqrep(struct siw_cep *cep, const void *pdata,
 }
 
 /*
- * Receive MPA Request/Reply header.
+ * Receive TRP Request/Reply header.
  *
- * Returns 0 if complete MPA Request/Reply haeder including
+ * Returns 0 if complete TRP Request/Reply header including
  * eventual private data was received. Returns -EAGAIN if
  * header was partially received or negative error code otherwise.
  *
  * Context: May be called in process context only
  */
-static int siw_recv_mpa_rr(struct siw_cep *cep)
+static int siw_recv_trp_rr(struct siw_cep *cep)
 {
 	struct sockaddr_storage peer_addr;
 	struct msghdr		msg;
@@ -509,12 +506,12 @@ static int siw_recv_mpa_rr(struct siw_cep *cep)
 	rv = kernel_recvmsg(cep->llp.sock, &msg, iov, 2,
 			    iov[0].iov_len + iov[1].iov_len,
 			    MSG_DONTWAIT);
-	if (rv < sizeof(struct mpa_rr)) {
+	if (rv < sizeof(struct trp_rr)) {
 		return -EPROTO;
 	}
 	pd_len = be16_to_cpu(cep->mpa.hdr.params.pd_len);
-	if (pd_len > MPA_MAX_PRIVDATA
-			|| rv != sizeof(struct mpa_rr) + pd_len)
+	if (pd_len > URDMA_PDATA_LEN_MAX
+			|| rv != sizeof(struct trp_rr) + pd_len)
 		return -EPROTO;
 
 	pr_debug(DBG_CM " %d bytes private_data received\n", pd_len);
@@ -525,75 +522,34 @@ static int siw_recv_mpa_rr(struct siw_cep *cep)
 
 
 /*
- * siw_proc_mpareq()
+ * siw_proc_trpreq()
  *
- * Read MPA Request from socket and signal new connection to IWCM
+ * Read TRP Request from socket and signal new connection to IWCM
  * if success. Caller must hold lock on corresponding listening CEP.
  */
-static int siw_proc_mpareq(struct siw_cep *cep)
+static int siw_proc_trpreq(struct siw_cep *cep)
 {
-	struct mpa_rr	*req;
+	struct trp_rr	*req;
 	int		rv;
 
-	rv = siw_recv_mpa_rr(cep);
+	rv = siw_recv_trp_rr(cep);
 	siw_cancel_timer(cep);
 	if (rv)
 		goto out;
 
 	req = &cep->mpa.hdr;
 
-	if (__mpa_rr_revision(req->params.bits) > MPA_REVISION_1) {
-		/* allow for 0 and 1 only */
+	if (htons(req->hdr.opcode) != trp_req) {
 		rv = -EPROTO;
 		goto out;
 	}
-	if (memcmp(req->key, MPA_KEY_REQ, 16)) {
-		rv = -EPROTO;
-		goto out;
-	}
-	/*
-	 * Prepare for sending MPA reply
-	 */
-	memcpy(req->key, MPA_KEY_REP, 16);
-
-	if (req->params.bits & MPA_RR_FLAG_MARKERS
-		|| (req->params.bits & MPA_RR_FLAG_CRC
-			&& !mpa_crc_required && mpa_crc_strict)) {
-		/*
-		 * MPA Markers: currently not supported. Marker TX to be added.
-		 *
-		 * CRC:
-		 *    RFC 5044, page 27: CRC MUST be used if peer requests it.
-		 *    siw specific: 'mpa_crc_strict' parameter to reject
-		 *    connection with CRC if local CRC off enforced by
-		 *    'mpa_crc_strict' module parameter.
-		 */
-		pr_debug(DBG_CM " Reject: CRC %d:%d:%d, M %d:%d\n",
-			req->params.bits & MPA_RR_FLAG_CRC ? 1 : 0,
-			mpa_crc_required, mpa_crc_strict,
-			req->params.bits & MPA_RR_FLAG_MARKERS ? 1 : 0, 0);
-
-		req->params.bits &= ~MPA_RR_FLAG_MARKERS;
-		req->params.bits |= MPA_RR_FLAG_REJECT; /* reject */
-
-		if (!mpa_crc_required && mpa_crc_strict)
-			req->params.bits &= ~MPA_RR_FLAG_CRC;
-
-		(void)siw_send_mpareqrep(cep, NULL, 0);
-		rv = -EOPNOTSUPP;
-		goto out;
-	}
-	/*
-	 * Enable CRC if requested by module initialization
-	 */
-	if (!(req->params.bits & MPA_RR_FLAG_CRC) && mpa_crc_required)
-		req->params.bits |= MPA_RR_FLAG_CRC;
-#if 0
-	if (!cep->mpa.hdr.params.c && mpa_crc_required)
-		cep->mpa.hdr.params.c = 1;
-#endif
 
 	cep->state = SIW_EPSTATE_RECVD_MPAREQ;
+	cep->ird = ntohs(req->params.ord);
+	cep->ord = ntohs(req->params.ird);
+	pr_debug(DBG_CM "(cep=0x%p): recved TRP Request ORD: %d (max: %d), IRD: %d (max: %d)\n",
+			cep, cep->ord, cep->sdev->attrs.max_ord,
+			cep->ird, cep->sdev->attrs.max_ird);
 
 	/* Keep reference until IWCM accepts/rejects */
 	siw_cep_get(cep);
@@ -605,56 +561,37 @@ out:
 }
 
 
-static int siw_proc_mpareply(struct siw_cep *cep)
+static int siw_proc_trpreply(struct siw_cep *cep)
 {
 	struct siw_qp_attrs	qp_attrs;
 	struct siw_qp		*qp = cep->qp;
-	struct mpa_rr		*rep;
+	struct trp_rr		*rep;
 	struct socket		*s = cep->llp.sock;
 	int			rv;
 
-	rv = siw_recv_mpa_rr(cep);
+	rv = siw_recv_trp_rr(cep);
 	siw_cancel_timer(cep);
 	if (rv)
 		goto out_err;
 
 	rep = &cep->mpa.hdr;
 
-	if (__mpa_rr_revision(rep->params.bits) > MPA_REVISION_1) {
-		/* allow for 0 and 1 only */
-		rv = -EPROTO;
-		goto out_err;
-	}
-	if (memcmp(rep->key, MPA_KEY_REP, 16)) {
-		rv = -EPROTO;
-		goto out_err;
-	}
-	if (rep->params.bits & MPA_RR_FLAG_REJECT) {
-		pr_debug(DBG_CM "(cep=0x%p): Got MPA reject\n", cep);
+	if (ntohs(rep->hdr.opcode) != trp_accept) {
+		pr_debug(DBG_CM "(cep=0x%p): Got TRP reject\n", cep);
 		(void)siw_cm_upcall(cep, IW_CM_EVENT_CONNECT_REPLY,
 				    -ECONNRESET);
 
 		rv = -ECONNRESET;
 		goto out;
 	}
-	if ((rep->params.bits & MPA_RR_FLAG_MARKERS)
-		|| (mpa_crc_required && !(rep->params.bits & MPA_RR_FLAG_CRC))
-		|| (mpa_crc_strict && !mpa_crc_required
-			&& (rep->params.bits & MPA_RR_FLAG_CRC))) {
 
-		pr_debug(DBG_CM " Reply unsupp: CRC %d:%d:%d, M %d:%d\n",
-			rep->params.bits & MPA_RR_FLAG_CRC ? 1 : 0,
-			mpa_crc_required, mpa_crc_strict,
-			rep->params.bits & MPA_RR_FLAG_MARKERS ? 1 : 0, 0);
+	pr_debug(DBG_CM "(cep=0x%p): recved TRP Accept ORD: %d (our IRD: %d), IRD: %d (our ORD: %d)\n",
+			cep, htons(rep->params.ord), cep->ird,
+			htons(rep->params.ird), cep->ord);
 
-		(void)siw_cm_upcall(cep, IW_CM_EVENT_CONNECT_REPLY,
-				    -ECONNREFUSED);
-		rv = -EINVAL;
-		goto out;
-	}
 	memset(&qp_attrs, 0, sizeof qp_attrs);
-	qp_attrs.irq_size = cep->ird;
-	qp_attrs.orq_size = cep->ord;
+	qp_attrs.irq_size = min(htons(rep->params.ord), qp->attrs.irq_size);
+	qp_attrs.orq_size = max(htons(rep->params.ird), qp->attrs.orq_size);
 	qp_attrs.llp_stream_handle = cep->llp.sock;
 	qp_attrs.state = SIW_QP_STATE_RTS;
 
@@ -739,15 +676,15 @@ static void siw_accept_newconn(struct siw_cep *cep)
 	if (rv)
 		goto error;
 	/*
-	 * See siw_proc_mpareq() etc. for the use of new_cep->listen_cep.
+	 * See siw_proc_trpreq() etc. for the use of new_cep->listen_cep.
 	 */
 	new_cep->listen_cep = cep;
 	siw_cep_get(cep);
 
-	/* Pull MPA Req from listening CEP's socket */
+	/* Pull TRP Req from listening CEP's socket */
 	new_cep->llp.sock = s;
 	siw_cep_set_inuse(new_cep);
-	rv = siw_proc_mpareq(new_cep);
+	rv = siw_proc_trpreq(new_cep);
 	siw_cep_set_free(new_cep);
 
 	new_cep->listen_cep = NULL;
@@ -815,16 +752,16 @@ static void siw_cm_work_handler(struct work_struct *w)
 
 		case SIW_EPSTATE_AWAIT_MPAREP:
 
-			rv = siw_proc_mpareply(cep);
+			rv = siw_proc_trpreply(cep);
 			break;
 
 		default:
 			/*
-			 * CEP already moved out of MPA handshake.
+			 * CEP already moved out of connect/accept handshake.
 			 * any connection management already done.
 			 * silently ignore the mpa packet.
 			 */
-			pr_debug(DBG_CM "(): CEP not in MPA "
+			pr_debug(DBG_CM "(): CEP not in "
 				"handshake state: %d\n", cep->state);
 
 		}
@@ -857,7 +794,7 @@ static void siw_cm_work_handler(struct work_struct *w)
 
 			case SIW_EPSTATE_AWAIT_MPAREP:
 				/*
-				 * MPA reply not received, but connection drop
+				 * TRP reply not received, but connection drop
 				 */
 				siw_cm_upcall(cep, IW_CM_EVENT_CONNECT_REPLY,
 					      -ECONNRESET);
@@ -894,7 +831,7 @@ static void siw_cm_work_handler(struct work_struct *w)
 				break;
 			case SIW_EPSTATE_AWAIT_MPAREQ:
 				/*
-				 * Socket close before MPA request received.
+				 * Socket close before TRP request received.
 				 */
 				pr_debug(DBG_CM
 					"(): STATE_AWAIT_MPAREQ: "
@@ -919,7 +856,7 @@ static void siw_cm_work_handler(struct work_struct *w)
 		switch (cep->state) {
 		case SIW_EPSTATE_AWAIT_MPAREP:
 			/*
-			 * MPA request timed out:
+			 * TRP request timed out:
 			 * Hide any partially received private data and signal
 			 * timeout
 			 */
@@ -933,7 +870,7 @@ static void siw_cm_work_handler(struct work_struct *w)
 
 		case SIW_EPSTATE_AWAIT_MPAREQ:
 			/*
-			 * No MPA request received after peer TCP stream setup.
+			 * No TRP request received after peer TCP stream setup.
 			 */
 			siw_cep_put(cep->listen_cep);
 			cep->listen_cep = NULL;
@@ -1142,7 +1079,7 @@ int siw_connect(struct iw_cm_id *id, struct iw_cm_conn_param *params)
 	if (!sdev->netdev)
 		return -ENODEV;
 
-	if (pd_len > MPA_MAX_PRIVDATA)
+	if (pd_len > URDMA_PDATA_LEN_MAX)
 		return -EINVAL;
 
 	qp = siw_qp_id2obj(sdev, params->qpn);
@@ -1212,19 +1149,13 @@ int siw_connect(struct iw_cm_id *id, struct iw_cm_conn_param *params)
 
 	cep->state = SIW_EPSTATE_AWAIT_MPAREP;
 
-	/*
-	 * Set MPA Request bits: CRC if required, no MPA Markers,
-	 * MPA Rev. 1, Key 'Request'.
-	 */
-	cep->mpa.hdr.params.bits = 0;
-	__mpa_rr_set_revision(&cep->mpa.hdr.params.bits, MPA_REVISION_1);
+	cep->mpa.hdr.hdr.psn = htons(0);
+	cep->mpa.hdr.hdr.ack_psn = htons(0);
+	cep->mpa.hdr.hdr.opcode = htons(trp_req);
+	cep->mpa.hdr.params.ird = htons(cep->ird);
+	cep->mpa.hdr.params.ord = htons(cep->ord);
 
-	if (mpa_crc_required)
-		cep->mpa.hdr.params.bits |= MPA_RR_FLAG_CRC;
-
-	memcpy(cep->mpa.hdr.key, MPA_KEY_REQ, 16);
-
-	rv = siw_send_mpareqrep(cep, params->private_data, pd_len);
+	rv = siw_send_trpreqrep(cep, params->private_data, pd_len);
 	/*
 	 * Reset private data.
 	 */
@@ -1312,9 +1243,14 @@ int siw_qp_rtr(struct siw_cep *cep)
 
 	switch (cep->state) {
 	case SIW_EPSTATE_ACCEPTING:
-		pr_debug(DBG_CM "(id=0x%p, QP%d): Sending MPA Reply\n",
+		pr_debug(DBG_CM "(id=0x%p, QP%d): Sending TRP Accept\n",
 				cep->cm_id, QP_ID(cep->qp));
-		rv = siw_send_mpareqrep(cep, cep->mpa.send_pdata,
+		cep->mpa.hdr.hdr.psn = htons(0);
+		cep->mpa.hdr.hdr.ack_psn = htons(0);
+		cep->mpa.hdr.hdr.opcode = htons(trp_accept);
+		cep->mpa.hdr.params.ird = htons(cep->qp->attrs.irq_size);
+		cep->mpa.hdr.params.ord = htons(cep->qp->attrs.orq_size);
+		rv = siw_send_trpreqrep(cep, cep->mpa.send_pdata,
 					cep->mpa.send_pdata_size);
 
 		if (!rv) {
@@ -1372,8 +1308,8 @@ out:
  *
  * Transition QP to RTS state, associate new CM id @id with accepted CEP
  * and get prepared for TCP input by installing socket callbacks.
- * Then send MPA Reply and generate the "connection established" event.
- * Socket callbacks must be installed before sending MPA Reply, because
+ * Then send TRP Accept and generate the "connection established" event.
+ * Socket callbacks must be installed before sending TRP Accept, because
  * the latter may cause a first RDMA message to arrive from the RDMA Initiator
  * side very quickly, at which time the socket callbacks must be ready.
  */
@@ -1422,22 +1358,22 @@ int siw_accept(struct iw_cm_id *id, struct iw_cm_conn_param *params)
 	pr_debug(DBG_CM "(id=0x%p, QP%d): dev(id)=%s\n",
 		id, QP_ID(qp), sdev->ofa_dev.name);
 
-	if (params->ord > qp->attrs.orq_size ||
-	    params->ird > qp->attrs.irq_size) {
+	if (params->ord > cep->ord ||
+	    params->ird > cep->ird) {
 		pr_debug(DBG_CM "(id=0x%p, QP%d): "
 			"ORD: %d (max: %d), IRD: %d (max: %d)\n",
 			id, QP_ID(qp),
-			params->ord, qp->attrs.orq_size,
-			params->ird, qp->attrs.irq_size);
+			params->ord, cep->ord,
+			params->ird, cep->ird);
 		rv = -EINVAL;
 		up_write(&qp->state_lock);
 		goto error;
 	}
-	if (params->private_data_len > MPA_MAX_PRIVDATA) {
+	if (params->private_data_len > URDMA_PDATA_LEN_MAX) {
 		pr_debug(DBG_CM "(id=0x%p, QP%d): "
 			"Private data too long: %d (max: %d)\n",
 			id, QP_ID(qp),
-			params->private_data_len, MPA_MAX_PRIVDATA);
+			params->private_data_len, URDMA_PDATA_LEN_MAX);
 		rv =  -EINVAL;
 		up_write(&qp->state_lock);
 		goto error;
@@ -1449,13 +1385,10 @@ int siw_accept(struct iw_cm_id *id, struct iw_cm_conn_param *params)
 	qp_attrs.orq_size = params->ord;
 	qp_attrs.irq_size = params->ird;
 	qp_attrs.llp_stream_handle = cep->llp.sock;
-
-	/*
-	 * Currently no MPA markers support. Consider adding marker TX path.
-	 */
 	qp_attrs.state = SIW_QP_STATE_RTS;
 
-	pr_debug(DBG_CM "(id=0x%p, QP%d): Moving to RTS\n", id, QP_ID(qp));
+	pr_debug(DBG_CM "(id=0x%p, QP%d): Moving to RTS, ORD %u IRD %u\n",
+			id, QP_ID(qp), qp_attrs.orq_size, qp_attrs.irq_size);
 
 	/* Associate QP with CEP */
 	siw_cep_get(cep);
@@ -1557,10 +1490,11 @@ int siw_reject(struct iw_cm_id *id, const void *pdata, u8 plen)
 	pr_debug(DBG_CM "(id=0x%p): cep->state=%d\n", id, cep->state);
 	pr_debug(DBG_CM " Reject: %d: %x\n", plen, plen ? *(char *)pdata : 0);
 
-	if (__mpa_rr_revision(cep->mpa.hdr.params.bits) == MPA_REVISION_1) {
-		cep->mpa.hdr.params.bits |= MPA_RR_FLAG_REJECT; /* reject */
-		(void)siw_send_mpareqrep(cep, pdata, plen);
-	}
+	cep->mpa.hdr.hdr.psn = htons(0);
+	cep->mpa.hdr.hdr.ack_psn = htons(0);
+	cep->mpa.hdr.hdr.opcode = htons(trp_reject);
+	(void)siw_send_trpreqrep(cep, pdata, plen);
+
 	siw_socket_disassoc(cep->llp.sock);
 	sock_release(cep->llp.sock);
 	cep->llp.sock = NULL;

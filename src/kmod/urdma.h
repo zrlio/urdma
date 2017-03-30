@@ -49,7 +49,6 @@
 
 #include "urdma_kabi.h"
 #include "backports.h"
-#include "iwarp.h"
 
 #define SIW_MAX_QP		(1024 * 100)
 #define SIW_MAX_ORD		128
@@ -179,8 +178,8 @@ struct siw_sk_upcalls {
 
 struct siw_qp_attrs {
 	enum siw_qp_state	state;
-	u32			orq_size;
-	u32			irq_size;
+	u16			orq_size;
+	u16			irq_size;
 	u16			urdma_devid;
 	u16			urdma_qp_id;
 	u16			urdma_rxq;
