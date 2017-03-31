@@ -83,4 +83,15 @@ struct trp_hdr {
 	uint16_t opcode;
 } __attribute__((__packed__));
 
+struct trp_rr_params {
+	uint16_t pd_len;
+	uint16_t ird;
+	uint16_t ord;
+} __attribute__((__packed__));
+
+struct trp_rr {
+	struct trp_hdr hdr;
+	struct trp_rr_params params;
+} __attribute__((__packed__));
+
 #endif

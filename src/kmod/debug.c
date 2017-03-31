@@ -107,7 +107,7 @@ static ssize_t siw_show_qps(struct file *f, char __user *buf, size_t space,
 
 	idr_for_each_entry(&sdev->qp_idr, qp, qp_id) {
 		n = snprintf(kbuf + len, space,
-			     "%-7d%-6d%-6d%-5d%-5d 0x%-17p"
+			     "%-7d%-6d%-6d%-5u%-5u 0x%-17p"
 			     " 0x%-18p\n",
 			     QP_ID(qp),
 			     qp->attrs.state,

@@ -2,6 +2,7 @@
 *.ko
 *.mod.h
 *.mod.c
+proto_trp.h
 urdma_kabi.h
 Module.symvers
 modules.order
