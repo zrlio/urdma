@@ -2045,7 +2045,9 @@ usiw_do_destroy_qp(struct usiw_qp *qp)
 	msg.hdr.qp_id = rte_cpu_to_be_16(qp->shm_qp->qp_id);
 	msg.ptr = rte_cpu_to_be_64((uintptr_t)qp->shm_qp);
 	send(qp->dev->urdmad_fd, &msg, sizeof(msg), 0);
-	//free(qp);
+	free(qp->stats.recv_count_histo);
+	free(qp->txq);
+	free(qp);
 } /* usiw_do_destroy_qp */
 
 
