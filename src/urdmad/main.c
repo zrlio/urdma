@@ -724,6 +724,7 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 	iface->flags = 0;
 	port_conf.rxmode.max_rx_pkt_len
 			= port_config->mtu + ETHER_HDR_LEN + ETHER_CRC_LEN;
+	port_conf.rxmode.jumbo_frame = !!(port_config->mtu > 1500);
 	if ((iface->dev_info.tx_offload_capa & tx_checksum_offloads)
 			== tx_checksum_offloads) {
 		iface->flags |= port_checksum_offload;
