@@ -746,20 +746,33 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 	} else {
 		port_conf.fdir_conf.mode = RTE_FDIR_MODE_NONE;
 	}
+
+	/* Calculate max_qp.  We map queue pairs 1:1 with hardware queues for
+	 * now, with 1 reserved for urdmad ARP/CM usage.  Note that at least
+	 * i40e reserves queues for VMDq and makes them unavailable for general
+	 * use, so we must subtract those queues from the available queues. */
+	if (iface->dev_info.max_vmdq_pools > 0
+			&& iface->dev_info.vmdq_queue_base > 0) {
+		RTE_LOG(INFO, USER1,
+			"port %" PRIu16 " reserves %" PRIu16 " queues for VMDq\n",
+			iface->portid, iface->dev_info.vmdq_queue_num);
+		iface->dev_info.max_rx_queues -= iface->dev_info.vmdq_queue_num;
+		iface->dev_info.max_tx_queues -= iface->dev_info.vmdq_queue_num;
+	}
 	iface->max_qp = port_config->max_qp > 0 ? port_config->max_qp
 		: RTE_MIN(iface->dev_info.max_rx_queues,
 					iface->dev_info.max_tx_queues);
-	if (iface->max_qp > iface->dev_info.max_rx_queues) {
+	if (iface->max_qp >= iface->dev_info.max_rx_queues) {
 		rte_exit(EXIT_FAILURE,
-			 "port %" PRIu16 " configured max_qp %" PRIu16 " > max_rq_queues %" PRIu16 "\n",
+			 "port %" PRIu16 " configured max_qp %" PRIu16 " > max_rx_queues %" PRIu16 "\n",
 			 iface->portid, iface->max_qp,
-			 iface->dev_info.max_rx_queues);
+			 iface->dev_info.max_rx_queues - 1);
 	}
-	if (iface->max_qp > iface->dev_info.max_tx_queues) {
+	if (iface->max_qp >= iface->dev_info.max_tx_queues) {
 		rte_exit(EXIT_FAILURE,
-			 "port %" PRIu16 " configured max_qp %" PRIu16 " > max_rq_queues %" PRIu16 "\n",
+			 "port %" PRIu16 " configured max_qp %" PRIu16 " > max_tx_queues %" PRIu16 "\n",
 			 iface->portid, iface->max_qp,
-			 iface->dev_info.max_rx_queues);
+			 iface->dev_info.max_tx_queues - 1);
 	}
 	fprintf(stderr, "port %" PRIu16 " max_qp %" PRIu16 "\n",
 			iface->portid, iface->max_qp);
