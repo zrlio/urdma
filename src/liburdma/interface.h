@@ -63,7 +63,6 @@
 #include "verbs.h"
 
 #define TX_BURST_SIZE 8
-#define DPDKV_MAX_QP 64
 #define MAX_ARP_ENTRIES 32
 #define MAX_RECV_WR 1023
 #define MAX_SEND_WR 1023
@@ -368,6 +367,8 @@ struct usiw_driver {
 	struct rte_ring *new_ctxs;
 	int urdmad_fd;
 	uint32_t lcore_mask[RTE_MAX_LCORE / 32];
+	uint16_t device_count;
+	uint16_t *max_qp;
 };
 
 /** Starts the progress thread. */

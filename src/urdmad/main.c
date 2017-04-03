@@ -81,7 +81,6 @@ static uint32_t core_mask[RTE_MAX_LCORE / 32];
 static const unsigned int core_mask_shift = 5;
 static const uint32_t core_mask_mask = 31;
 
-
 static void init_core_mask(void)
 {
 	struct rte_config *config;
@@ -409,23 +408,31 @@ send_create_qp_resp(struct urdma_process *process, struct urdmad_qp *qp)
 static int
 handle_hello(struct urdma_process *process, struct urdmad_sock_hello_req *req)
 {
-	struct urdmad_sock_hello_resp resp;
+	struct urdmad_sock_hello_resp *resp;
 	ssize_t ret;
+	size_t resp_size;
 	int i;
 
 	if (!reserve_cores(rte_cpu_to_be_32(req->req_lcore_count),
 				process->core_mask))
 		return -1;
 
-	memset(&resp, 0, sizeof(resp));
-	resp.hdr.opcode = rte_cpu_to_be_32(urdma_sock_hello_resp);
-	for (i = 0; i < RTE_DIM(resp.lcore_mask); i++) {
-		resp.lcore_mask[i] = rte_cpu_to_be_32(process->core_mask[i]);
+	resp_size = sizeof(*resp) + driver->port_count * sizeof(*resp->max_qp);
+	resp = alloca(resp_size);
+	memset(resp, 0, resp_size);
+	resp->hdr.opcode = rte_cpu_to_be_32(urdma_sock_hello_resp);
+	resp->max_lcore = rte_cpu_to_be_16(RTE_MAX_LCORE);
+	resp->device_count = rte_cpu_to_be_16(driver->port_count);
+	for (i = 0; i < RTE_DIM(resp->lcore_mask); i++) {
+		resp->lcore_mask[i] = rte_cpu_to_be_32(process->core_mask[i]);
 	}
-	ret = send(process->fd.fd, &resp, sizeof(resp), 0);
+	for (i = 0; i < driver->port_count; ++i) {
+		resp->max_qp[i] = rte_cpu_to_be_16(driver->ports[i].max_qp);
+	}
+	ret = send(process->fd.fd, resp, resp_size, 0);
 	if (ret < 0) {
 		return ret;
-	} else if (ret == sizeof(resp)) {
+	} else if (ret == resp_size) {
 		return 0;
 	} else {
 		errno = EMSGSIZE;

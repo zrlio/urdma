@@ -47,6 +47,7 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/prctl.h>
 #include <sys/queue.h>
 #include <sys/un.h>
@@ -235,6 +236,7 @@ usiw_driver_init(int portid)
 	}
 
 	dev->urdmad_fd = driver->urdmad_fd;
+	dev->max_qp = driver->max_qp[dev->portid];
 
 	return &dev->vdev.device;
 } /* usiw_driver_init */
@@ -410,9 +412,11 @@ static int
 do_hello(void)
 {
 	struct urdmad_sock_hello_req req;
-	struct urdmad_sock_hello_resp resp;
+	struct urdmad_sock_hello_resp *resp;
+	struct pollfd poll_list;
 	int i;
 	ssize_t ret;
+	int resp_size;
 
 	memset(&req, 0, sizeof(req));
 	req.hdr.opcode = rte_cpu_to_be_32(urdma_sock_hello_req);
@@ -421,13 +425,33 @@ do_hello(void)
 	if (ret != sizeof(req)) {
 		return -1;
 	}
-	ret = recv(driver->urdmad_fd, &resp, sizeof(resp), 0);
-	if (ret != sizeof(resp)) {
+	poll_list.fd = driver->urdmad_fd;
+	poll_list.events = POLLIN;
+	poll_list.revents = 0;
+	ret = poll(&poll_list, 1, -1);
+	if (ret < 0) {
+		return -1;
+	}
+	ret = ioctl(driver->urdmad_fd, FIONREAD, &resp_size);
+	if (ret < 0 || resp_size < sizeof(*resp)) {
+		return -1;
+	}
+	resp = alloca(resp_size);
+	ret = recv(driver->urdmad_fd, resp, resp_size, 0);
+	if (ret != resp_size) {
 		return -1;
 	}
 
-	for (i = 0; i < RTE_DIM(resp.lcore_mask); i++) {
-		driver->lcore_mask[i] = rte_be_to_cpu_32(resp.lcore_mask[i]);
+	for (i = 0; i < RTE_DIM(resp->lcore_mask); i++) {
+		driver->lcore_mask[i] = rte_be_to_cpu_32(resp->lcore_mask[i]);
+	}
+	driver->device_count = rte_be_to_cpu_16(resp->device_count);
+	driver->max_qp = malloc(driver->device_count * sizeof(*driver->max_qp));
+	if (!driver->max_qp) {
+		return -1;
+	}
+	for (i = 0; i < driver->device_count; i++) {
+		driver->max_qp[i] = rte_be_to_cpu_16(resp->max_qp[i]);
 	}
 
 	return 0;
@@ -550,6 +574,7 @@ free_ring:
 	rte_ring_free(driver->new_ctxs);
 close_fd:
 	close(driver->urdmad_fd);
+	free(driver->max_qp);
 err:
 	free(driver);
 	driver = NULL;

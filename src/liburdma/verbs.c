@@ -326,6 +326,7 @@ static int
 usiw_query_device(struct ibv_context *context,
 		struct ibv_device_attr *device_attr)
 {
+	struct usiw_context *ourctx;
 	struct ibv_query_device cmd;
 	__attribute__((unused)) uint64_t raw_fw_ver;
 	int ret;
@@ -337,6 +338,7 @@ usiw_query_device(struct ibv_context *context,
 	ret = ibv_cmd_query_device(context, device_attr,
 			&raw_fw_ver, &cmd, sizeof(cmd));
 
+	ourctx = usiw_get_context(context);
 	strncpy(device_attr->fw_ver, PACKAGE_VERSION,
 		sizeof(device_attr->fw_ver));
 	device_attr->max_mr_size = MAX_MR_SIZE;
@@ -344,7 +346,7 @@ usiw_query_device(struct ibv_context *context,
 	device_attr->vendor_id = URDMA_VENDOR_ID;
 	device_attr->vendor_part_id = URDMA_VENDOR_PART_ID;
 	device_attr->hw_ver = 0;
-	device_attr->max_qp = DPDKV_MAX_QP - 1;
+	device_attr->max_qp = ourctx->dev->max_qp;
 	device_attr->max_qp_wr = RTE_MIN(MAX_SEND_WR, MAX_RECV_WR);
 	device_attr->device_cap_flags = 0;
 	device_attr->max_sge = DPDK_VERBS_IOV_LEN_MAX;

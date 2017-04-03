@@ -134,7 +134,10 @@ struct urdmad_sock_hello_req {
 
 struct urdmad_sock_hello_resp {
 	struct urdmad_sock_msg hdr;
+	uint16_t max_lcore;
+	uint16_t device_count;
 	uint32_t lcore_mask[RTE_MAX_LCORE / 32];
+	uint16_t max_qp[];
 };
 
 union urdmad_sock_any_msg {
