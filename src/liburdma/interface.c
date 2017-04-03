@@ -1154,13 +1154,16 @@ process_send(struct usiw_qp *qp, struct packet_context *orig)
 		} else if (serial_less_32(msn, ee->expected_recv_msn)) {
 			/* This is a duplicate of a previously received
 			 * message */
+			RTE_LOG(INFO, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Received msn=%" PRIu32 " but expected msn=%" PRIu32 "\n",
+					qp->shm_qp->dev_id, qp->shm_qp->qp_id,
+					msn, ee->expected_recv_msn);
 			do_rdmap_terminate(qp, orig,
 					ddp_error_untagged_invalid_msn);
 			return;
 		} else {
 			/* else, we received this message out of order */
 			assert(serial_greater_32(msn, ee->expected_recv_msn));
-			RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Received msn=%" PRIu32 " but expected msn=%" PRIu32 "\n",
+			RTE_LOG(INFO, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Received msn=%" PRIu32 " but expected msn=%" PRIu32 "\n",
 					qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 					msn, ee->expected_recv_msn);
 		}
@@ -1276,7 +1279,7 @@ process_rdma_read_request(struct usiw_qp *qp, struct packet_context *orig)
 
 	msn = rte_be_to_cpu_32(rdmap->untagged.msn);
 	if (msn != orig->src_ep->expected_read_msn) {
-		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> RDMA READ failure: expected MSN %" PRIu32 " received %" PRIu32 "\n",
+		RTE_LOG(INFO, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> RDMA READ failure: expected MSN %" PRIu32 " received %" PRIu32 "\n",
 				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 				orig->src_ep->expected_read_msn, msn);
 		do_rdmap_terminate(qp, orig, ddp_error_untagged_invalid_msn);
@@ -1790,7 +1793,7 @@ process_data_packet(struct usiw_qp *qp, struct rte_mbuf *mbuf)
 		/* We detected a sequence number gap.  Try to build a
 		 * contiguous range so we can send a SACK to lower the number
 		 * of retransmissions. */
-		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> receive psn %" PRIu32 "; next expected psn %" PRIu32 "\n",
+		RTE_LOG(INFO, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> receive psn %" PRIu32 "; next expected psn %" PRIu32 "\n",
 				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 				ctx.psn,
 				ctx.src_ep->recv_ack_psn);
