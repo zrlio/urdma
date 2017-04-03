@@ -71,6 +71,7 @@ struct usiw_port {
 	uint16_t rx_desc_count;
 	uint16_t tx_desc_count;
 	uint16_t rx_burst_size;
+	uint16_t tx_burst_size;
 	uint16_t max_qp;
 	struct urdmad_qp_head avail_qp;
 	struct urdmad_qp *qp;

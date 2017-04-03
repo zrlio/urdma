@@ -100,6 +100,8 @@ struct urdmad_qp {
 		/**< Hardware receive descriptors on this RX queue. */
 	uint16_t rx_burst_size;
 		/**< Size of array passed to rte_eth_rx_burst(). */
+	uint16_t tx_burst_size;
+		/**< Size of array passed to rte_eth_tx_burst(). */
 	uint16_t mtu;
 		/**< Device MTU. */
 

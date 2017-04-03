@@ -863,7 +863,6 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 		atomic_fetch_add(&qp->recv_cq->refcnt, 1);
 		qp->recv_cq->qp_count++;
 	}
-	qp->txq_end = qp->txq;
 	qp->timer_last = 0;
 	qp->pd = container_of(pd, struct usiw_mr_table, pd);
 
@@ -872,7 +871,7 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 			qp_init_attr->cap.max_send_sge);
 	if (retval != 0) {
 		errno = -retval;
-		goto free_kernel_qp;
+		goto free_txq;
 	}
 	qp->sq.max_inline = qp_init_attr->cap.max_inline_data;
 
@@ -881,7 +880,7 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 			qp_init_attr->cap.max_recv_sge);
 	if (retval != 0) {
 		errno = -retval;
-		goto free_kernel_qp;
+		goto free_txq;
 	}
 
 	qp->readresp_store = NULL;
@@ -912,6 +911,8 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 	LIST_INSERT_HEAD(&qp->ctx->qp_active, qp, ctx_entry);
 	return &qp->ib_qp;
 
+free_txq:
+	free(qp->txq);
 free_kernel_qp:
 	ibv_cmd_destroy_qp(&qp->ib_qp);
 return_user_qp:

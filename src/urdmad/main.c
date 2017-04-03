@@ -267,6 +267,10 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 	if (qp->rx_burst_size > qp->rx_desc_count + 1) {
 		qp->rx_burst_size = qp->rx_desc_count + 1;
 	}
+	qp->tx_burst_size = dev->tx_burst_size;
+	if (qp->tx_burst_size > dev->tx_desc_count) {
+		qp->tx_burst_size = dev->tx_desc_count;
+	}
 	memcpy(&qp->remote_ether_addr, event->dst_ether, ETHER_ADDR_LEN);
 	if (dev->flags & port_fdir) {
 		memset(&fdirf, 0, sizeof(fdirf));
@@ -785,10 +789,12 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 		iface->tx_desc_count = port_config->tx_desc_count;
 	}
 	iface->rx_burst_size = port_config->rx_burst_size;
+	iface->tx_burst_size = port_config->tx_burst_size;
 	fprintf(stderr,
-		"port %" PRIu16 " tx_desc_count %" PRIu16 " rx_desc_count %" PRIu16 " rx_burst_size %" PRIu16 "\n",
+		"port %" PRIu16 " tx_desc_count %" PRIu16 " rx_desc_count %" PRIu16 " rx_burst_size %" PRIu16 " tx_burst_size %" PRIu16 "\n",
 		iface->portid, iface->tx_desc_count,
-		iface->rx_desc_count, iface->rx_burst_size);
+		iface->rx_desc_count, iface->rx_burst_size,
+		iface->tx_burst_size);
 
 	LIST_INIT(&iface->avail_qp);
 

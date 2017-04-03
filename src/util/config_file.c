@@ -198,6 +198,11 @@ urdma__config_file_get_ports(struct usiw_config *config,
 					&(*port_config)[i].tx_desc_count) < 0) {
 			return -EINVAL;
 		}
+		if (get_uint_value(port, i, "tx_burst_size",
+					1, (*port_config)[i].tx_desc_count, 8,
+					&(*port_config)[i].tx_burst_size) < 0) {
+			return -EINVAL;
+		}
 	}
 
 	return port_count;

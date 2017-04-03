@@ -62,7 +62,6 @@
 #include "list.h"
 #include "verbs.h"
 
-#define TX_BURST_SIZE 8
 #define MAX_RECV_WR 1023
 #define MAX_SEND_WR 1023
 #define DPDK_VERBS_IOV_LEN_MAX 32
@@ -266,11 +265,11 @@ struct usiw_qp {
 	struct usiw_cq *send_cq;
 
 	/* txq_end points one entry beyond the last entry in the table
-	 * the table is full when txq_end == txq + TX_BURST_SIZE
+	 * the table is full when txq_end == txq + tx_burst_size
 	 * the burst should be flushed at that point
 	 */
 	struct rte_mbuf **txq_end;
-	struct rte_mbuf *txq[TX_BURST_SIZE];
+	struct rte_mbuf **txq;
 
 	struct usiw_send_wqe_queue sq;
 

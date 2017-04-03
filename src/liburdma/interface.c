@@ -370,7 +370,7 @@ enqueue_ether_frame(struct rte_mbuf *sendmsg, unsigned int ether_type,
 #endif
 
 	*(qp->txq_end++) = sendmsg;
-	if (qp->txq_end == qp->txq + TX_BURST_SIZE) {
+	if (qp->txq_end == qp->txq + qp->shm_qp->tx_burst_size) {
 		RTE_LOG(DEBUG, USER1, "TX queue filled; early flush forced\n");
 		flush_tx_queue(qp);
 	}
@@ -2062,9 +2062,7 @@ start_qp(struct usiw_qp *qp)
 		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Set up readresp_store failed: %s\n",
 						qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 						strerror(errno));
-		atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
-		rte_spinlock_unlock(&qp->shm_qp->conn_event_lock);
-		return;
+		goto err;
 	}
 	for (x = 0; x < qp->shm_qp->ird_max; ++x) {
 		TAILQ_INSERT_TAIL(&qp->readresp_empty,
@@ -2081,12 +2079,18 @@ start_qp(struct usiw_qp *qp)
 		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Set up tx_pending failed: %s\n",
 						qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 						strerror(errno));
-		atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
-		free(qp->readresp_store);
-		rte_spinlock_unlock(&qp->shm_qp->conn_event_lock);
-		return;
+		goto free_readresp_store;
 	}
 	qp->remote_ep.tx_head = qp->remote_ep.tx_pending;
+
+	qp->txq = calloc(qp->shm_qp->tx_burst_size, sizeof(*qp->txq));
+	if (!qp->txq) {
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Set up txq failed: %s\n",
+						qp->shm_qp->dev_id, qp->shm_qp->qp_id,
+						strerror(errno));
+		goto free_tx_pending;
+	}
+	qp->txq_end = qp->txq;
 
 	qp->stats.recv_max_burst_size = qp->shm_qp->rx_burst_size;
 	qp->stats.recv_count_histo = calloc(qp->stats.recv_max_burst_size + 1,
@@ -2095,16 +2099,24 @@ start_qp(struct usiw_qp *qp)
 		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Set up recv_count_histo failed: %s\n",
 						qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 						strerror(errno));
-		atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
-		free(qp->remote_ep.tx_pending);
-		free(qp->readresp_store);
-		rte_spinlock_unlock(&qp->shm_qp->conn_event_lock);
-		return;
+		goto free_txq;
 	}
 
 	atomic_store(&qp->shm_qp->conn_state, usiw_qp_running);
 	atomic_fetch_sub(&qp->ctx->qp_init_count, 1);
+	goto unlock;
+
+free_txq:
+	free(qp->txq);
+free_tx_pending:
+	free(qp->remote_ep.tx_pending);
+free_readresp_store:
+	free(qp->readresp_store);
+err:
+	atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
+unlock:
 	rte_spinlock_unlock(&qp->shm_qp->conn_event_lock);
+	return;
 } /* start_qp */
 
 
