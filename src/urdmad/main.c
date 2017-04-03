@@ -264,6 +264,10 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 	} else {
 		qp->rx_desc_count = rxq_info.nb_desc;
 	}
+	qp->rx_burst_size = dev->rx_burst_size;
+	if (qp->rx_burst_size > qp->rx_desc_count + 1) {
+		qp->rx_burst_size = qp->rx_desc_count + 1;
+	}
 	memcpy(&qp->remote_ether_addr, event->dst_ether, ETHER_ADDR_LEN);
 	if (dev->flags & port_fdir) {
 		memset(&fdirf, 0, sizeof(fdirf));
@@ -615,13 +619,32 @@ kni_process_burst(struct usiw_port *port,
 } /* kni_process_burst */
 
 
+static void
+do_xchg_packets(struct usiw_port *port)
+{
+	struct rte_mbuf *rxmbuf[port->rx_burst_size];
+	unsigned int count;
+
+	count = rte_kni_rx_burst(port->kni,
+			rxmbuf, port->rx_burst_size);
+	if (count) {
+		rte_eth_tx_burst(port->portid, 0,
+			rxmbuf, count);
+	}
+
+	count = rte_eth_rx_burst(port->portid, 0,
+				rxmbuf, port->rx_burst_size);
+	if (count) {
+		kni_process_burst(port, rxmbuf, count);
+	}
+} /* do_xchng_packets */
+
+
 static int
 event_loop(void *arg)
 {
 	struct usiw_driver *driver = arg;
 	struct usiw_port *port;
-	struct rte_mbuf *rxmbuf[RX_BURST_SIZE];
-	unsigned int count;
 	int portid, ret;
 
 	while (1) {
@@ -633,18 +656,7 @@ event_loop(void *arg)
 				break;
 			}
 
-			count = rte_kni_rx_burst(port->kni,
-					rxmbuf, RX_BURST_SIZE);
-			if (count) {
-				rte_eth_tx_burst(port->portid, 0,
-					rxmbuf, count);
-			}
-
-			count = rte_eth_rx_burst(port->portid, 0,
-						rxmbuf, RX_BURST_SIZE);
-			if (count) {
-				kni_process_burst(port, rxmbuf, count);
-			}
+			do_xchg_packets(port);
 		}
 	}
 
@@ -765,10 +777,11 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 	} else {
 		iface->tx_desc_count = port_config->tx_desc_count;
 	}
+	iface->rx_burst_size = port_config->rx_burst_size;
 	fprintf(stderr,
-		"port %" PRIu16 " rx_desc_count %" PRIu16 " tx_desc_count %" PRIu16 "\n",
-		iface->portid, iface->rx_desc_count,
-		iface->tx_desc_count);
+		"port %" PRIu16 " tx_desc_count %" PRIu16 " rx_desc_count %" PRIu16 " rx_burst_size %" PRIu16 "\n",
+		iface->portid, iface->tx_desc_count,
+		iface->rx_desc_count, iface->rx_burst_size);
 
 	LIST_INIT(&iface->avail_qp);
 

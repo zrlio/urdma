@@ -1909,17 +1909,17 @@ progress_send_wqe(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 static int
 process_receive_queue(struct usiw_qp *qp, void *prefetch_addr, uint64_t *now)
 {
-	struct rte_mbuf *rxmbuf[RX_BURST_SIZE];
+	struct rte_mbuf *rxmbuf[qp->shm_qp->rx_burst_size];
 	uint16_t rx_count, pkt, i;
 
 	/* Get burst of RX packets */
 	if (qp->dev->flags & port_fdir) {
 		rx_count = rte_eth_rx_burst(qp->dev->portid,
 				qp->shm_qp->rx_queue,
-				rxmbuf, RX_BURST_SIZE);
+				rxmbuf, qp->shm_qp->rx_burst_size);
 	} else if (qp->remote_ep.rx_queue) {
 		rx_count = rte_ring_dequeue_burst(qp->remote_ep.rx_queue,
-				(void **)rxmbuf, RX_BURST_SIZE);
+				(void **)rxmbuf, qp->shm_qp->rx_burst_size);
 	} else {
 		rx_count = 0;
 	}
@@ -2088,6 +2088,20 @@ start_qp(struct usiw_qp *qp)
 	}
 	qp->remote_ep.tx_head = qp->remote_ep.tx_pending;
 
+	qp->stats.recv_max_burst_size = qp->shm_qp->rx_burst_size;
+	qp->stats.recv_count_histo = calloc(qp->stats.recv_max_burst_size + 1,
+			sizeof(*qp->stats.recv_count_histo));
+	if (!qp->stats.recv_count_histo) {
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Set up recv_count_histo failed: %s\n",
+						qp->shm_qp->dev_id, qp->shm_qp->qp_id,
+						strerror(errno));
+		atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
+		free(qp->remote_ep.tx_pending);
+		free(qp->readresp_store);
+		rte_spinlock_unlock(&qp->shm_qp->conn_event_lock);
+		return;
+	}
+
 	atomic_store(&qp->shm_qp->conn_state, usiw_qp_running);
 	atomic_fetch_sub(&qp->ctx->qp_init_count, 1);
 	rte_spinlock_unlock(&qp->shm_qp->conn_event_lock);
@@ -2132,7 +2146,6 @@ kni_loop(void *arg)
 	struct usiw_context *ctx;
 	struct usiw_driver *driver;
 	struct usiw_qp *qp, **qp_prev;
-	struct rte_mbuf *rxmbuf[RX_BURST_SIZE];
 	void *ctxs_to_add[NEW_CTX_MAX];
 	unsigned int i, count;
 	int portid, ret;

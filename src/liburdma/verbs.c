@@ -850,12 +850,6 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 	atomic_store(&qp->shm_qp->conn_state, usiw_qp_unbound);
 	qp->ctx = ctx;
 	qp->dev = ctx->dev;
-	qp->stats.recv_max_burst_size = RX_BURST_SIZE;
-	qp->stats.recv_count_histo = calloc(qp->stats.recv_max_burst_size + 1,
-			sizeof(*qp->stats.recv_count_histo));
-	if (!qp->stats.recv_count_histo) {
-		goto free_kernel_qp;
-	}
 
 	qp->send_cq = container_of(qp_init_attr->send_cq,
 			struct usiw_cq, ib_cq);

@@ -63,7 +63,6 @@
 #include "verbs.h"
 
 #define TX_BURST_SIZE 8
-#define RX_BURST_SIZE 32
 #define DPDKV_MAX_QP 64
 #define MAX_ARP_ENTRIES 32
 #define MAX_RECV_WR 1023

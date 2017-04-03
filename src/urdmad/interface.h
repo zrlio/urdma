@@ -47,7 +47,6 @@
 #include <rte_spinlock.h>
 
 #define PENDING_DATAGRAM_INFO_SIZE 64
-#define RX_BURST_SIZE 32
 
 #ifndef container_of
 #define container_of(ptr, type, field) \
@@ -71,6 +70,7 @@ struct usiw_port {
 
 	uint16_t rx_desc_count;
 	uint16_t tx_desc_count;
+	uint16_t rx_burst_size;
 	uint16_t max_qp;
 	struct urdmad_qp_head avail_qp;
 	struct urdmad_qp *qp;
