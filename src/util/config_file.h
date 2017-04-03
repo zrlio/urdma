@@ -45,6 +45,9 @@ struct json_object;
 
 struct usiw_port_config {
 	unsigned int mtu;
+	unsigned int rx_desc_count;
+	unsigned int tx_desc_count;
+	int max_qp;
 	char ipv4_address[ipv4_addr_len_max];
 };
 

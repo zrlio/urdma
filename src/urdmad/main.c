@@ -703,7 +703,8 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 
 	memset(&port_conf, 0, sizeof(port_conf));
 	iface->flags = 0;
-	port_conf.rxmode.max_rx_pkt_len = ETHER_MAX_LEN;
+	port_conf.rxmode.max_rx_pkt_len
+			= port_config->mtu + ETHER_HDR_LEN + ETHER_CRC_LEN;
 	if ((iface->dev_info.tx_offload_capa & tx_checksum_offloads)
 			== tx_checksum_offloads) {
 		iface->flags |= port_checksum_offload;
@@ -725,29 +726,49 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 	} else {
 		port_conf.fdir_conf.mode = RTE_FDIR_MODE_NONE;
 	}
-	iface->max_qp = URDMA_MAX_QP;
-	fprintf(stderr, "max_rx_queues %d\n", iface->dev_info.max_rx_queues);
+	iface->max_qp = port_config->max_qp > 0 ? port_config->max_qp
+		: RTE_MIN(iface->dev_info.max_rx_queues,
+					iface->dev_info.max_tx_queues);
 	if (iface->max_qp > iface->dev_info.max_rx_queues) {
-		iface->max_qp = iface->dev_info.max_rx_queues;
+		rte_exit(EXIT_FAILURE,
+			 "port %" PRIu16 " configured max_qp %" PRIu16 " > max_rq_queues %" PRIu16 "\n",
+			 iface->portid, iface->max_qp,
+			 iface->dev_info.max_rx_queues);
 	}
-	fprintf(stderr, "max_tx_queues %d\n", iface->dev_info.max_tx_queues);
 	if (iface->max_qp > iface->dev_info.max_tx_queues) {
-		iface->max_qp = iface->dev_info.max_tx_queues;
+		rte_exit(EXIT_FAILURE,
+			 "port %" PRIu16 " configured max_qp %" PRIu16 " > max_rq_queues %" PRIu16 "\n",
+			 iface->portid, iface->max_qp,
+			 iface->dev_info.max_rx_queues);
 	}
+	fprintf(stderr, "port %" PRIu16 " max_qp %" PRIu16 "\n",
+			iface->portid, iface->max_qp);
 
-	/* TODO: Do performance testing to determine optimal descriptor
-	 * counts */
-	/* FIXME: Retry mempool allocations with smaller amounts until it
-	 * succeeds, and then base max_qp and rx/tx_desc_count based on that */
-	iface->rx_desc_count = iface->dev_info.rx_desc_lim.nb_max;
-	if (iface->rx_desc_count > RX_DESC_COUNT_MAX) {
-		iface->rx_desc_count = RX_DESC_COUNT_MAX;
+	/* TODO: Auto-tuning of rx_desc_count and tx_desc_count */
+	if (port_config->rx_desc_count == UINT_MAX) {
+		iface->rx_desc_count = iface->dev_info.rx_desc_lim.nb_max;
+	} else if (iface->rx_desc_count > iface->dev_info.rx_desc_lim.nb_max) {
+		rte_exit(EXIT_FAILURE,
+			 "port %" PRIu16 " configured rx_desc_count %" PRIu16 " > rx_desc_lim.nb_max %" PRIu16 "\n",
+			 iface->portid, iface->rx_desc_count,
+			 iface->dev_info.rx_desc_lim.nb_max);
+	} else {
+		iface->rx_desc_count = port_config->rx_desc_count;
 	}
-	fprintf(stderr, "rx_desc_count %" PRIu16 "\n", iface->rx_desc_count);
-	iface->tx_desc_count = iface->dev_info.tx_desc_lim.nb_max;
-	if (iface->tx_desc_count > TX_DESC_COUNT_MAX) {
-		iface->tx_desc_count = TX_DESC_COUNT_MAX;
+	if (port_config->tx_desc_count == UINT_MAX) {
+		iface->tx_desc_count = iface->dev_info.tx_desc_lim.nb_max;
+	} else if (iface->tx_desc_count > iface->dev_info.tx_desc_lim.nb_max) {
+		rte_exit(EXIT_FAILURE,
+			 "port %" PRIu16 " configured tx_desc_count %" PRIu16 " > tx_desc_lim.nb_max %" PRIu16 "\n",
+			 iface->portid, iface->tx_desc_count,
+			 iface->dev_info.tx_desc_lim.nb_max);
+	} else {
+		iface->tx_desc_count = port_config->tx_desc_count;
 	}
+	fprintf(stderr,
+		"port %" PRIu16 " rx_desc_count %" PRIu16 " tx_desc_count %" PRIu16 "\n",
+		iface->portid, iface->rx_desc_count,
+		iface->tx_desc_count);
 
 	LIST_INIT(&iface->avail_qp);
 
@@ -773,7 +794,8 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 		2 * iface->max_qp * iface->rx_desc_count,
 		0, 0, RTE_PKTMBUF_HEADROOM + port_config->mtu, socket_id);
 	if (iface->rx_mempool == NULL)
-		rte_exit(EXIT_FAILURE, "Cannot create rx mempool with %u mbufs: %s\n",
+		rte_exit(EXIT_FAILURE, "Cannot create rx mempool for port %" PRIu16 " with %u mbufs: %s\n",
+				iface->portid,
 				2 * iface->max_qp * iface->rx_desc_count,
 				rte_strerror(rte_errno));
 
@@ -784,7 +806,8 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 		0, PENDING_DATAGRAM_INFO_SIZE,
 		RTE_PKTMBUF_HEADROOM + port_config->mtu, socket_id);
 	if (iface->tx_ddp_mempool == NULL)
-		rte_exit(EXIT_FAILURE, "Cannot create tx mempool with %u mbufs: %s\n",
+		rte_exit(EXIT_FAILURE, "Cannot create tx mempool for port %" PRIu16 " with %u mbufs: %s\n",
+				iface->portid,
 				2 * iface->max_qp * iface->tx_desc_count,
 				rte_strerror(rte_errno));
 
