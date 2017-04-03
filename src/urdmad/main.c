@@ -779,22 +779,42 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 
 	/* TODO: Auto-tuning of rx_desc_count and tx_desc_count */
 	if (port_config->rx_desc_count == UINT_MAX) {
-		iface->rx_desc_count = iface->dev_info.rx_desc_lim.nb_max;
-	} else if (iface->rx_desc_count > iface->dev_info.rx_desc_lim.nb_max) {
+		iface->rx_desc_count = iface->dev_info.rx_desc_lim.nb_min;
+	} else if (port_config->rx_desc_count > iface->dev_info.rx_desc_lim.nb_max) {
 		rte_exit(EXIT_FAILURE,
 			 "port %" PRIu16 " configured rx_desc_count %" PRIu16 " > rx_desc_lim.nb_max %" PRIu16 "\n",
 			 iface->portid, iface->rx_desc_count,
 			 iface->dev_info.rx_desc_lim.nb_max);
+	} else if (port_config->rx_desc_count < iface->dev_info.rx_desc_lim.nb_min) {
+		rte_exit(EXIT_FAILURE,
+			 "port %" PRIu16 " configured rx_desc_count %" PRIu16 " < rx_desc_lim.nb_min %" PRIu16 "\n",
+			 iface->portid, iface->rx_desc_count,
+			 iface->dev_info.rx_desc_lim.nb_min);
+	} else if (port_config->rx_desc_count % iface->dev_info.rx_desc_lim.nb_align) {
+		rte_exit(EXIT_FAILURE,
+			 "port %" PRIu16 " configured rx_desc_count %" PRIu16 " does not match alignment %" PRIu16 "\n",
+			 iface->portid, iface->rx_desc_count,
+			 iface->dev_info.rx_desc_lim.nb_align);
 	} else {
 		iface->rx_desc_count = port_config->rx_desc_count;
 	}
 	if (port_config->tx_desc_count == UINT_MAX) {
-		iface->tx_desc_count = iface->dev_info.tx_desc_lim.nb_max;
-	} else if (iface->tx_desc_count > iface->dev_info.tx_desc_lim.nb_max) {
+		iface->tx_desc_count = iface->dev_info.tx_desc_lim.nb_min;
+	} else if (port_config->tx_desc_count > iface->dev_info.tx_desc_lim.nb_max) {
 		rte_exit(EXIT_FAILURE,
 			 "port %" PRIu16 " configured tx_desc_count %" PRIu16 " > tx_desc_lim.nb_max %" PRIu16 "\n",
 			 iface->portid, iface->tx_desc_count,
 			 iface->dev_info.tx_desc_lim.nb_max);
+	} else if (port_config->tx_desc_count < iface->dev_info.tx_desc_lim.nb_min) {
+		rte_exit(EXIT_FAILURE,
+			 "port %" PRIu16 " configured tx_desc_count %" PRIu16 " < tx_desc_lim.nb_min %" PRIu16 "\n",
+			 iface->portid, iface->tx_desc_count,
+			 iface->dev_info.tx_desc_lim.nb_min);
+	} else if (port_config->tx_desc_count % iface->dev_info.tx_desc_lim.nb_align) {
+		rte_exit(EXIT_FAILURE,
+			 "port %" PRIu16 " configured tx_desc_count %" PRIu16 " does not match alignment %" PRIu16 "\n",
+			 iface->portid, iface->tx_desc_count,
+			 iface->dev_info.tx_desc_lim.nb_align);
 	} else {
 		iface->tx_desc_count = port_config->tx_desc_count;
 	}
