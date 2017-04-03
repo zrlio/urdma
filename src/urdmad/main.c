@@ -675,7 +675,7 @@ event_loop(void *arg)
 }
 
 
-static int
+static void
 setup_base_filters(struct usiw_port *iface)
 {
 	struct rte_eth_fdir_filter_info filter_info;
@@ -694,14 +694,13 @@ setup_base_filters(struct usiw_port *iface)
 	retval = rte_eth_dev_filter_ctrl(iface->portid, RTE_ETH_FILTER_FDIR,
 			RTE_ETH_FILTER_SET, &filter_info);
 	if (retval != 0) {
-		RTE_LOG(CRIT, USER1, "Could not set fdir filter info: %s\n",
-				strerror(-retval));
+		rte_exit(EXIT_FAILURE, "Could not set fdir filter info on port %" PRIu16 ": %s\n",
+				iface->portid, strerror(-retval));
 	}
-	return retval;
 } /* setup_base_filters */
 
 
-static int
+static void
 usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 {
 	static const uint32_t rx_checksum_offloads
@@ -717,12 +716,9 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 	int retval;
 	uint16_t q;
 
-	/* *** FIXME: *** LOTS of resource leaks on failure */
-
 	socket_id = rte_eth_dev_socket_id(iface->portid);
 
-	if (iface->portid >= rte_eth_dev_count())
-		return -EINVAL;
+	assert(iface->portid < rte_eth_dev_count());
 
 	memset(&port_conf, 0, sizeof(port_conf));
 	iface->flags = 0;
@@ -843,8 +839,12 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 	/* Configure the Ethernet device. */
 	retval = rte_eth_dev_configure(iface->portid, iface->max_qp + 1,
 			iface->max_qp + 1, &port_conf);
-	if (retval != 0)
-		return retval;
+	if (retval != 0) {
+		rte_exit(EXIT_FAILURE,
+			"Cannot configure port %" PRIu16 " with max_qp %" PRIu16 ": %s\n",
+			iface->portid, iface->max_qp,
+			rte_strerror(-retval));
+	}
 
 	rte_eth_promiscuous_disable(iface->portid);
 
@@ -852,7 +852,9 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 	retval = rte_eth_rx_queue_setup(iface->portid, 0, iface->rx_desc_count,
 			socket_id, NULL, iface->rx_mempool);
 	if (retval < 0)
-		return retval;
+		rte_exit(EXIT_FAILURE,
+			"Cannot setup port %" PRIu16 " rx queue 0: %s\n",
+			iface->portid, rte_strerror(-retval));
 
 	/* Data RX queue startup is deferred */
 	memcpy(&rxconf, &iface->dev_info.default_rxconf, sizeof(rxconf));
@@ -862,7 +864,9 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 				iface->rx_desc_count, socket_id, &rxconf,
 				iface->rx_mempool);
 		if (retval < 0) {
-			return retval;
+			rte_exit(EXIT_FAILURE,
+				"Cannot setup port %" PRIu16 " rx queue %" PRIu16 ": %s\n",
+				iface->portid, q, rte_strerror(-retval));
 		}
 	}
 
@@ -870,7 +874,9 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 	retval = rte_eth_tx_queue_setup(iface->portid, 0, iface->tx_desc_count,
 			socket_id, NULL);
 	if (retval < 0)
-		return retval;
+		rte_exit(EXIT_FAILURE,
+			"Cannot setup port %" PRIu16 " tx queue 0: %s\n",
+			iface->portid, rte_strerror(-retval));
 
 	/* Data TX queue requires checksum offload, and startup is deferred */
 	memcpy(&txconf, &iface->dev_info.default_txconf, sizeof(txconf));
@@ -887,19 +893,19 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 		retval = rte_eth_tx_queue_setup(iface->portid, q,
 				iface->tx_desc_count, socket_id, &txconf);
 		if (retval < 0)
-			return retval;
+			rte_exit(EXIT_FAILURE,
+				"Cannot setup port %" PRIu16 " tx queue %" PRIu16 ": %s\n",
+				iface->portid, q, rte_strerror(-retval));
 	}
 
 	if (iface->flags & port_fdir) {
-		retval = setup_base_filters(iface);
-		if (retval < 0) {
-			return retval;
-		}
+		setup_base_filters(iface);
 	}
 
 	retval = usiw_port_setup_kni(iface);
 	if (retval < 0) {
-		return retval;
+		rte_exit(EXIT_FAILURE, "Could not set port %u KNI interface: %s\n",
+				iface->portid, strerror(-retval));
 	}
 
 	retval = rte_eth_dev_set_mtu(iface->portid, port_config->mtu);
@@ -910,7 +916,10 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 	}
 	iface->mtu = port_config->mtu;
 
-	return rte_eth_dev_start(iface->portid);
+	retval = rte_eth_dev_start(iface->portid);
+	if (retval < 0)
+		rte_exit(EXIT_FAILURE, "Could not start port %u: %s\n",
+				iface->portid, strerror(-retval));
 } /* usiw_port_init */
 
 
@@ -1032,12 +1041,7 @@ do_init_driver(void)
 				&driver->ports[portid].ether_addr);
 		rte_eth_dev_info_get(portid, &driver->ports[portid].dev_info);
 
-		retval = usiw_port_init(&driver->ports[portid],
-					&port_config[portid]);
-		if (retval < 0) {
-			rte_exit(EXIT_FAILURE, "Could not initialize port %u: %s\n",
-					portid, strerror(-retval));
-		}
+		usiw_port_init(&driver->ports[portid], &port_config[portid]);
 	}
 	rte_eal_remote_launch(event_loop, driver, driver->progress_lcore);
 	/* FIXME: cannot free driver beyond this point since it is being
