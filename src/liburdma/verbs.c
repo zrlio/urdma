@@ -369,7 +369,7 @@ usiw_query_device(struct ibv_context *context,
 	device_attr->max_mcast_grp = 0;
 	device_attr->max_mcast_qp_attach = 0;
 	device_attr->max_total_mcast_qp_attach = 0;
-	device_attr->max_ah = MAX_ARP_ENTRIES;
+	device_attr->max_ah = 0;
 	device_attr->max_fmr = 0;
 	device_attr->max_srq = 0;
 	device_attr->max_pkeys = 0;

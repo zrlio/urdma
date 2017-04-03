@@ -63,7 +63,6 @@
 #include "verbs.h"
 
 #define TX_BURST_SIZE 8
-#define MAX_ARP_ENTRIES 32
 #define MAX_RECV_WR 1023
 #define MAX_SEND_WR 1023
 #define DPDK_VERBS_IOV_LEN_MAX 32
