@@ -1980,8 +1980,7 @@ progress_qp(struct usiw_qp *qp)
 		}
 		assert(send_wqe->state != SEND_WQE_INIT);
 		progress_send_wqe(qp, send_wqe);
-		if (send_wqe->state == SEND_WQE_TRANSFER
-				|| send_wqe->opcode == usiw_wr_write) {
+		if (send_wqe->state == SEND_WQE_TRANSFER) {
 			scount++;
 		}
 	}
