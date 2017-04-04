@@ -296,8 +296,27 @@ static void
 usiw_recv_wqe_queue_add_active(struct usiw_recv_wqe_queue *q,
 		struct usiw_recv_wqe *wqe)
 {
+	struct usiw_recv_wqe *lptr, **prev, *last;
 	RTE_LOG(DEBUG, USER1, "ADD active recv WQE msn=%" PRIu32 "\n",
 			wqe->msn);
+	if (!q->active_head.tqh_first
+				|| wqe->msn < q->active_head.tqh_first->msn) {
+		/* We are plugging a sequence number gap, so we belong at the
+		 * head of the list. */
+		TAILQ_INSERT_HEAD(&q->active_head, wqe, active);
+		return;
+	}
+	/* else, we must find the first element that is greater than us and
+	 * insert ourselves before it */
+	last = NULL;
+	TAILQ_FOR_EACH(lptr, &q->active_head, active, prev) {
+		if (wqe->msn < lptr->msn) {
+			assert(last != NULL);
+			TAILQ_INSERT_AFTER(&q->active_head, last, wqe, active);
+			return;
+		}
+		last = lptr;
+	}
 	TAILQ_INSERT_TAIL(&q->active_head, wqe, active);
 } /* usiw_recv_wqe_queue_add_active */
 
@@ -1133,6 +1152,23 @@ memcpy_to_iov(struct iovec * restrict dest, size_t iov_count,
 
 
 static void
+bump_expected_recv_msn(struct usiw_qp *qp)
+{
+	struct usiw_recv_wqe *lptr, **prev;
+
+	qp->remote_ep.expected_recv_msn++;
+	/* If we have a sequence number gap, this will adjust expected_recv_msn
+	 * once we have plugged the hole by receiving the "missing" SEND
+	 * message. */
+	TAILQ_FOR_EACH(lptr, &qp->rq0.active_head, active, prev) {
+		if (lptr->msn == qp->remote_ep.expected_recv_msn) {
+			qp->remote_ep.expected_recv_msn++;
+		}
+	}
+} /* bump_expected_recv_msn */
+
+
+static void
 process_send(struct usiw_qp *qp, struct packet_context *orig)
 {
 	struct usiw_recv_wqe *wqe;
@@ -1150,7 +1186,7 @@ process_send(struct usiw_qp *qp, struct packet_context *orig)
 	if (ret < 0) {
 		msn = rte_be_to_cpu_32(rdmap->msn);
 		if (msn == ee->expected_recv_msn) {
-			ee->expected_recv_msn++;
+			bump_expected_recv_msn(qp);
 		} else if (serial_less_32(msn, ee->expected_recv_msn)) {
 			/* This is a duplicate of a previously received
 			 * message */
