@@ -240,6 +240,7 @@ struct read_response_state {
 	uint32_t msg_size;
 	uint32_t sink_stag; /* network byte order */
 	uint64_t sink_offset; /* host byte order */
+	bool active;
 	struct ee_state *sink_ep;
 	TAILQ_ENTRY(read_response_state) qp_entry;
 };
@@ -280,8 +281,7 @@ struct usiw_qp {
 	struct usiw_recv_wqe_queue rq0;
 
 	struct read_response_state *readresp_store;
-	struct read_response_state_tailq_head readresp_active;
-	struct read_response_state_tailq_head readresp_empty;
+	uint32_t readresp_head_msn;
 	uint8_t ord_active;
 
 	struct usiw_cq *recv_cq;

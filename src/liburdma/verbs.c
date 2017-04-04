@@ -884,8 +884,7 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 	}
 
 	qp->readresp_store = NULL;
-	TAILQ_INIT(&qp->readresp_active);
-	TAILQ_INIT(&qp->readresp_empty);
+	qp->readresp_head_msn = 1;
 	qp->ord_active = 0;
 
 	ee = &qp->remote_ep;

@@ -1225,10 +1225,16 @@ respond_rdma_read(struct usiw_qp *qp)
 	size_t dgram_length;
 	size_t payload_length;
 	uint16_t mtu = qp->shm_qp->mtu;
+	unsigned long msn, end;
 	int count;
 
 	count = 0;
-	TAILQ_FOR_EACH(readresp, &qp->readresp_active, qp_entry, prev) {
+	for (msn = qp->readresp_head_msn, end = msn + qp->shm_qp->ird_max;
+							msn != end; ++msn) {
+		readresp = &qp->readresp_store[msn % qp->shm_qp->ird_max];
+		if (!readresp->active) {
+			break;
+		}
 		while (readresp->msg_size > 0
 				&& serial_less_32(readresp->sink_ep->send_next_psn,
 					readresp->sink_ep->send_max_psn)) {
@@ -1258,8 +1264,8 @@ respond_rdma_read(struct usiw_qp *qp)
 
 		if (readresp->msg_size == 0) {
 			/* Signal that this is done */
-			TAILQ_REMOVE(&qp->readresp_active, readresp, qp_entry);
-			TAILQ_INSERT_TAIL(&qp->readresp_empty, readresp, qp_entry);
+			readresp->active = false;
+			qp->readresp_head_msn++;
 		}
 	}
 	return count;
@@ -1278,14 +1284,18 @@ process_rdma_read_request(struct usiw_qp *qp, struct packet_context *orig)
 	struct usiw_mr *mr;
 
 	msn = rte_be_to_cpu_32(rdmap->untagged.msn);
-	if (msn != orig->src_ep->expected_read_msn) {
-		RTE_LOG(INFO, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> RDMA READ failure: expected MSN %" PRIu32 " received %" PRIu32 "\n",
+	if (msn < orig->src_ep->expected_read_msn
+			|| msn >= qp->readresp_head_msn + qp->shm_qp->ird_max) {
+		RTE_LOG(INFO, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> RDMA READ failure: expected MSN in range [%" PRIu32 ", %" PRIu32 "] received %" PRIu32 "\n",
 				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
-				orig->src_ep->expected_read_msn, msn);
+				orig->src_ep->expected_read_msn,
+				qp->readresp_head_msn + qp->shm_qp->ird_max,
+				msn);
 		do_rdmap_terminate(qp, orig, ddp_error_untagged_invalid_msn);
 		return;
 	}
-	orig->src_ep->expected_read_msn++;
+	if (msn == orig->src_ep->expected_read_msn)
+		orig->src_ep->expected_read_msn++;
 
 	rkey = rte_be_to_cpu_32(rdmap->source_stag);
 	candidate = usiw_mr_lookup(qp->pd, rkey);
@@ -1313,18 +1323,15 @@ process_rdma_read_request(struct usiw_qp *qp, struct packet_context *orig)
 		return;
 	}
 
-	readresp = qp->readresp_empty.tqh_first;
-	if (!readresp) {
-		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> RDMA READ failure: exceeded ord_max %" PRIu8 "\n",
-				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
-				qp->shm_qp->ord_max);
+	readresp = &qp->readresp_store[msn % qp->shm_qp->ird_max];
+	if (readresp->active) {
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> RDMA READ failure: duplicate MSN %" PRIu32 "\n",
+				qp->shm_qp->dev_id, qp->shm_qp->qp_id, msn);
 		do_rdmap_terminate(qp, orig,
 				rdmap_error_remote_stream_catastrophic);
 		return;
 	}
-	TAILQ_REMOVE(&qp->readresp_empty, readresp, qp_entry);
-	TAILQ_INSERT_TAIL(&qp->readresp_active, readresp, qp_entry);
-
+	readresp->active = true;
 	readresp->vaddr = (void *)vaddr;
 	readresp->msg_size = rdma_length;
 	readresp->sink_stag = rdmap->untagged.head.sink_stag;
@@ -2068,11 +2075,6 @@ start_qp(struct usiw_qp *qp)
 						qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 						strerror(errno));
 		goto err;
-	}
-	for (x = 0; x < qp->shm_qp->ird_max; ++x) {
-		TAILQ_INSERT_TAIL(&qp->readresp_empty,
-				&qp->readresp_store[x],
-				qp_entry);
 	}
 
 	/* FIXME: Get this from the peer */
