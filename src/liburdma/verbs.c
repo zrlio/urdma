@@ -787,6 +787,7 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 	struct usiw_context *ctx;
 	struct ee_state *ee;
 	struct usiw_qp *qp;
+	size_t sz;
 	int retval;
 
 	if ((qp_init_attr->qp_type != IBV_QPT_UD
@@ -815,8 +816,10 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 	if (!qp_init_attr->cap.max_recv_sge) {
 		qp_init_attr->cap.max_recv_sge = 3;
 	}
-	if (qp_init_attr->cap.max_inline_data > sizeof(struct iovec)
-					* qp_init_attr->cap.max_send_sge) {
+	sz = qp_init_attr->cap.max_send_sge * sizeof(struct iovec);
+	if (!qp_init_attr->cap.max_inline_data < sz) {
+		qp_init_attr->cap.max_inline_data = sz;
+	} else if (qp_init_attr->cap.max_inline_data > sz) {
 		qp_init_attr->cap.max_send_sge
 			= (qp_init_attr->cap.max_inline_data - 1)
 			/ sizeof(struct iovec) + 1;
