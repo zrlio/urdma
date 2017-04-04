@@ -282,7 +282,7 @@ struct usiw_qp {
 	struct read_response_state *readresp_store;
 	struct read_response_state_tailq_head readresp_active;
 	struct read_response_state_tailq_head readresp_empty;
-	uint8_t ird_active;
+	uint8_t ord_active;
 
 	struct usiw_cq *recv_cq;
 	struct usiw_mr_table *pd;

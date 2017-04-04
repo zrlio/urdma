@@ -306,8 +306,8 @@ static int siw_cm_upcall(struct siw_cep *cep, enum iw_cm_event_type reason,
 	}
 	if (reason == IW_CM_EVENT_CONNECT_REQUEST) {
 #if HAVE_RFC_6581
-		event.ird = cep->ird;
-		event.ord = cep->ord;
+		event.ird = cep->ord;
+		event.ord = cep->ird;
 #endif
 		event.provider_data = cep;
 		cm_id = cep->listen_cep->cm_id;
@@ -611,8 +611,8 @@ static int siw_proc_trpreply(struct siw_cep *cep)
 	}
 
 	memset(&qp_attrs, 0, sizeof qp_attrs);
-	qp_attrs.irq_size = min(htons(rep->params.ord), qp->attrs.irq_size);
-	qp_attrs.orq_size = max(htons(rep->params.ird), qp->attrs.orq_size);
+	qp_attrs.irq_size = max(htons(rep->params.ord), cep->ird);
+	qp_attrs.orq_size = min(htons(rep->params.ird), cep->ord);
 	qp_attrs.llp_stream_handle = cep->llp.sock;
 	qp_attrs.state = SIW_QP_STATE_RTS;
 

@@ -981,8 +981,8 @@ do_rdmap_read_request(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 		return;
 	}
 
-	if (qp->ird_active >= qp->shm_qp->ird_max) {
-		/* Cannot issue more than ird_max simultaneous RDMA READ
+	if (qp->ord_active >= qp->shm_qp->ord_max) {
+		/* Cannot issue more than ord_max simultaneous RDMA READ
 		 * Requests. */
 		return;
 	} else if (wqe->remote_ep->send_next_psn
@@ -1003,7 +1003,7 @@ do_rdmap_read_request(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 		atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
 		return;
 	}
-	qp->ird_active++;
+	qp->ord_active++;
 
 	sendmsg = rte_pktmbuf_alloc(qp->dev->tx_ddp_mempool);
 
@@ -1373,8 +1373,8 @@ process_rdma_read_response(struct usiw_qp *qp, struct packet_context *orig)
 			qp_free_send_wqe(qp, read_wqe, true);
 		}
 		rte_spinlock_unlock(&qp->sq.lock);
-		assert(qp->ird_active > 0);
-		qp->ird_active--;
+		assert(qp->ord_active > 0);
+		qp->ord_active--;
 	}
 }	/* process_rdma_read_response */
 
