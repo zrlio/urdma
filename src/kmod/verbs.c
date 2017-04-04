@@ -134,6 +134,10 @@ static ssize_t siw_event_file_write(struct file *filp, const char __user *buf,
 		}
 		cq_event = (struct urdma_cq_event *)&event;
 		cq = siw_cq_id2obj(file->ctx->sdev, cq_event->cq_id);
+		if (WARN_ON_ONCE(!cq)) {
+			rv = -EINVAL;
+			goto out;
+		}
 		cq->ofa_cq.comp_handler(&cq->ofa_cq, cq->ofa_cq.cq_context);
 		siw_cq_put(cq);
 		break;
