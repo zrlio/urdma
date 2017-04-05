@@ -145,6 +145,7 @@ urdma_accl_post_recvv(struct ibv_qp *ib_qp, const struct iovec *iov, size_t iov_
 	wqe->msn = 0;
 	wqe->recv_size = 0;
 	wqe->input_size = 0;
+	wqe->complete = false;
 	x = rte_ring_enqueue(qp->rq0.ring, wqe);
 	assert(x == 0);
 
@@ -891,7 +892,6 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 	qp->ord_active = 0;
 
 	ee = &qp->remote_ep;
-	ee->expected_recv_msn = 1;
 	ee->expected_read_msn = 1;
 	ee->expected_ack_msn = 1;
 	ee->next_send_msn = 1;
@@ -1221,6 +1221,7 @@ usiw_post_recv(struct ibv_qp *ib_qp, struct ibv_recv_wr *wr,
 		wqe->msn = 0;
 		wqe->recv_size = 0;
 		wqe->input_size = 0;
+		wqe->complete = false;
 		x = rte_ring_enqueue(qp->rq0.ring, wqe);
 		assert(x == 0);
 	}

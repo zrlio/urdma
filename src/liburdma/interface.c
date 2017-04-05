@@ -281,6 +281,7 @@ usiw_recv_wqe_queue_init(uint32_t qpn, struct usiw_recv_wqe_queue *q,
 	rte_spinlock_init(&q->lock);
 	q->max_wr = max_recv_wr;
 	q->max_sge = max_recv_sge;
+	q->next_msn = 1;
 	return 0;
 } /* usiw_recv_wqe_queue_init */
 
@@ -296,27 +297,8 @@ static void
 usiw_recv_wqe_queue_add_active(struct usiw_recv_wqe_queue *q,
 		struct usiw_recv_wqe *wqe)
 {
-	struct usiw_recv_wqe *lptr, **prev, *last;
 	RTE_LOG(DEBUG, USER1, "ADD active recv WQE msn=%" PRIu32 "\n",
 			wqe->msn);
-	if (!q->active_head.tqh_first
-				|| wqe->msn < q->active_head.tqh_first->msn) {
-		/* We are plugging a sequence number gap, so we belong at the
-		 * head of the list. */
-		TAILQ_INSERT_HEAD(&q->active_head, wqe, active);
-		return;
-	}
-	/* else, we must find the first element that is greater than us and
-	 * insert ourselves before it */
-	last = NULL;
-	TAILQ_FOR_EACH(lptr, &q->active_head, active, prev) {
-		if (wqe->msn < lptr->msn) {
-			assert(last != NULL);
-			TAILQ_INSERT_AFTER(&q->active_head, last, wqe, active);
-			return;
-		}
-		last = lptr;
-	}
 	TAILQ_INSERT_TAIL(&q->active_head, wqe, active);
 } /* usiw_recv_wqe_queue_add_active */
 
@@ -827,7 +809,7 @@ rq_flush(struct usiw_qp *qp)
 
 	rte_spinlock_lock(&qp->rq0.lock);
 	while (rte_ring_dequeue(qp->rq0.ring, (void **)&wqe) == 0) {
-		wqe->msn = qp->remote_ep.expected_recv_msn++;
+		wqe->msn = qp->rq0.next_msn++;
 		usiw_recv_wqe_queue_add_active(&qp->rq0, wqe);
 	}
 	TAILQ_FOR_EACH(wqe, &qp->rq0.active_head, active, prev) {
@@ -1151,21 +1133,23 @@ memcpy_to_iov(struct iovec * restrict dest, size_t iov_count,
 } /* memcpy_to_iov */
 
 
+/** Pull all recv WQEs off of the ring for the given qp. */
 static void
-bump_expected_recv_msn(struct usiw_qp *qp)
+dequeue_recv_wqes(struct usiw_qp *qp)
 {
-	struct usiw_recv_wqe *lptr, **prev;
+	struct usiw_recv_wqe *wqe[qp->rq0.max_wr + 1];
+	unsigned int i, ret;
 
-	qp->remote_ep.expected_recv_msn++;
-	/* If we have a sequence number gap, this will adjust expected_recv_msn
-	 * once we have plugged the hole by receiving the "missing" SEND
-	 * message. */
-	TAILQ_FOR_EACH(lptr, &qp->rq0.active_head, active, prev) {
-		if (lptr->msn == qp->remote_ep.expected_recv_msn) {
-			qp->remote_ep.expected_recv_msn++;
+	while ((ret = rte_ring_dequeue_burst(qp->rq0.ring, (void **)wqe,
+						qp->rq0.max_wr + 1)) > 0) {
+		for (i = 0; i < ret; i++) {
+			wqe[i]->remote_ep = &qp->remote_ep;
+			wqe[i]->msn = qp->rq0.next_msn++;
+			usiw_recv_wqe_queue_add_active(&qp->rq0, wqe[i]);
 		}
 	}
-} /* bump_expected_recv_msn */
+	assert(rte_ring_empty(qp->rq0.ring));
+} /* dequeue_recv_wqes */
 
 
 static void
@@ -1175,48 +1159,37 @@ process_send(struct usiw_qp *qp, struct packet_context *orig)
 	struct rdmap_untagged_packet *rdmap
 		= (struct rdmap_untagged_packet *)orig->rdmap;
 	struct ee_state *ee = orig->src_ep;
-	uint32_t msn;
+	uint32_t msn, expected_msn;
 	size_t offset;
 	size_t payload_length;
 	int ret;
 
-	ret = usiw_recv_wqe_queue_lookup(&qp->rq0,
-			rte_be_to_cpu_32(rdmap->msn), &wqe);
+	if (!qp->rq0.active_head.tqh_first)
+		dequeue_recv_wqes(qp);
+
+	msn = rte_be_to_cpu_32(rdmap->msn);
+	ret = usiw_recv_wqe_queue_lookup(&qp->rq0, msn, &wqe);
 	assert(ret != -EINVAL);
 	if (ret < 0) {
-		msn = rte_be_to_cpu_32(rdmap->msn);
-		if (msn == ee->expected_recv_msn) {
-			bump_expected_recv_msn(qp);
-		} else if (serial_less_32(msn, ee->expected_recv_msn)) {
+		if (qp->rq0.active_head.tqh_first) {
 			/* This is a duplicate of a previously received
-			 * message */
+			 * message --- should never happen since TRP will not
+			 * give us a duplicate packet. */
+			expected_msn = qp->rq0.active_head.tqh_first->msn;
 			RTE_LOG(INFO, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Received msn=%" PRIu32 " but expected msn=%" PRIu32 "\n",
 					qp->shm_qp->dev_id, qp->shm_qp->qp_id,
-					msn, ee->expected_recv_msn);
+					msn, expected_msn);
 			do_rdmap_terminate(qp, orig,
 					ddp_error_untagged_invalid_msn);
-			return;
 		} else {
-			/* else, we received this message out of order */
-			assert(serial_greater_32(msn, ee->expected_recv_msn));
-			RTE_LOG(INFO, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Received msn=%" PRIu32 " but expected msn=%" PRIu32 "\n",
-					qp->shm_qp->dev_id, qp->shm_qp->qp_id,
-					msn, ee->expected_recv_msn);
-		}
-
-		ret = rte_ring_dequeue(qp->rq0.ring, (void **)&wqe);
-		if (ret != 0) {
+			RTE_LOG(INFO, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Received SEND msn=%" PRIu32 " to empty receive queue\n",
+					qp->dev->portid,
+					qp->shm_qp->rx_queue, msn);
+			assert(rte_ring_empty(qp->rq0.ring));
 			do_rdmap_terminate(qp, orig,
 					ddp_error_untagged_no_buffer);
-			rte_exit(EXIT_FAILURE, "rte_ring_dequeue rq0.ring port %u queue %u: %s\n",
-					qp->dev->portid,
-					qp->shm_qp->rx_queue, rte_strerror(-ret));
 		}
-
-		wqe->remote_ep = ee;
-		wqe->msn = msn;
-
-		usiw_recv_wqe_queue_add_active(&qp->rq0, wqe);
+		return;
 	}
 
 	offset = rte_be_to_cpu_32(rdmap->mo);
@@ -1242,12 +1215,24 @@ process_send(struct usiw_qp *qp, struct packet_context *orig)
 	memcpy_to_iov(wqe->iov, wqe->iov_count, PAYLOAD_OF(rdmap),
 			payload_length, offset);
 	wqe->recv_size += payload_length;
-
 	assert(wqe->input_size == 0 || wqe->recv_size <= wqe->input_size);
 	if (wqe->recv_size == wqe->input_size) {
-		rte_spinlock_lock(&qp->rq0.lock);
-		post_recv_cqe(qp, wqe, IBV_WC_SUCCESS);
-		rte_spinlock_unlock(&qp->rq0.lock);
+		wqe->complete = true;
+	}
+
+	/* Post completion, but only if there are no holes in the LLP packet
+	 * sequence. This ensures that even in the case of missing packets,
+	 * we maintain the ordering between received Tagged and Untagged
+	 * frames. Walk the queue starting at the head to make sure we post
+	 * completions that we had previously deferred. */
+	if (serial_less_32(orig->psn, wqe->remote_ep->recv_ack_psn)) {
+		wqe = qp->rq0.active_head.tqh_first;
+		while (wqe && wqe->complete) {
+			rte_spinlock_lock(&qp->rq0.lock);
+			post_recv_cqe(qp, wqe, IBV_WC_SUCCESS);
+			rte_spinlock_unlock(&qp->rq0.lock);
+			wqe = qp->rq0.active_head.tqh_first;
+		}
 	}
 }	/* process_send */
 

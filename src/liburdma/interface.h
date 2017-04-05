@@ -106,7 +106,7 @@ struct usiw_recv_wqe {
 	struct ee_state *remote_ep;
 	TAILQ_ENTRY(usiw_recv_wqe) active;
 	uint32_t msn;
-	uint32_t index;
+	bool complete;
 	size_t total_request_size;
 	size_t recv_size;
 	size_t input_size;
@@ -191,6 +191,7 @@ struct usiw_recv_wqe_queue {
 	struct rte_ring *ring;
 	struct rte_ring *free_ring;
 	TAILQ_HEAD(usiw_recv_wqe_active_head, usiw_recv_wqe) active_head;
+	uint32_t next_msn;
 	char *storage;
 	int max_wr;
 	int max_sge;
@@ -208,7 +209,6 @@ enum {
 };
 
 struct ee_state {
-	uint32_t expected_recv_msn;
 	uint32_t expected_read_msn;
 	uint32_t expected_ack_msn;
 	uint32_t next_send_msn;
