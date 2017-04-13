@@ -145,6 +145,7 @@ urdma_accl_post_recvv(struct ibv_qp *ib_qp, const struct iovec *iov, size_t iov_
 	wqe->msn = 0;
 	wqe->recv_size = 0;
 	wqe->input_size = 0;
+	wqe->complete = false;
 	x = rte_ring_enqueue(qp->rq0.ring, wqe);
 	assert(x == 0);
 
@@ -326,6 +327,7 @@ static int
 usiw_query_device(struct ibv_context *context,
 		struct ibv_device_attr *device_attr)
 {
+	struct usiw_context *ourctx;
 	struct ibv_query_device cmd;
 	__attribute__((unused)) uint64_t raw_fw_ver;
 	int ret;
@@ -337,6 +339,7 @@ usiw_query_device(struct ibv_context *context,
 	ret = ibv_cmd_query_device(context, device_attr,
 			&raw_fw_ver, &cmd, sizeof(cmd));
 
+	ourctx = usiw_get_context(context);
 	strncpy(device_attr->fw_ver, PACKAGE_VERSION,
 		sizeof(device_attr->fw_ver));
 	device_attr->max_mr_size = MAX_MR_SIZE;
@@ -344,7 +347,7 @@ usiw_query_device(struct ibv_context *context,
 	device_attr->vendor_id = URDMA_VENDOR_ID;
 	device_attr->vendor_part_id = URDMA_VENDOR_PART_ID;
 	device_attr->hw_ver = 0;
-	device_attr->max_qp = DPDKV_MAX_QP - 1;
+	device_attr->max_qp = ourctx->dev->max_qp;
 	device_attr->max_qp_wr = RTE_MIN(MAX_SEND_WR, MAX_RECV_WR);
 	device_attr->device_cap_flags = 0;
 	device_attr->max_sge = DPDK_VERBS_IOV_LEN_MAX;
@@ -367,7 +370,7 @@ usiw_query_device(struct ibv_context *context,
 	device_attr->max_mcast_grp = 0;
 	device_attr->max_mcast_qp_attach = 0;
 	device_attr->max_total_mcast_qp_attach = 0;
-	device_attr->max_ah = MAX_ARP_ENTRIES;
+	device_attr->max_ah = 0;
 	device_attr->max_fmr = 0;
 	device_attr->max_srq = 0;
 	device_attr->max_pkeys = 0;
@@ -785,6 +788,7 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 	struct usiw_context *ctx;
 	struct ee_state *ee;
 	struct usiw_qp *qp;
+	size_t sz;
 	int retval;
 
 	if ((qp_init_attr->qp_type != IBV_QPT_UD
@@ -813,8 +817,10 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 	if (!qp_init_attr->cap.max_recv_sge) {
 		qp_init_attr->cap.max_recv_sge = 3;
 	}
-	if (qp_init_attr->cap.max_inline_data > sizeof(struct iovec)
-					* qp_init_attr->cap.max_send_sge) {
+	sz = qp_init_attr->cap.max_send_sge * sizeof(struct iovec);
+	if (!qp_init_attr->cap.max_inline_data < sz) {
+		qp_init_attr->cap.max_inline_data = sz;
+	} else if (qp_init_attr->cap.max_inline_data > sz) {
 		qp_init_attr->cap.max_send_sge
 			= (qp_init_attr->cap.max_inline_data - 1)
 			/ sizeof(struct iovec) + 1;
@@ -850,12 +856,6 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 	atomic_store(&qp->shm_qp->conn_state, usiw_qp_unbound);
 	qp->ctx = ctx;
 	qp->dev = ctx->dev;
-	qp->stats.recv_max_burst_size = RX_BURST_SIZE;
-	qp->stats.recv_count_histo = calloc(qp->stats.recv_max_burst_size + 1,
-			sizeof(*qp->stats.recv_count_histo));
-	if (!qp->stats.recv_count_histo) {
-		goto free_kernel_qp;
-	}
 
 	qp->send_cq = container_of(qp_init_attr->send_cq,
 			struct usiw_cq, ib_cq);
@@ -867,7 +867,6 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 		atomic_fetch_add(&qp->recv_cq->refcnt, 1);
 		qp->recv_cq->qp_count++;
 	}
-	qp->txq_end = qp->txq;
 	qp->timer_last = 0;
 	qp->pd = container_of(pd, struct usiw_mr_table, pd);
 
@@ -876,7 +875,7 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 			qp_init_attr->cap.max_send_sge);
 	if (retval != 0) {
 		errno = -retval;
-		goto free_kernel_qp;
+		goto free_txq;
 	}
 	qp->sq.max_inline = qp_init_attr->cap.max_inline_data;
 
@@ -885,16 +884,14 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 			qp_init_attr->cap.max_recv_sge);
 	if (retval != 0) {
 		errno = -retval;
-		goto free_kernel_qp;
+		goto free_txq;
 	}
 
 	qp->readresp_store = NULL;
-	TAILQ_INIT(&qp->readresp_active);
-	TAILQ_INIT(&qp->readresp_empty);
-	qp->ird_active = 0;
+	qp->readresp_head_msn = 1;
+	qp->ord_active = 0;
 
 	ee = &qp->remote_ep;
-	ee->expected_recv_msn = 1;
 	ee->expected_read_msn = 1;
 	ee->expected_ack_msn = 1;
 	ee->next_send_msn = 1;
@@ -916,6 +913,8 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 	LIST_INSERT_HEAD(&qp->ctx->qp_active, qp, ctx_entry);
 	return &qp->ib_qp;
 
+free_txq:
+	free(qp->txq);
 free_kernel_qp:
 	ibv_cmd_destroy_qp(&qp->ib_qp);
 return_user_qp:
@@ -1222,6 +1221,7 @@ usiw_post_recv(struct ibv_qp *ib_qp, struct ibv_recv_wr *wr,
 		wqe->msn = 0;
 		wqe->recv_size = 0;
 		wqe->input_size = 0;
+		wqe->complete = false;
 		x = rte_ring_enqueue(qp->rq0.ring, wqe);
 		assert(x == 0);
 	}

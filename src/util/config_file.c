@@ -59,11 +59,70 @@
 #define DEFAULT_MTU 1500
 #define JUMBO_MTU 9000
 
+
+static int
+get_int_value(struct json_object *parent, int index,
+		const char *name, int min, int max, int def, int *val)
+{
+	struct json_object *obj;
+
+	if (json_object_object_get_ex(parent, name, &obj)) {
+		if (!json_object_is_type(obj, json_type_int)
+				&& !json_object_is_type(obj,
+							json_type_string)) {
+			fprintf(stderr,
+				"Configuration error: port %d field \"%s\" is not integer\n",
+				index, name);
+			return -EINVAL;
+		}
+		*val = json_object_get_int(obj);
+		if (*val < min || *val > max) {
+			fprintf(stderr, "Configuration error: port %d field \"%s\" (%u) must be in range [%u, %u]\n",
+					index, name, *val, min, max);
+			return -EINVAL;
+		}
+	} else {
+		*val = def;
+	}
+
+	return 0;
+} /* get_int_value */
+
+
+static int
+get_uint_value(struct json_object *parent, int index,
+		const char *name, unsigned int min, unsigned int max,
+		unsigned int def, unsigned int *val)
+{
+	struct json_object *obj;
+
+	if (json_object_object_get_ex(parent, name, &obj)) {
+		if (!json_object_is_type(obj, json_type_int)
+				&& !json_object_is_type(obj,
+							json_type_string)) {
+			fprintf(stderr,
+				"Configuration error: port %d field \"%s\" is not integer\n",
+				index, name);
+			return -EINVAL;
+		}
+		*val = json_object_get_int(obj);
+		if (*val < min || *val > max) {
+			fprintf(stderr, "Configuration error: port %d field \"%s\" (%u) must be in range [%u, %u]\n",
+					index, name, *val, min, max);
+			return -EINVAL;
+		}
+	} else {
+		*val = def;
+	}
+
+	return 0;
+} /* get_uint_value */
+
 int
 urdma__config_file_get_ports(struct usiw_config *config,
 			     struct usiw_port_config **port_config)
 {
-	struct json_object *ports, *port, *ipv4, *mtu;
+	struct json_object *ports, *port, *obj;
 	int port_count, i;
 
 	if (!json_object_object_get_ex(config->root, "ports", &ports)) {
@@ -88,26 +147,26 @@ urdma__config_file_get_ports(struct usiw_config *config,
 					i);
 			return -EINVAL;
 		}
-		if (!json_object_object_get_ex(port, "ipv4_address", &ipv4)) {
+		if (!json_object_object_get_ex(port, "ipv4_address", &obj)) {
 			fprintf(stderr, "Configuration error: port has no \"ipv4_address\" field\n");
 			return -EINVAL;
 		}
-		if (!json_object_is_type(ipv4, json_type_string)) {
+		if (!json_object_is_type(obj, json_type_string)) {
 			fprintf(stderr, "Configuration error: ipv4_address is not string\n");
 			return -EINVAL;
 		}
 		strncpy((*port_config)[i].ipv4_address,
-				json_object_get_string(ipv4),
+				json_object_get_string(obj),
 				ipv4_addr_len_max);
 
-		if (json_object_object_get_ex(port, "mtu", &mtu)) {
-			if (!json_object_is_type(mtu, json_type_int)
-					&& !json_object_is_type(mtu,
+		if (json_object_object_get_ex(port, "mtu", &obj)) {
+			if (!json_object_is_type(obj, json_type_int)
+					&& !json_object_is_type(obj,
 						json_type_string)) {
 				fprintf(stderr, "Configuration error: port %d mtu is not integer\n", i);
 				return -EINVAL;
 			}
-			(*port_config)[i].mtu = json_object_get_int(mtu);
+			(*port_config)[i].mtu = json_object_get_int(obj);
 			if ((*port_config)[i].mtu != DEFAULT_MTU
 					&& (*port_config)[i].mtu != JUMBO_MTU) {
 				fprintf(stderr, "Configuration error: port %d mtu %u invalid; expected 1500 or 9000\n",
@@ -116,6 +175,33 @@ urdma__config_file_get_ports(struct usiw_config *config,
 			}
 		} else {
 			(*port_config)[i].mtu = DEFAULT_MTU;
+		}
+
+		if (get_int_value(port, i, "max_qp", 1, UINT16_MAX, -1,
+				&(*port_config)[i].max_qp) < 0) {
+			return -EINVAL;
+		}
+		if (get_uint_value(port, i, "rx_desc_count",
+					1, UINT_MAX, UINT_MAX,
+					&(*port_config)[i].rx_desc_count) < 0) {
+			return -EINVAL;
+		}
+		if (get_uint_value(port, i, "rx_burst_size",
+					1, (*port_config)[i].rx_desc_count,
+					((*port_config)[i].rx_desc_count > 32)
+					? (*port_config)[i].rx_desc_count : 32,
+					&(*port_config)[i].rx_burst_size) < 0) {
+			return -EINVAL;
+		}
+		if (get_uint_value(port, i, "tx_desc_count",
+					1, UINT_MAX, UINT_MAX,
+					&(*port_config)[i].tx_desc_count) < 0) {
+			return -EINVAL;
+		}
+		if (get_uint_value(port, i, "tx_burst_size",
+					1, (*port_config)[i].tx_desc_count, 8,
+					&(*port_config)[i].tx_burst_size) < 0) {
+			return -EINVAL;
 		}
 	}
 

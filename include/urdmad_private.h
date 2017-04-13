@@ -98,6 +98,10 @@ struct urdmad_qp {
 
 	uint16_t rx_desc_count;
 		/**< Hardware receive descriptors on this RX queue. */
+	uint16_t rx_burst_size;
+		/**< Size of array passed to rte_eth_rx_burst(). */
+	uint16_t tx_burst_size;
+		/**< Size of array passed to rte_eth_tx_burst(). */
 	uint16_t mtu;
 		/**< Device MTU. */
 
@@ -132,7 +136,10 @@ struct urdmad_sock_hello_req {
 
 struct urdmad_sock_hello_resp {
 	struct urdmad_sock_msg hdr;
+	uint16_t max_lcore;
+	uint16_t device_count;
 	uint32_t lcore_mask[RTE_MAX_LCORE / 32];
+	uint16_t max_qp[];
 };
 
 union urdmad_sock_any_msg {

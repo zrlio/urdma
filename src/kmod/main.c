@@ -654,6 +654,8 @@ static struct siw_dev *siw_device_create(struct net_device *netdev)
 	ofa_dev->iwcm->add_ref = siw_qp_get_ref;
 	ofa_dev->iwcm->rem_ref = siw_qp_put_ref;
 	ofa_dev->iwcm->get_qp = siw_get_ofaqp;
+	strncpy(ofa_dev->iwcm->ifname, netdev->name,
+						sizeof(ofa_dev->iwcm->ifname));
 	/*
 	 * set and register sw version + user if type
 	 */

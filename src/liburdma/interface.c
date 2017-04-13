@@ -281,6 +281,7 @@ usiw_recv_wqe_queue_init(uint32_t qpn, struct usiw_recv_wqe_queue *q,
 	rte_spinlock_init(&q->lock);
 	q->max_wr = max_recv_wr;
 	q->max_sge = max_recv_sge;
+	q->next_msn = 1;
 	return 0;
 } /* usiw_recv_wqe_queue_init */
 
@@ -370,7 +371,7 @@ enqueue_ether_frame(struct rte_mbuf *sendmsg, unsigned int ether_type,
 #endif
 
 	*(qp->txq_end++) = sendmsg;
-	if (qp->txq_end == qp->txq + TX_BURST_SIZE) {
+	if (qp->txq_end == qp->txq + qp->shm_qp->tx_burst_size) {
 		RTE_LOG(DEBUG, USER1, "TX queue filled; early flush forced\n");
 		flush_tx_queue(qp);
 	}
@@ -808,7 +809,7 @@ rq_flush(struct usiw_qp *qp)
 
 	rte_spinlock_lock(&qp->rq0.lock);
 	while (rte_ring_dequeue(qp->rq0.ring, (void **)&wqe) == 0) {
-		wqe->msn = qp->remote_ep.expected_recv_msn++;
+		wqe->msn = qp->rq0.next_msn++;
 		usiw_recv_wqe_queue_add_active(&qp->rq0, wqe);
 	}
 	TAILQ_FOR_EACH(wqe, &qp->rq0.active_head, active, prev) {
@@ -981,8 +982,8 @@ do_rdmap_read_request(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 		return;
 	}
 
-	if (qp->ird_active >= qp->shm_qp->ird_max) {
-		/* Cannot issue more than ird_max simultaneous RDMA READ
+	if (qp->ord_active >= qp->shm_qp->ord_max) {
+		/* Cannot issue more than ord_max simultaneous RDMA READ
 		 * Requests. */
 		return;
 	} else if (wqe->remote_ep->send_next_psn
@@ -1003,7 +1004,7 @@ do_rdmap_read_request(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 		atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
 		return;
 	}
-	qp->ird_active++;
+	qp->ord_active++;
 
 	sendmsg = rte_pktmbuf_alloc(qp->dev->tx_ddp_mempool);
 
@@ -1132,6 +1133,25 @@ memcpy_to_iov(struct iovec * restrict dest, size_t iov_count,
 } /* memcpy_to_iov */
 
 
+/** Pull all recv WQEs off of the ring for the given qp. */
+static void
+dequeue_recv_wqes(struct usiw_qp *qp)
+{
+	struct usiw_recv_wqe *wqe[qp->rq0.max_wr + 1];
+	unsigned int i, ret;
+
+	while ((ret = rte_ring_dequeue_burst(qp->rq0.ring, (void **)wqe,
+						qp->rq0.max_wr + 1)) > 0) {
+		for (i = 0; i < ret; i++) {
+			wqe[i]->remote_ep = &qp->remote_ep;
+			wqe[i]->msn = qp->rq0.next_msn++;
+			usiw_recv_wqe_queue_add_active(&qp->rq0, wqe[i]);
+		}
+	}
+	assert(rte_ring_empty(qp->rq0.ring));
+} /* dequeue_recv_wqes */
+
+
 static void
 process_send(struct usiw_qp *qp, struct packet_context *orig)
 {
@@ -1139,45 +1159,37 @@ process_send(struct usiw_qp *qp, struct packet_context *orig)
 	struct rdmap_untagged_packet *rdmap
 		= (struct rdmap_untagged_packet *)orig->rdmap;
 	struct ee_state *ee = orig->src_ep;
-	uint32_t msn;
+	uint32_t msn, expected_msn;
 	size_t offset;
 	size_t payload_length;
 	int ret;
 
-	ret = usiw_recv_wqe_queue_lookup(&qp->rq0,
-			rte_be_to_cpu_32(rdmap->msn), &wqe);
+	if (!qp->rq0.active_head.tqh_first)
+		dequeue_recv_wqes(qp);
+
+	msn = rte_be_to_cpu_32(rdmap->msn);
+	ret = usiw_recv_wqe_queue_lookup(&qp->rq0, msn, &wqe);
 	assert(ret != -EINVAL);
 	if (ret < 0) {
-		msn = rte_be_to_cpu_32(rdmap->msn);
-		if (msn == ee->expected_recv_msn) {
-			ee->expected_recv_msn++;
-		} else if (serial_less_32(msn, ee->expected_recv_msn)) {
+		if (qp->rq0.active_head.tqh_first) {
 			/* This is a duplicate of a previously received
-			 * message */
+			 * message --- should never happen since TRP will not
+			 * give us a duplicate packet. */
+			expected_msn = qp->rq0.active_head.tqh_first->msn;
+			RTE_LOG(INFO, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Received msn=%" PRIu32 " but expected msn=%" PRIu32 "\n",
+					qp->shm_qp->dev_id, qp->shm_qp->qp_id,
+					msn, expected_msn);
 			do_rdmap_terminate(qp, orig,
 					ddp_error_untagged_invalid_msn);
-			return;
 		} else {
-			/* else, we received this message out of order */
-			assert(serial_greater_32(msn, ee->expected_recv_msn));
-			RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Received msn=%" PRIu32 " but expected msn=%" PRIu32 "\n",
-					qp->shm_qp->dev_id, qp->shm_qp->qp_id,
-					msn, ee->expected_recv_msn);
-		}
-
-		ret = rte_ring_dequeue(qp->rq0.ring, (void **)&wqe);
-		if (ret != 0) {
+			RTE_LOG(INFO, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Received SEND msn=%" PRIu32 " to empty receive queue\n",
+					qp->dev->portid,
+					qp->shm_qp->rx_queue, msn);
+			assert(rte_ring_empty(qp->rq0.ring));
 			do_rdmap_terminate(qp, orig,
 					ddp_error_untagged_no_buffer);
-			rte_exit(EXIT_FAILURE, "rte_ring_dequeue rq0.ring port %u queue %u: %s\n",
-					qp->dev->portid,
-					qp->shm_qp->rx_queue, rte_strerror(-ret));
 		}
-
-		wqe->remote_ep = ee;
-		wqe->msn = msn;
-
-		usiw_recv_wqe_queue_add_active(&qp->rq0, wqe);
+		return;
 	}
 
 	offset = rte_be_to_cpu_32(rdmap->mo);
@@ -1203,12 +1215,24 @@ process_send(struct usiw_qp *qp, struct packet_context *orig)
 	memcpy_to_iov(wqe->iov, wqe->iov_count, PAYLOAD_OF(rdmap),
 			payload_length, offset);
 	wqe->recv_size += payload_length;
-
 	assert(wqe->input_size == 0 || wqe->recv_size <= wqe->input_size);
 	if (wqe->recv_size == wqe->input_size) {
-		rte_spinlock_lock(&qp->rq0.lock);
-		post_recv_cqe(qp, wqe, IBV_WC_SUCCESS);
-		rte_spinlock_unlock(&qp->rq0.lock);
+		wqe->complete = true;
+	}
+
+	/* Post completion, but only if there are no holes in the LLP packet
+	 * sequence. This ensures that even in the case of missing packets,
+	 * we maintain the ordering between received Tagged and Untagged
+	 * frames. Walk the queue starting at the head to make sure we post
+	 * completions that we had previously deferred. */
+	if (serial_less_32(orig->psn, wqe->remote_ep->recv_ack_psn)) {
+		wqe = qp->rq0.active_head.tqh_first;
+		while (wqe && wqe->complete) {
+			rte_spinlock_lock(&qp->rq0.lock);
+			post_recv_cqe(qp, wqe, IBV_WC_SUCCESS);
+			rte_spinlock_unlock(&qp->rq0.lock);
+			wqe = qp->rq0.active_head.tqh_first;
+		}
 	}
 }	/* process_send */
 
@@ -1222,10 +1246,16 @@ respond_rdma_read(struct usiw_qp *qp)
 	size_t dgram_length;
 	size_t payload_length;
 	uint16_t mtu = qp->shm_qp->mtu;
+	unsigned long msn, end;
 	int count;
 
 	count = 0;
-	TAILQ_FOR_EACH(readresp, &qp->readresp_active, qp_entry, prev) {
+	for (msn = qp->readresp_head_msn, end = msn + qp->shm_qp->ird_max;
+							msn != end; ++msn) {
+		readresp = &qp->readresp_store[msn % qp->shm_qp->ird_max];
+		if (!readresp->active) {
+			break;
+		}
 		while (readresp->msg_size > 0
 				&& serial_less_32(readresp->sink_ep->send_next_psn,
 					readresp->sink_ep->send_max_psn)) {
@@ -1255,8 +1285,8 @@ respond_rdma_read(struct usiw_qp *qp)
 
 		if (readresp->msg_size == 0) {
 			/* Signal that this is done */
-			TAILQ_REMOVE(&qp->readresp_active, readresp, qp_entry);
-			TAILQ_INSERT_TAIL(&qp->readresp_empty, readresp, qp_entry);
+			readresp->active = false;
+			qp->readresp_head_msn++;
 		}
 	}
 	return count;
@@ -1275,14 +1305,18 @@ process_rdma_read_request(struct usiw_qp *qp, struct packet_context *orig)
 	struct usiw_mr *mr;
 
 	msn = rte_be_to_cpu_32(rdmap->untagged.msn);
-	if (msn != orig->src_ep->expected_read_msn) {
-		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> RDMA READ failure: expected MSN %" PRIu32 " received %" PRIu32 "\n",
+	if (msn < orig->src_ep->expected_read_msn
+			|| msn >= qp->readresp_head_msn + qp->shm_qp->ird_max) {
+		RTE_LOG(INFO, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> RDMA READ failure: expected MSN in range [%" PRIu32 ", %" PRIu32 "] received %" PRIu32 "\n",
 				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
-				orig->src_ep->expected_read_msn, msn);
+				orig->src_ep->expected_read_msn,
+				qp->readresp_head_msn + qp->shm_qp->ird_max,
+				msn);
 		do_rdmap_terminate(qp, orig, ddp_error_untagged_invalid_msn);
 		return;
 	}
-	orig->src_ep->expected_read_msn++;
+	if (msn == orig->src_ep->expected_read_msn)
+		orig->src_ep->expected_read_msn++;
 
 	rkey = rte_be_to_cpu_32(rdmap->source_stag);
 	candidate = usiw_mr_lookup(qp->pd, rkey);
@@ -1310,18 +1344,15 @@ process_rdma_read_request(struct usiw_qp *qp, struct packet_context *orig)
 		return;
 	}
 
-	readresp = qp->readresp_empty.tqh_first;
-	if (!readresp) {
-		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> RDMA READ failure: exceeded ord_max %" PRIu8 "\n",
-				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
-				qp->shm_qp->ord_max);
+	readresp = &qp->readresp_store[msn % qp->shm_qp->ird_max];
+	if (readresp->active) {
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> RDMA READ failure: duplicate MSN %" PRIu32 "\n",
+				qp->shm_qp->dev_id, qp->shm_qp->qp_id, msn);
 		do_rdmap_terminate(qp, orig,
 				rdmap_error_remote_stream_catastrophic);
 		return;
 	}
-	TAILQ_REMOVE(&qp->readresp_empty, readresp, qp_entry);
-	TAILQ_INSERT_TAIL(&qp->readresp_active, readresp, qp_entry);
-
+	readresp->active = true;
 	readresp->vaddr = (void *)vaddr;
 	readresp->msg_size = rdma_length;
 	readresp->sink_stag = rdmap->untagged.head.sink_stag;
@@ -1370,8 +1401,8 @@ process_rdma_read_response(struct usiw_qp *qp, struct packet_context *orig)
 			qp_free_send_wqe(qp, read_wqe, true);
 		}
 		rte_spinlock_unlock(&qp->sq.lock);
-		assert(qp->ird_active > 0);
-		qp->ird_active--;
+		assert(qp->ord_active > 0);
+		qp->ord_active--;
 	}
 }	/* process_rdma_read_response */
 
@@ -1790,7 +1821,7 @@ process_data_packet(struct usiw_qp *qp, struct rte_mbuf *mbuf)
 		/* We detected a sequence number gap.  Try to build a
 		 * contiguous range so we can send a SACK to lower the number
 		 * of retransmissions. */
-		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> receive psn %" PRIu32 "; next expected psn %" PRIu32 "\n",
+		RTE_LOG(INFO, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> receive psn %" PRIu32 "; next expected psn %" PRIu32 "\n",
 				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 				ctx.psn,
 				ctx.src_ep->recv_ack_psn);
@@ -1909,17 +1940,17 @@ progress_send_wqe(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 static int
 process_receive_queue(struct usiw_qp *qp, void *prefetch_addr, uint64_t *now)
 {
-	struct rte_mbuf *rxmbuf[RX_BURST_SIZE];
+	struct rte_mbuf *rxmbuf[qp->shm_qp->rx_burst_size];
 	uint16_t rx_count, pkt, i;
 
 	/* Get burst of RX packets */
 	if (qp->dev->flags & port_fdir) {
 		rx_count = rte_eth_rx_burst(qp->dev->portid,
 				qp->shm_qp->rx_queue,
-				rxmbuf, RX_BURST_SIZE);
+				rxmbuf, qp->shm_qp->rx_burst_size);
 	} else if (qp->remote_ep.rx_queue) {
 		rx_count = rte_ring_dequeue_burst(qp->remote_ep.rx_queue,
-				(void **)rxmbuf, RX_BURST_SIZE);
+				(void **)rxmbuf, qp->shm_qp->rx_burst_size);
 	} else {
 		rx_count = 0;
 	}
@@ -1970,8 +2001,7 @@ progress_qp(struct usiw_qp *qp)
 		}
 		assert(send_wqe->state != SEND_WQE_INIT);
 		progress_send_wqe(qp, send_wqe);
-		if (send_wqe->state == SEND_WQE_TRANSFER
-				|| send_wqe->opcode == usiw_wr_write) {
+		if (send_wqe->state == SEND_WQE_TRANSFER) {
 			scount++;
 		}
 	}
@@ -2045,7 +2075,9 @@ usiw_do_destroy_qp(struct usiw_qp *qp)
 	msg.hdr.qp_id = rte_cpu_to_be_16(qp->shm_qp->qp_id);
 	msg.ptr = rte_cpu_to_be_64((uintptr_t)qp->shm_qp);
 	send(qp->dev->urdmad_fd, &msg, sizeof(msg), 0);
-	//free(qp);
+	free(qp->stats.recv_count_histo);
+	free(qp->txq);
+	free(qp);
 } /* usiw_do_destroy_qp */
 
 
@@ -2062,14 +2094,7 @@ start_qp(struct usiw_qp *qp)
 		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Set up readresp_store failed: %s\n",
 						qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 						strerror(errno));
-		atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
-		rte_spinlock_unlock(&qp->shm_qp->conn_event_lock);
-		return;
-	}
-	for (x = 0; x < qp->shm_qp->ird_max; ++x) {
-		TAILQ_INSERT_TAIL(&qp->readresp_empty,
-				&qp->readresp_store[x],
-				qp_entry);
+		goto err;
 	}
 
 	/* FIXME: Get this from the peer */
@@ -2081,16 +2106,44 @@ start_qp(struct usiw_qp *qp)
 		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Set up tx_pending failed: %s\n",
 						qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 						strerror(errno));
-		atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
-		free(qp->readresp_store);
-		rte_spinlock_unlock(&qp->shm_qp->conn_event_lock);
-		return;
+		goto free_readresp_store;
 	}
 	qp->remote_ep.tx_head = qp->remote_ep.tx_pending;
 
+	qp->txq = calloc(qp->shm_qp->tx_burst_size, sizeof(*qp->txq));
+	if (!qp->txq) {
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Set up txq failed: %s\n",
+						qp->shm_qp->dev_id, qp->shm_qp->qp_id,
+						strerror(errno));
+		goto free_tx_pending;
+	}
+	qp->txq_end = qp->txq;
+
+	qp->stats.recv_max_burst_size = qp->shm_qp->rx_burst_size;
+	qp->stats.recv_count_histo = calloc(qp->stats.recv_max_burst_size + 1,
+			sizeof(*qp->stats.recv_count_histo));
+	if (!qp->stats.recv_count_histo) {
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Set up recv_count_histo failed: %s\n",
+						qp->shm_qp->dev_id, qp->shm_qp->qp_id,
+						strerror(errno));
+		goto free_txq;
+	}
+
 	atomic_store(&qp->shm_qp->conn_state, usiw_qp_running);
 	atomic_fetch_sub(&qp->ctx->qp_init_count, 1);
+	goto unlock;
+
+free_txq:
+	free(qp->txq);
+free_tx_pending:
+	free(qp->remote_ep.tx_pending);
+free_readresp_store:
+	free(qp->readresp_store);
+err:
+	atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
+unlock:
 	rte_spinlock_unlock(&qp->shm_qp->conn_event_lock);
+	return;
 } /* start_qp */
 
 
@@ -2132,7 +2185,6 @@ kni_loop(void *arg)
 	struct usiw_context *ctx;
 	struct usiw_driver *driver;
 	struct usiw_qp *qp, **qp_prev;
-	struct rte_mbuf *rxmbuf[RX_BURST_SIZE];
 	void *ctxs_to_add[NEW_CTX_MAX];
 	unsigned int i, count;
 	int portid, ret;

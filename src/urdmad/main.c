@@ -81,7 +81,6 @@ static uint32_t core_mask[RTE_MAX_LCORE / 32];
 static const unsigned int core_mask_shift = 5;
 static const uint32_t core_mask_mask = 31;
 
-
 static void init_core_mask(void)
 {
 	struct rte_config *config;
@@ -264,6 +263,14 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 	} else {
 		qp->rx_desc_count = rxq_info.nb_desc;
 	}
+	qp->rx_burst_size = dev->rx_burst_size;
+	if (qp->rx_burst_size > qp->rx_desc_count + 1) {
+		qp->rx_burst_size = qp->rx_desc_count + 1;
+	}
+	qp->tx_burst_size = dev->tx_burst_size;
+	if (qp->tx_burst_size > dev->tx_desc_count) {
+		qp->tx_burst_size = dev->tx_desc_count;
+	}
 	memcpy(&qp->remote_ether_addr, event->dst_ether, ETHER_ADDR_LEN);
 	if (dev->flags & port_fdir) {
 		memset(&fdirf, 0, sizeof(fdirf));
@@ -405,23 +412,31 @@ send_create_qp_resp(struct urdma_process *process, struct urdmad_qp *qp)
 static int
 handle_hello(struct urdma_process *process, struct urdmad_sock_hello_req *req)
 {
-	struct urdmad_sock_hello_resp resp;
+	struct urdmad_sock_hello_resp *resp;
 	ssize_t ret;
+	size_t resp_size;
 	int i;
 
 	if (!reserve_cores(rte_cpu_to_be_32(req->req_lcore_count),
 				process->core_mask))
 		return -1;
 
-	memset(&resp, 0, sizeof(resp));
-	resp.hdr.opcode = rte_cpu_to_be_32(urdma_sock_hello_resp);
-	for (i = 0; i < RTE_DIM(resp.lcore_mask); i++) {
-		resp.lcore_mask[i] = rte_cpu_to_be_32(process->core_mask[i]);
+	resp_size = sizeof(*resp) + driver->port_count * sizeof(*resp->max_qp);
+	resp = alloca(resp_size);
+	memset(resp, 0, resp_size);
+	resp->hdr.opcode = rte_cpu_to_be_32(urdma_sock_hello_resp);
+	resp->max_lcore = rte_cpu_to_be_16(RTE_MAX_LCORE);
+	resp->device_count = rte_cpu_to_be_16(driver->port_count);
+	for (i = 0; i < RTE_DIM(resp->lcore_mask); i++) {
+		resp->lcore_mask[i] = rte_cpu_to_be_32(process->core_mask[i]);
 	}
-	ret = send(process->fd.fd, &resp, sizeof(resp), 0);
+	for (i = 0; i < driver->port_count; ++i) {
+		resp->max_qp[i] = rte_cpu_to_be_16(driver->ports[i].max_qp);
+	}
+	ret = send(process->fd.fd, resp, resp_size, 0);
 	if (ret < 0) {
 		return ret;
-	} else if (ret == sizeof(resp)) {
+	} else if (ret == resp_size) {
 		return 0;
 	} else {
 		errno = EMSGSIZE;
@@ -615,13 +630,32 @@ kni_process_burst(struct usiw_port *port,
 } /* kni_process_burst */
 
 
+static void
+do_xchg_packets(struct usiw_port *port)
+{
+	struct rte_mbuf *rxmbuf[port->rx_burst_size];
+	unsigned int count;
+
+	count = rte_kni_rx_burst(port->kni,
+			rxmbuf, port->rx_burst_size);
+	if (count) {
+		rte_eth_tx_burst(port->portid, 0,
+			rxmbuf, count);
+	}
+
+	count = rte_eth_rx_burst(port->portid, 0,
+				rxmbuf, port->rx_burst_size);
+	if (count) {
+		kni_process_burst(port, rxmbuf, count);
+	}
+} /* do_xchng_packets */
+
+
 static int
 event_loop(void *arg)
 {
 	struct usiw_driver *driver = arg;
 	struct usiw_port *port;
-	struct rte_mbuf *rxmbuf[RX_BURST_SIZE];
-	unsigned int count;
 	int portid, ret;
 
 	while (1) {
@@ -633,18 +667,7 @@ event_loop(void *arg)
 				break;
 			}
 
-			count = rte_kni_rx_burst(port->kni,
-					rxmbuf, RX_BURST_SIZE);
-			if (count) {
-				rte_eth_tx_burst(port->portid, 0,
-					rxmbuf, count);
-			}
-
-			count = rte_eth_rx_burst(port->portid, 0,
-						rxmbuf, RX_BURST_SIZE);
-			if (count) {
-				kni_process_burst(port, rxmbuf, count);
-			}
+			do_xchg_packets(port);
 		}
 	}
 
@@ -652,7 +675,7 @@ event_loop(void *arg)
 }
 
 
-static int
+static void
 setup_base_filters(struct usiw_port *iface)
 {
 	struct rte_eth_fdir_filter_info filter_info;
@@ -671,14 +694,13 @@ setup_base_filters(struct usiw_port *iface)
 	retval = rte_eth_dev_filter_ctrl(iface->portid, RTE_ETH_FILTER_FDIR,
 			RTE_ETH_FILTER_SET, &filter_info);
 	if (retval != 0) {
-		RTE_LOG(CRIT, USER1, "Could not set fdir filter info: %s\n",
-				strerror(-retval));
+		rte_exit(EXIT_FAILURE, "Could not set fdir filter info on port %" PRIu16 ": %s\n",
+				iface->portid, strerror(-retval));
 	}
-	return retval;
 } /* setup_base_filters */
 
 
-static int
+static void
 usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 {
 	static const uint32_t rx_checksum_offloads
@@ -694,16 +716,15 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 	int retval;
 	uint16_t q;
 
-	/* *** FIXME: *** LOTS of resource leaks on failure */
-
 	socket_id = rte_eth_dev_socket_id(iface->portid);
 
-	if (iface->portid >= rte_eth_dev_count())
-		return -EINVAL;
+	assert(iface->portid < rte_eth_dev_count());
 
 	memset(&port_conf, 0, sizeof(port_conf));
 	iface->flags = 0;
-	port_conf.rxmode.max_rx_pkt_len = ETHER_MAX_LEN;
+	port_conf.rxmode.max_rx_pkt_len
+			= port_config->mtu + ETHER_HDR_LEN + ETHER_CRC_LEN;
+	port_conf.rxmode.jumbo_frame = !!(port_config->mtu > 1500);
 	if ((iface->dev_info.tx_offload_capa & tx_checksum_offloads)
 			== tx_checksum_offloads) {
 		iface->flags |= port_checksum_offload;
@@ -725,29 +746,85 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 	} else {
 		port_conf.fdir_conf.mode = RTE_FDIR_MODE_NONE;
 	}
-	iface->max_qp = URDMA_MAX_QP;
-	fprintf(stderr, "max_rx_queues %d\n", iface->dev_info.max_rx_queues);
-	if (iface->max_qp > iface->dev_info.max_rx_queues) {
-		iface->max_qp = iface->dev_info.max_rx_queues;
-	}
-	fprintf(stderr, "max_tx_queues %d\n", iface->dev_info.max_tx_queues);
-	if (iface->max_qp > iface->dev_info.max_tx_queues) {
-		iface->max_qp = iface->dev_info.max_tx_queues;
-	}
 
-	/* TODO: Do performance testing to determine optimal descriptor
-	 * counts */
-	/* FIXME: Retry mempool allocations with smaller amounts until it
-	 * succeeds, and then base max_qp and rx/tx_desc_count based on that */
-	iface->rx_desc_count = iface->dev_info.rx_desc_lim.nb_max;
-	if (iface->rx_desc_count > RX_DESC_COUNT_MAX) {
-		iface->rx_desc_count = RX_DESC_COUNT_MAX;
+	/* Calculate max_qp.  We map queue pairs 1:1 with hardware queues for
+	 * now, with 1 reserved for urdmad ARP/CM usage.  Note that at least
+	 * i40e reserves queues for VMDq and makes them unavailable for general
+	 * use, so we must subtract those queues from the available queues. */
+	if (iface->dev_info.max_vmdq_pools > 0
+			&& iface->dev_info.vmdq_queue_base > 0) {
+		RTE_LOG(INFO, USER1,
+			"port %" PRIu16 " reserves %" PRIu16 " queues for VMDq\n",
+			iface->portid, iface->dev_info.vmdq_queue_num);
+		iface->dev_info.max_rx_queues -= iface->dev_info.vmdq_queue_num;
+		iface->dev_info.max_tx_queues -= iface->dev_info.vmdq_queue_num;
 	}
-	fprintf(stderr, "rx_desc_count %" PRIu16 "\n", iface->rx_desc_count);
-	iface->tx_desc_count = iface->dev_info.tx_desc_lim.nb_max;
-	if (iface->tx_desc_count > TX_DESC_COUNT_MAX) {
-		iface->tx_desc_count = TX_DESC_COUNT_MAX;
+	iface->max_qp = port_config->max_qp > 0 ? port_config->max_qp
+		: RTE_MIN(iface->dev_info.max_rx_queues,
+					iface->dev_info.max_tx_queues);
+	if (iface->max_qp >= iface->dev_info.max_rx_queues) {
+		rte_exit(EXIT_FAILURE,
+			 "port %" PRIu16 " configured max_qp %" PRIu16 " > max_rx_queues %" PRIu16 "\n",
+			 iface->portid, iface->max_qp,
+			 iface->dev_info.max_rx_queues - 1);
 	}
+	if (iface->max_qp >= iface->dev_info.max_tx_queues) {
+		rte_exit(EXIT_FAILURE,
+			 "port %" PRIu16 " configured max_qp %" PRIu16 " > max_tx_queues %" PRIu16 "\n",
+			 iface->portid, iface->max_qp,
+			 iface->dev_info.max_tx_queues - 1);
+	}
+	fprintf(stderr, "port %" PRIu16 " max_qp %" PRIu16 "\n",
+			iface->portid, iface->max_qp);
+
+	/* TODO: Auto-tuning of rx_desc_count and tx_desc_count */
+	if (port_config->rx_desc_count == UINT_MAX) {
+		iface->rx_desc_count = iface->dev_info.rx_desc_lim.nb_min;
+	} else if (port_config->rx_desc_count > iface->dev_info.rx_desc_lim.nb_max) {
+		rte_exit(EXIT_FAILURE,
+			 "port %" PRIu16 " configured rx_desc_count %" PRIu16 " > rx_desc_lim.nb_max %" PRIu16 "\n",
+			 iface->portid, iface->rx_desc_count,
+			 iface->dev_info.rx_desc_lim.nb_max);
+	} else if (port_config->rx_desc_count < iface->dev_info.rx_desc_lim.nb_min) {
+		rte_exit(EXIT_FAILURE,
+			 "port %" PRIu16 " configured rx_desc_count %" PRIu16 " < rx_desc_lim.nb_min %" PRIu16 "\n",
+			 iface->portid, iface->rx_desc_count,
+			 iface->dev_info.rx_desc_lim.nb_min);
+	} else if (port_config->rx_desc_count % iface->dev_info.rx_desc_lim.nb_align) {
+		rte_exit(EXIT_FAILURE,
+			 "port %" PRIu16 " configured rx_desc_count %" PRIu16 " does not match alignment %" PRIu16 "\n",
+			 iface->portid, iface->rx_desc_count,
+			 iface->dev_info.rx_desc_lim.nb_align);
+	} else {
+		iface->rx_desc_count = port_config->rx_desc_count;
+	}
+	if (port_config->tx_desc_count == UINT_MAX) {
+		iface->tx_desc_count = iface->dev_info.tx_desc_lim.nb_min;
+	} else if (port_config->tx_desc_count > iface->dev_info.tx_desc_lim.nb_max) {
+		rte_exit(EXIT_FAILURE,
+			 "port %" PRIu16 " configured tx_desc_count %" PRIu16 " > tx_desc_lim.nb_max %" PRIu16 "\n",
+			 iface->portid, iface->tx_desc_count,
+			 iface->dev_info.tx_desc_lim.nb_max);
+	} else if (port_config->tx_desc_count < iface->dev_info.tx_desc_lim.nb_min) {
+		rte_exit(EXIT_FAILURE,
+			 "port %" PRIu16 " configured tx_desc_count %" PRIu16 " < tx_desc_lim.nb_min %" PRIu16 "\n",
+			 iface->portid, iface->tx_desc_count,
+			 iface->dev_info.tx_desc_lim.nb_min);
+	} else if (port_config->tx_desc_count % iface->dev_info.tx_desc_lim.nb_align) {
+		rte_exit(EXIT_FAILURE,
+			 "port %" PRIu16 " configured tx_desc_count %" PRIu16 " does not match alignment %" PRIu16 "\n",
+			 iface->portid, iface->tx_desc_count,
+			 iface->dev_info.tx_desc_lim.nb_align);
+	} else {
+		iface->tx_desc_count = port_config->tx_desc_count;
+	}
+	iface->rx_burst_size = port_config->rx_burst_size;
+	iface->tx_burst_size = port_config->tx_burst_size;
+	fprintf(stderr,
+		"port %" PRIu16 " tx_desc_count %" PRIu16 " rx_desc_count %" PRIu16 " rx_burst_size %" PRIu16 " tx_burst_size %" PRIu16 "\n",
+		iface->portid, iface->tx_desc_count,
+		iface->rx_desc_count, iface->rx_burst_size,
+		iface->tx_burst_size);
 
 	LIST_INIT(&iface->avail_qp);
 
@@ -773,7 +850,8 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 		2 * iface->max_qp * iface->rx_desc_count,
 		0, 0, RTE_PKTMBUF_HEADROOM + port_config->mtu, socket_id);
 	if (iface->rx_mempool == NULL)
-		rte_exit(EXIT_FAILURE, "Cannot create rx mempool with %u mbufs: %s\n",
+		rte_exit(EXIT_FAILURE, "Cannot create rx mempool for port %" PRIu16 " with %u mbufs: %s\n",
+				iface->portid,
 				2 * iface->max_qp * iface->rx_desc_count,
 				rte_strerror(rte_errno));
 
@@ -784,7 +862,8 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 		0, PENDING_DATAGRAM_INFO_SIZE,
 		RTE_PKTMBUF_HEADROOM + port_config->mtu, socket_id);
 	if (iface->tx_ddp_mempool == NULL)
-		rte_exit(EXIT_FAILURE, "Cannot create tx mempool with %u mbufs: %s\n",
+		rte_exit(EXIT_FAILURE, "Cannot create tx mempool for port %" PRIu16 " with %u mbufs: %s\n",
+				iface->portid,
 				2 * iface->max_qp * iface->tx_desc_count,
 				rte_strerror(rte_errno));
 
@@ -794,8 +873,12 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 	/* Configure the Ethernet device. */
 	retval = rte_eth_dev_configure(iface->portid, iface->max_qp + 1,
 			iface->max_qp + 1, &port_conf);
-	if (retval != 0)
-		return retval;
+	if (retval != 0) {
+		rte_exit(EXIT_FAILURE,
+			"Cannot configure port %" PRIu16 " with max_qp %" PRIu16 ": %s\n",
+			iface->portid, iface->max_qp,
+			rte_strerror(-retval));
+	}
 
 	rte_eth_promiscuous_disable(iface->portid);
 
@@ -803,7 +886,9 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 	retval = rte_eth_rx_queue_setup(iface->portid, 0, iface->rx_desc_count,
 			socket_id, NULL, iface->rx_mempool);
 	if (retval < 0)
-		return retval;
+		rte_exit(EXIT_FAILURE,
+			"Cannot setup port %" PRIu16 " rx queue 0: %s\n",
+			iface->portid, rte_strerror(-retval));
 
 	/* Data RX queue startup is deferred */
 	memcpy(&rxconf, &iface->dev_info.default_rxconf, sizeof(rxconf));
@@ -813,7 +898,9 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 				iface->rx_desc_count, socket_id, &rxconf,
 				iface->rx_mempool);
 		if (retval < 0) {
-			return retval;
+			rte_exit(EXIT_FAILURE,
+				"Cannot setup port %" PRIu16 " rx queue %" PRIu16 ": %s\n",
+				iface->portid, q, rte_strerror(-retval));
 		}
 	}
 
@@ -821,7 +908,9 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 	retval = rte_eth_tx_queue_setup(iface->portid, 0, iface->tx_desc_count,
 			socket_id, NULL);
 	if (retval < 0)
-		return retval;
+		rte_exit(EXIT_FAILURE,
+			"Cannot setup port %" PRIu16 " tx queue 0: %s\n",
+			iface->portid, rte_strerror(-retval));
 
 	/* Data TX queue requires checksum offload, and startup is deferred */
 	memcpy(&txconf, &iface->dev_info.default_txconf, sizeof(txconf));
@@ -838,19 +927,19 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 		retval = rte_eth_tx_queue_setup(iface->portid, q,
 				iface->tx_desc_count, socket_id, &txconf);
 		if (retval < 0)
-			return retval;
+			rte_exit(EXIT_FAILURE,
+				"Cannot setup port %" PRIu16 " tx queue %" PRIu16 ": %s\n",
+				iface->portid, q, rte_strerror(-retval));
 	}
 
 	if (iface->flags & port_fdir) {
-		retval = setup_base_filters(iface);
-		if (retval < 0) {
-			return retval;
-		}
+		setup_base_filters(iface);
 	}
 
 	retval = usiw_port_setup_kni(iface);
 	if (retval < 0) {
-		return retval;
+		rte_exit(EXIT_FAILURE, "Could not set port %u KNI interface: %s\n",
+				iface->portid, strerror(-retval));
 	}
 
 	retval = rte_eth_dev_set_mtu(iface->portid, port_config->mtu);
@@ -861,7 +950,10 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 	}
 	iface->mtu = port_config->mtu;
 
-	return rte_eth_dev_start(iface->portid);
+	retval = rte_eth_dev_start(iface->portid);
+	if (retval < 0)
+		rte_exit(EXIT_FAILURE, "Could not start port %u: %s\n",
+				iface->portid, strerror(-retval));
 } /* usiw_port_init */
 
 
@@ -983,12 +1075,7 @@ do_init_driver(void)
 				&driver->ports[portid].ether_addr);
 		rte_eth_dev_info_get(portid, &driver->ports[portid].dev_info);
 
-		retval = usiw_port_init(&driver->ports[portid],
-					&port_config[portid]);
-		if (retval < 0) {
-			rte_exit(EXIT_FAILURE, "Could not initialize port %u: %s\n",
-					portid, strerror(-retval));
-		}
+		usiw_port_init(&driver->ports[portid], &port_config[portid]);
 	}
 	rte_eal_remote_launch(event_loop, driver, driver->progress_lcore);
 	/* FIXME: cannot free driver beyond this point since it is being

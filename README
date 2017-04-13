@@ -102,3 +102,12 @@ Known Issues
 
  - The progress thread will use 100% CPU since it must busy-poll on the KNI
    interfaces (there is no way to sleep until the process gets an event).
+
+ - urdma follows the RFC 5040 ordering rules strictly, meaning that it
+   can place data segments out of order if it receives them out of
+   order. This in turn means that if two RDMA WRITE requests are made
+   on overlapping buffers, urdma may place a data segment from the first
+   *after* the corresponding data segment from the second, thus leading
+   to a torn write from the perspective of the application. Thus
+   applications must not post multiple transfer requests on overlapping
+   buffers simultaneously if they depend on the data ordering.

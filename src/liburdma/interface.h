@@ -62,10 +62,6 @@
 #include "list.h"
 #include "verbs.h"
 
-#define TX_BURST_SIZE 8
-#define RX_BURST_SIZE 32
-#define DPDKV_MAX_QP 64
-#define MAX_ARP_ENTRIES 32
 #define MAX_RECV_WR 1023
 #define MAX_SEND_WR 1023
 #define DPDK_VERBS_IOV_LEN_MAX 32
@@ -110,7 +106,7 @@ struct usiw_recv_wqe {
 	struct ee_state *remote_ep;
 	TAILQ_ENTRY(usiw_recv_wqe) active;
 	uint32_t msn;
-	uint32_t index;
+	bool complete;
 	size_t total_request_size;
 	size_t recv_size;
 	size_t input_size;
@@ -195,6 +191,7 @@ struct usiw_recv_wqe_queue {
 	struct rte_ring *ring;
 	struct rte_ring *free_ring;
 	TAILQ_HEAD(usiw_recv_wqe_active_head, usiw_recv_wqe) active_head;
+	uint32_t next_msn;
 	char *storage;
 	int max_wr;
 	int max_sge;
@@ -212,7 +209,6 @@ enum {
 };
 
 struct ee_state {
-	uint32_t expected_recv_msn;
 	uint32_t expected_read_msn;
 	uint32_t expected_ack_msn;
 	uint32_t next_send_msn;
@@ -244,6 +240,7 @@ struct read_response_state {
 	uint32_t msg_size;
 	uint32_t sink_stag; /* network byte order */
 	uint64_t sink_offset; /* host byte order */
+	bool active;
 	struct ee_state *sink_ep;
 	TAILQ_ENTRY(read_response_state) qp_entry;
 };
@@ -269,11 +266,11 @@ struct usiw_qp {
 	struct usiw_cq *send_cq;
 
 	/* txq_end points one entry beyond the last entry in the table
-	 * the table is full when txq_end == txq + TX_BURST_SIZE
+	 * the table is full when txq_end == txq + tx_burst_size
 	 * the burst should be flushed at that point
 	 */
 	struct rte_mbuf **txq_end;
-	struct rte_mbuf *txq[TX_BURST_SIZE];
+	struct rte_mbuf **txq;
 
 	struct usiw_send_wqe_queue sq;
 
@@ -284,9 +281,8 @@ struct usiw_qp {
 	struct usiw_recv_wqe_queue rq0;
 
 	struct read_response_state *readresp_store;
-	struct read_response_state_tailq_head readresp_active;
-	struct read_response_state_tailq_head readresp_empty;
-	uint8_t ird_active;
+	uint32_t readresp_head_msn;
+	uint8_t ord_active;
 
 	struct usiw_cq *recv_cq;
 	struct usiw_mr_table *pd;
@@ -369,6 +365,8 @@ struct usiw_driver {
 	struct rte_ring *new_ctxs;
 	int urdmad_fd;
 	uint32_t lcore_mask[RTE_MAX_LCORE / 32];
+	uint16_t device_count;
+	uint16_t *max_qp;
 };
 
 /** Starts the progress thread. */
