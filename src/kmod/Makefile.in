@@ -1,4 +1,4 @@
-# Makefile.in
+# @configure_input@
 
 # Userspace Software iWARP library for DPDK
 #
@@ -39,6 +39,10 @@
 
 SOURCES = ae.c backports.h cm.c cm.h debug.c debug.h main.c mem.c \
 	  obj.c obj.h qp.c urdma.h verbs.c verbs.h Kbuild
+
+ifeq ($(WANT_DEBUG),yes)
+export CONFIG_URDMA_DEBUG = y
+endif
 
 .PHONY: all
 all:

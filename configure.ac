@@ -136,6 +136,15 @@ if test ! -f ${KERNELDIR}/Makefile; then
 	AC_MSG_ERROR([urdma requires a kernel source tree.  Install kernel-devel or equivalent])
 fi
 
+AC_ARG_ENABLE([debug], [AS_HELP_STRING([--enable-debug],
+		[Enable debug prints by default])],
+	      [case ${enableval} in
+	       yes|no) WANT_DEBUG=${enableval} ;;
+	       *) AC_MSG_ERROR([Invalid value ${enableval} for --enable-debug]) ;;
+	       esac],
+	      [WANT_DEBUG=no])
+AC_SUBST([WANT_DEBUG])
+
 AC_ARG_ENABLE([werror], [AS_HELP_STRING([--enable-werror],
 	      [Treat compiler warnings as errors])],
 	      [case ${enable_werror} in
@@ -251,6 +260,7 @@ Using libdir: ${libdir}
 Using includedir: ${includedir}
 Using bindir: ${bindir}
 Using C compiler: ${CC} ${EXTRA_CFLAGS} ${CFLAGS} ${CPPFLAGS}
+Enable debug: ${WANT_DEBUG}
 
 You can now run 'make' to build and 'make install' to install.
 -----------------------------------------------------------------------
