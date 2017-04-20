@@ -53,6 +53,7 @@
 #include <sys/epoll.h>
 #include <sys/prctl.h>
 #include <sys/socket.h>
+#include <sys/timerfd.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -566,6 +567,38 @@ listen_data_ready(struct urdma_fd *listen_fd)
 
 
 static void
+timer_data_ready(struct urdma_fd *fd)
+{
+	struct rte_eth_stats stats;
+	unsigned int i;
+	uint64_t event_count;
+	int ret;
+
+	errno = EMSGSIZE;
+	ret = read(fd->fd, &event_count, sizeof(event_count));
+	if (ret < sizeof(event_count)) {
+		rte_exit(EXIT_FAILURE, "Error disarming timer: %s\n", strerror(errno));
+	}
+
+	for (i = 0; i < driver->port_count; i++) {
+		ret = rte_eth_stats_get(driver->ports[i].portid, &stats);
+		if (ret) {
+			continue;
+		}
+
+		if (stats.imissed || stats.ierrors || stats.oerrors
+							|| stats.rx_nombuf) {
+			RTE_LOG(NOTICE, USER1,
+				"port %u imissed=%" PRIu64 " ierrors=%" PRIu64 " oerrors=%" PRIu64 " rx_nombuf=%" PRIu64 "\n",
+				driver->ports[i].portid, stats.imissed,
+				stats.ierrors, stats.oerrors, stats.rx_nombuf);
+		}
+		rte_eth_stats_reset(driver->ports[i].portid);
+	}
+} /* timer_data_ready */
+
+
+static void
 do_poll(int timeout)
 {
 	struct epoll_event event;
@@ -1009,12 +1042,41 @@ setup_socket(const char *path)
 
 
 static void
+setup_timer(int interval_ms)
+{
+	struct itimerspec tv;
+	int ret;
+
+	driver->timer.fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
+	if (driver->timer.fd < 0) {
+		rte_exit(EXIT_FAILURE, "Could not open timer fd: %s\n",
+				strerror(errno));
+	}
+
+	tv.it_interval.tv_sec = interval_ms / 1000;
+	tv.it_interval.tv_nsec = (interval_ms % 1000) * 1000000;
+	memcpy(&tv.it_value, &tv.it_interval, sizeof(tv.it_value));
+
+	if (timerfd_settime(driver->timer.fd, 0, &tv, NULL) < 0) {
+		rte_exit(EXIT_FAILURE, "Could not arm timer fd %d: %s\n",
+				driver->timer.fd, strerror(errno));
+	}
+
+	driver->timer.data_ready = &timer_data_ready;
+	if (epoll_add(driver->epoll_fd, &driver->timer, EPOLLIN) < 0) {
+		rte_exit(EXIT_FAILURE, "Could not add timer fd %d to epoll set: %s\n",
+				driver->timer.fd, strerror(errno));
+	}
+} /* setup_timer */
+
+
+static void
 do_init_driver(void)
 {
 	struct usiw_port_config *port_config;
 	struct usiw_config config;
 	char *sock_name;
-	int portid, port_count;
+	int portid, port_count, timer_ms;
 	int retval;
 
 	retval = urdma__config_file_open(&config);
@@ -1040,6 +1102,11 @@ do_init_driver(void)
 		rte_exit(EXIT_FAILURE, "sock_name not found in configuration\n");
 	}
 
+	timer_ms = urdma__config_file_get_timer_interval(&config);
+	if (!timer_ms) {
+		timer_ms = 5000;
+	}
+
 	urdma__config_file_close(&config);
 
 	driver = calloc(1, sizeof(*driver)
@@ -1054,6 +1121,7 @@ do_init_driver(void)
 		rte_exit(EXIT_FAILURE, "Could not open epoll fd: %s\n",
 				strerror(errno));
 	}
+	setup_timer(timer_ms);
 	setup_socket(sock_name);
 	free(sock_name);
 	driver->chardev.data_ready = &chardev_data_ready;
