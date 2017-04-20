@@ -523,6 +523,7 @@ process_data_ready(struct urdma_fd *process_fd)
 err:
 	LIST_REMOVE(process, entry);
 	close(process->fd.fd);
+	free(process);
 } /* process_data_ready */
 
 
