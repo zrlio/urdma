@@ -126,6 +126,7 @@ static int fetch_dest_hwaddr(struct net_device *netdev,
 	n = dst_neigh_lookup(&rt->dst, &dst_ipv4_addr);
 	if (!n || !(n->nud_state & NUD_VALID)) {
 		rv = -ENODATA;
+		rcu_read_unlock();
 		goto out;
 	}
 	memcpy(dst_hw_addr, n->ha, ETHER_ADDR_LEN);
