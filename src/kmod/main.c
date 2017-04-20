@@ -65,7 +65,7 @@ MODULE_LICENSE("Dual BSD/GPL");
 MODULE_VERSION(PACKAGE_VERSION);
 
 static struct list_head urdma_devlist;
-DEFINE_SPINLOCK(siw_dev_lock);
+static DEFINE_SPINLOCK(siw_dev_lock);
 
 static ssize_t show_sw_version(struct device *dev,
 			       struct device_attribute *attr, char *buf)
