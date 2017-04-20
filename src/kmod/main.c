@@ -171,9 +171,11 @@ out:
 	return rv;
 }
 
-/* file->lock MUST be locked */
+/* file->lock MUST be locked before calling this function, but will be unlocked
+ * before the function returns. */
 static ssize_t do_read_disconnect_event(struct urdma_chardev_data *file,
 		struct siw_cep *cep, char *buf, size_t count)
+	__releases(file->lock)
 {
 	struct urdma_qp_disconnected_event event;
 
@@ -187,6 +189,7 @@ static ssize_t do_read_disconnect_event(struct urdma_chardev_data *file,
 	event.urdmad_dev_id = cep->urdmad_dev_id;
 	event.urdmad_qp_id = cep->urdmad_qp_id;
 	if (copy_to_user(buf, &event, sizeof(event))) {
+		spin_unlock_irq(&file->lock);
 		return -EFAULT;
 	}
 
@@ -198,9 +201,11 @@ static ssize_t do_read_disconnect_event(struct urdma_chardev_data *file,
 	return sizeof(event);
 } /* do_read_disconnect_event */
 
-/* file->lock MUST be locked */
+/* file->lock MUST be locked before calling this function, but will be unlocked
+ * before the function returns. */
 static ssize_t do_read_established_event(struct urdma_chardev_data *file,
 		struct siw_cep *cep, char *buf, size_t count)
+	__releases(file->lock)
 {
 	struct urdma_qp_connected_event event;
 	struct net_device *netdev;
@@ -236,7 +241,7 @@ static ssize_t do_read_established_event(struct urdma_chardev_data *file,
 	rv = fetch_dest_hwaddr(netdev, event.src_ipv4, event.dst_ipv4,
 		&event.dst_ether);
 	if (copy_to_user(buf, &event, sizeof(event))) {
-		return -EFAULT;
+		rv = -EFAULT;
 	}
 
 	dev_put(netdev);
