@@ -692,7 +692,7 @@ event_loop(void *arg)
 	int portid, ret;
 
 	while (1) {
-		do_poll(50);
+		do_poll(1);
 		for (portid = 0; portid < driver->port_count; ++portid) {
 			port = &driver->ports[portid];
 			ret = rte_kni_handle_request(port->kni);
