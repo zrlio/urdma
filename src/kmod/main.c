@@ -174,7 +174,7 @@ out:
 /* file->lock MUST be locked before calling this function, but will be unlocked
  * before the function returns. */
 static ssize_t do_read_disconnect_event(struct urdma_chardev_data *file,
-		struct siw_cep *cep, char *buf, size_t count)
+		struct siw_cep *cep, char __user *buf, size_t count)
 	__releases(file->lock)
 {
 	struct urdma_qp_disconnected_event event;
@@ -204,7 +204,7 @@ static ssize_t do_read_disconnect_event(struct urdma_chardev_data *file,
 /* file->lock MUST be locked before calling this function, but will be unlocked
  * before the function returns. */
 static ssize_t do_read_established_event(struct urdma_chardev_data *file,
-		struct siw_cep *cep, char *buf, size_t count)
+		struct siw_cep *cep, char __user *buf, size_t count)
 	__releases(file->lock)
 {
 	struct urdma_qp_connected_event event;
@@ -249,7 +249,7 @@ static ssize_t do_read_established_event(struct urdma_chardev_data *file,
 	return (rv >= 0) ? sizeof(event) : rv;
 } /* do_read_established_event */
 
-static ssize_t urdma_chardev_read(struct file *filp, char *buf,
+static ssize_t urdma_chardev_read(struct file *filp, char __user *buf,
 		size_t count, loff_t *offset)
 {
 	struct urdma_chardev_data *file;
@@ -303,7 +303,7 @@ out:
 	return rv;
 }
 
-static ssize_t urdma_chardev_write(struct file *filp, const char *buf,
+static ssize_t urdma_chardev_write(struct file *filp, const char __user *buf,
 		size_t count, loff_t *offset)
 {
 	struct urdma_chardev_data *file;
