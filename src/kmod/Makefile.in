@@ -45,7 +45,7 @@ all:
 	for i in $(SOURCES); do if [ ! -e $${i} ]; then ln -s @srcdir@/$${i} $${i}; fi; done
 	if [ ! -e urdma_kabi.h ]; then ln -s @top_srcdir@/include/urdma_kabi.h .; fi
 	if [ ! -e proto_trp.h ]; then ln -s @top_srcdir@/include/proto_trp.h .; fi
-	make -C @KERNELDIR@ M=`pwd` top_srcdir=$(realpath @top_srcdir@) modules EXTRA_CFLAGS="-g -DDEBUG -DPACKAGE_VERSION='\"@PACKAGE_VERSION@\"'"
+	make -C @KERNELDIR@ M=`pwd` top_srcdir=$(realpath @top_srcdir@) PACKAGE_VERSION='\"@PACKAGE_VERSION@\"' modules
 
 Makefile: @srcdir@/Makefile.in
 	cd @top_builddir@; ./config.status

@@ -37,6 +37,8 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+ccflags-y += -g -DDEBUG -DPACKAGE_VERSION=$(PACKAGE_VERSION)
+
 obj-m += urdma.o
 
 urdma-objs := ae.o cm.o debug.o main.o mem.o obj.o qp.o verbs.o
