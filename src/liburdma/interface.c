@@ -1750,11 +1750,25 @@ process_data_packet(struct usiw_qp *qp, struct rte_mbuf *mbuf)
 	eth_hdr = rte_pktmbuf_mtod(mbuf, struct ether_hdr *);
 
 	ipv4_hdr = (struct ipv4_hdr *)rte_pktmbuf_adj(mbuf, sizeof(*eth_hdr));
-	assert(ipv4_hdr->next_proto_id == IP_HDR_PROTO_UDP);
-	assert(ipv4_hdr->dst_addr == qp->dev->ipv4_addr);
+	if (ipv4_hdr->next_proto_id != IP_HDR_PROTO_UDP) {
+		RTE_LOG(NOTICE, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Drop packet with IPv4 next header %" PRIu8 " not UDP\n",
+			qp->shm_qp->dev_id, qp->shm_qp->qp_id,
+			ipv4_hdr->next_proto_id);
+	}
+	if (ipv4_hdr->dst_addr != qp->dev->ipv4_addr) {
+		RTE_LOG(NOTICE, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Drop packet with IPv4 dst addr %" PRIx32 "; expected %" PRIx32 "\n",
+			qp->shm_qp->dev_id, qp->shm_qp->qp_id,
+			rte_be_to_cpu_32(ipv4_hdr->dst_addr),
+			rte_be_to_cpu_32(qp->dev->ipv4_addr));
+	}
 
 	udp_hdr = (struct udp_hdr *)rte_pktmbuf_adj(mbuf, sizeof(*ipv4_hdr));
-	assert(udp_hdr->dst_port == qp->shm_qp->local_udp_port);
+	if (udp_hdr->dst_port != qp->shm_qp->local_udp_port) {
+		RTE_LOG(NOTICE, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Drop packet with UDP dst port %" PRIu16 "; expected %" PRIu16 "\n",
+			qp->shm_qp->dev_id, qp->shm_qp->qp_id,
+			rte_be_to_cpu_16(udp_hdr->dst_port),
+			rte_be_to_cpu_16(qp->shm_qp->local_udp_port));
+	}
 
 	ctx.src_ep = &qp->remote_ep;
 	if (!ctx.src_ep) {
