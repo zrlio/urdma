@@ -376,7 +376,22 @@ static int urdma_chardev_release(struct inode *inodep, struct file *filp)
 	spin_lock_irq(&file->lock);
 	list_for_each_safe(pos, next, &file->rtr_wait_list) {
 		cep = list_entry(pos, struct siw_cep, rtr_wait_entry);
+		pr_debug("chardev release: remove rtr wait event for cep %p\n",
+				(void *)cep);
 		list_del(pos);
+	}
+	list_for_each_safe(pos, next, &file->established_list) {
+		cep = list_entry(pos, struct siw_cep, established_entry);
+		pr_debug("chardev release: remove established event for cep %p\n",
+				(void *)cep);
+		list_del(pos);
+	}
+	list_for_each_safe(pos, next, &file->disconnect_list) {
+		cep = list_entry(pos, struct siw_cep, disconnect_entry);
+		pr_info("chardev release: remove disconnect event for cep %p\n",
+				(void *)cep);
+		list_del(pos);
+		siw_cep_put(cep);
 	}
 	spin_unlock_irq(&file->lock);
 	module_put(THIS_MODULE);
@@ -458,20 +473,6 @@ static void siw_device_deregister(struct siw_dev *sdev)
 	WARN_ON(atomic_read(&sdev->num_cq));
 	WARN_ON(atomic_read(&sdev->num_pd));
 	WARN_ON(atomic_read(&sdev->num_cep));
-
-	i = 0;
-
-	while (!list_empty(&sdev->cep_list)) {
-		struct siw_cep *cep = list_entry(sdev->cep_list.next,
-						 struct siw_cep, devq);
-		list_del(&cep->devq);
-		pr_debug(": Free CEP (0x%p), state: %d\n",
-			cep, cep->state);
-		kfree(cep);
-		i++;
-	}
-	if (i)
-		pr_warning("siw_device_deregister: free'd %d CEPs\n", i);
 
 	sdev->is_registered = 0;
 }
