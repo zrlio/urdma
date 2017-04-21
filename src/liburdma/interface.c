@@ -2112,8 +2112,8 @@ start_qp(struct usiw_qp *qp)
 	}
 
 	/* FIXME: Get this from the peer */
-	qp->remote_ep.send_max_psn = qp->shm_qp->rx_desc_count / 2;
-	qp->remote_ep.tx_pending_size = qp->shm_qp->rx_desc_count / 2;
+	qp->remote_ep.send_max_psn = qp->shm_qp->tx_desc_count / 2;
+	qp->remote_ep.tx_pending_size = qp->shm_qp->tx_desc_count / 2;
 	qp->remote_ep.tx_pending = calloc(qp->remote_ep.tx_pending_size,
 			sizeof(*qp->remote_ep.tx_pending));
 	if (!qp->remote_ep.tx_pending) {

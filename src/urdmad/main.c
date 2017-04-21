@@ -218,6 +218,7 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 	struct urdma_qp_rtr_event rtr_event;
 	struct rte_eth_fdir_filter fdirf;
 	struct rte_eth_rxq_info rxq_info;
+	struct rte_eth_txq_info txq_info;
 	struct usiw_port *dev;
 	struct urdmad_qp *qp;
 	ssize_t ret;
@@ -263,6 +264,13 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 		qp->rx_desc_count = dev->rx_desc_count;
 	} else {
 		qp->rx_desc_count = rxq_info.nb_desc;
+	}
+	ret = rte_eth_tx_queue_info_get(event->urdmad_dev_id,
+			event->urdmad_qp_id, &txq_info);
+	if (ret < 0) {
+		qp->tx_desc_count = dev->tx_desc_count;
+	} else {
+		qp->tx_desc_count = txq_info.nb_desc;
 	}
 	qp->rx_burst_size = dev->rx_burst_size;
 	if (qp->rx_burst_size > qp->rx_desc_count + 1) {
