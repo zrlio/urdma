@@ -635,6 +635,9 @@ static struct siw_dev *siw_device_create(struct net_device *netdev)
 #ifdef HAVE_IB_BIND_MW
 	ofa_dev->bind_mw = NULL;
 #endif
+#ifdef HAVE_IB_DISASSOCIATE_CONTEXT
+	ofa_dev->disassociate_ucontext = urdma_disassociate_ucontext;
+#endif
 
 	ofa_dev->create_srq = siw_create_srq;
 	ofa_dev->modify_srq = siw_modify_srq;

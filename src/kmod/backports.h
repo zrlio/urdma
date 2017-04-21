@@ -64,6 +64,12 @@
 #define HAVE_IB_GET_PORT_IMMUTABLE 1
 #endif
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 3, 0)
+/* Introduced in Linux commit 036b10635739f and first appeared in
+ * Linux 4.3-rc1. */
+#define HAVE_IB_DISASSOCIATE_CONTEXT 1
+#endif
+
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 5, 0)
 /* Removed in Linux commit b7d3e0a94fe1, which first appeared in
  * Linux 4.5-rc1. */
