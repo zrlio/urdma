@@ -161,8 +161,7 @@ static unsigned int urdma_chardev_poll(struct file *filp,
 		rv = -EINVAL;
 		goto out;
 	}
-	if (!list_empty(&file->established_list)
-			|| !list_empty(&file->disconnect_list)) {
+	if (!list_empty(&file->established_list)) {
 		rv = POLLIN | POLLRDNORM;
 	}
 
@@ -170,36 +169,6 @@ out:
 	spin_unlock_bh(&file->lock);
 	return rv;
 }
-
-/* file->lock MUST be locked before calling this function, but will be unlocked
- * before the function returns. */
-static ssize_t do_read_disconnect_event(struct urdma_chardev_data *file,
-		struct siw_cep *cep, char __user *buf, size_t count)
-	__releases(file->lock)
-{
-	struct urdma_qp_disconnected_event event;
-
-	if (count < sizeof(event)) {
-		spin_unlock_bh(&file->lock);
-		return -EINVAL;
-	}
-
-	memset(&event, 0, sizeof(event));
-	event.event_type = SIW_EVENT_QP_DISCONNECTED;
-	event.urdmad_dev_id = cep->urdmad_dev_id;
-	event.urdmad_qp_id = cep->urdmad_qp_id;
-	if (copy_to_user(buf, &event, sizeof(event))) {
-		spin_unlock_bh(&file->lock);
-		return -EFAULT;
-	}
-
-	list_del(&cep->disconnect_entry);
-	spin_unlock_bh(&file->lock);
-
-	siw_cep_put(cep);
-
-	return sizeof(event);
-} /* do_read_disconnect_event */
 
 /* file->lock MUST be locked before calling this function, but will be unlocked
  * before the function returns. */
@@ -263,8 +232,7 @@ static ssize_t urdma_chardev_read(struct file *filp, char __user *buf,
 		goto unlock;
 	}
 
-	while (list_empty(&file->established_list)
-			&& list_empty(&file->disconnect_list)) {
+	while (list_empty(&file->established_list)) {
 		if (filp->f_flags & O_NONBLOCK) {
 			rv = -EAGAIN;
 			goto unlock;
@@ -272,8 +240,7 @@ static ssize_t urdma_chardev_read(struct file *filp, char __user *buf,
 		spin_unlock_bh(&file->lock);
 
 		rv = wait_event_interruptible(file->wait_head,
-				(!list_empty(&file->established_list)
-				 ||!list_empty(&file->disconnect_list)));
+				!list_empty(&file->established_list));
 		if (rv < 0) {
 			return rv;
 		}
@@ -285,17 +252,10 @@ static ssize_t urdma_chardev_read(struct file *filp, char __user *buf,
 		}
 	}
 
-	if (!list_empty(&file->established_list)) {
-		cep = list_first_entry(&file->established_list,
-				struct siw_cep, established_entry);
-		rv = do_read_established_event(file, cep, buf, count);
-		goto out;
-	} else {
-		cep = list_first_entry(&file->disconnect_list,
-				struct siw_cep, disconnect_entry);
-		rv = do_read_disconnect_event(file, cep, buf, count);
-		goto out;
-	}
+	cep = list_first_entry(&file->established_list,
+			struct siw_cep, established_entry);
+	rv = do_read_established_event(file, cep, buf, count);
+	goto out;
 
 unlock:
 	spin_unlock_bh(&file->lock);
@@ -385,13 +345,6 @@ static int urdma_chardev_release(struct inode *inodep, struct file *filp)
 		pr_debug("chardev release: remove established event for cep %p\n",
 				(void *)cep);
 		list_del(pos);
-	}
-	list_for_each_safe(pos, next, &file->disconnect_list) {
-		cep = list_entry(pos, struct siw_cep, disconnect_entry);
-		pr_info("chardev release: remove disconnect event for cep %p\n",
-				(void *)cep);
-		list_del(pos);
-		siw_cep_put(cep);
 	}
 	spin_unlock_bh(&file->lock);
 	module_put(THIS_MODULE);
@@ -832,7 +785,6 @@ static __init int siw_init_module(void)
 	chardev_data->dev = &usiw_generic_dma_device;
 	spin_lock_init(&chardev_data->lock);
 	INIT_LIST_HEAD(&chardev_data->established_list);
-	INIT_LIST_HEAD(&chardev_data->disconnect_list);
 	INIT_LIST_HEAD(&chardev_data->rtr_wait_list);
 	init_waitqueue_head(&chardev_data->wait_head);
 	dev_set_drvdata(&usiw_generic_dma_device, chardev_data);

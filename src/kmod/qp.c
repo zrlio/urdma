@@ -140,21 +140,6 @@ notify_established(struct siw_ucontext *ctx, struct siw_qp *qp)
 	}
 }
 
-static void
-notify_disconnected(struct siw_ucontext *ctx, struct siw_qp *qp)
-{
-	struct urdma_chardev_data *file
-		= dev_get_drvdata(ctx->sdev->ofa_dev.dma_device);
-
-	if (file) {
-		qp->cep->urdmad_dev_id = qp->attrs.urdma_devid;
-		qp->cep->urdmad_qp_id = qp->attrs.urdma_qp_id;
-		siw_cep_get(qp->cep);
-		list_add_tail(&qp->cep->disconnect_entry,
-				&file->disconnect_list);
-		wake_up(&file->wait_head);
-	}
-}
 
 static inline struct siw_ucontext *siw_ctx_ofa2siw(struct ib_ucontext *ofa_ctx)
 {
@@ -276,9 +261,6 @@ siw_qp_modify(struct siw_qp *qp, struct siw_qp_attrs *attrs,
 		case SIW_QP_STATE_ERROR:
 			qp->attrs.state = attrs->state;
 			drop_conn = 1;
-			notify_disconnected(
-				siw_ctx_ofa2siw(qp->ofa_qp.uobject->context),
-				qp);
 			break;
 
 		default:
