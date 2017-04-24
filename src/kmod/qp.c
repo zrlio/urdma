@@ -134,6 +134,7 @@ notify_established(struct siw_ucontext *ctx, struct siw_qp *qp)
 	if (!file) {
 		siw_qp_rtr_fail(qp->cep);
 	} else {
+		siw_cep_get(qp->cep);
 		list_add_tail(&qp->cep->established_entry,
 				&file->established_list);
 		wake_up(&file->wait_head);

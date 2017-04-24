@@ -1316,6 +1316,9 @@ accept_error:
 	siw_cep_put(cep);
 
 out:
+	/* Decrement the refcount that was incremented when this was added to
+	 * the urdmad chardev lists */
+	siw_cep_put(cep);
 	return rv;
 }
 

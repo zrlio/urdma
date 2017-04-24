@@ -339,12 +339,14 @@ static int urdma_chardev_release(struct inode *inodep, struct file *filp)
 		pr_debug("chardev release: remove rtr wait event for cep %p\n",
 				(void *)cep);
 		list_del(pos);
+		siw_cep_put(cep);
 	}
 	list_for_each_safe(pos, next, &file->established_list) {
 		cep = list_entry(pos, struct siw_cep, established_entry);
 		pr_debug("chardev release: remove established event for cep %p\n",
 				(void *)cep);
 		list_del(pos);
+		siw_cep_put(cep);
 	}
 	spin_unlock_bh(&file->lock);
 	module_put(THIS_MODULE);
