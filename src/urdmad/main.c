@@ -161,30 +161,15 @@ static void return_lcores(uint32_t *in_mask)
 
 
 static void
-handle_qp_disconnected_event(struct urdma_qp_disconnected_event *event, size_t count)
+return_qp(struct usiw_port *dev, struct urdmad_qp *qp)
 {
 	enum { mbuf_count = 4 };
 	struct rte_eth_fdir_filter fdirf;
 	struct rte_mbuf *mbuf[mbuf_count];
-	struct usiw_port *dev;
-	struct urdmad_qp *qp;
 	int ret;
 
-	if (count < sizeof(*event)) {
-		static bool warned = false;
-		if (!warned) {
-			RTE_LOG(ERR, USER1, "Read only %zd/%zu bytes\n",
-					count, sizeof(*event));
-			warned = true;
-		}
-		return;
-	}
-
-	RTE_LOG(DEBUG, USER1, "Got disconnected event for device %" PRIu16 " queue pair %" PRIu16 "\n",
-			event->urdmad_dev_id, event->urdmad_qp_id);
-
-	dev = &driver->ports[event->urdmad_dev_id];
-	qp = &dev->qp[event->urdmad_qp_id];
+	LIST_REMOVE(qp, urdmad__entry);
+	LIST_INSERT_HEAD(&dev->avail_qp, qp, urdmad__entry);
 
 	if (dev->flags & port_fdir) {
 		memset(&fdirf, 0, sizeof(fdirf));
@@ -210,6 +195,28 @@ handle_qp_disconnected_event(struct urdma_qp_disconnected_event *event, size_t c
 					mbuf, mbuf_count);
 		} while (ret > 0);
 	}
+} /* return_qp */
+
+
+static void
+handle_qp_disconnected_event(struct urdma_qp_disconnected_event *event, size_t count)
+{
+	struct usiw_port *dev;
+	struct urdmad_qp *qp;
+	int ret;
+
+	if (count < sizeof(*event)) {
+		static bool warned = false;
+		if (!warned) {
+			RTE_LOG(ERR, USER1, "Read only %zd/%zu bytes\n",
+					count, sizeof(*event));
+			warned = true;
+		}
+		return;
+	}
+
+	RTE_LOG(DEBUG, USER1, "Got disconnected event for device %" PRIu16 " queue pair %" PRIu16 "\n",
+			event->urdmad_dev_id, event->urdmad_qp_id);
 } /* handle_qp_disconnected_event */
 
 static void
@@ -473,9 +480,7 @@ process_data_ready(struct urdma_fd *process_fd)
 		LIST_FOR_EACH(qp, &process->owned_qps, urdmad__entry, prev) {
 			RTE_LOG(DEBUG, USER1, "Return QP %" PRIu16 " to pool\n",
 					qp->qp_id);
-			LIST_REMOVE(qp, urdmad__entry);
-			LIST_INSERT_HEAD(&driver->ports[qp->dev_id].avail_qp,
-					qp, urdmad__entry);
+			return_qp(&driver->ports[qp->dev_id], qp);
 		}
 		return_lcores(process->core_mask);
 		goto err;
@@ -509,9 +514,7 @@ process_data_ready(struct urdma_fd *process_fd)
 		}
 		port = &driver->ports[dev_id];
 		qp = &port->qp[qp_id];
-		LIST_REMOVE(qp, urdmad__entry);
-		LIST_INSERT_HEAD(&driver->ports[dev_id].avail_qp, qp,
-					urdmad__entry);
+		return_qp(port, qp);
 		break;
 	case urdma_sock_hello_req:
 		fprintf(stderr, "HELLO on fd %d\n", process->fd.fd);
