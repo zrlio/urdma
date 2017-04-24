@@ -147,16 +147,16 @@ static unsigned int urdma_chardev_poll(struct file *filp,
 	unsigned int rv = 0;
 
 	file = filp->private_data;
-	spin_lock_irq(&file->lock);
+	spin_lock_bh(&file->lock);
 	if (!file->dev) {
 		rv = -EINVAL;
 		goto out;
 	}
-	spin_unlock_irq(&file->lock);
+	spin_unlock_bh(&file->lock);
 
 	poll_wait(filp, &file->wait_head, poll_table);
 
-	spin_lock_irq(&file->lock);
+	spin_lock_bh(&file->lock);
 	if (!file->dev) {
 		rv = -EINVAL;
 		goto out;
@@ -167,7 +167,7 @@ static unsigned int urdma_chardev_poll(struct file *filp,
 	}
 
 out:
-	spin_unlock_irq(&file->lock);
+	spin_unlock_bh(&file->lock);
 	return rv;
 }
 
@@ -180,7 +180,7 @@ static ssize_t do_read_disconnect_event(struct urdma_chardev_data *file,
 	struct urdma_qp_disconnected_event event;
 
 	if (count < sizeof(event)) {
-		spin_unlock_irq(&file->lock);
+		spin_unlock_bh(&file->lock);
 		return -EINVAL;
 	}
 
@@ -189,12 +189,12 @@ static ssize_t do_read_disconnect_event(struct urdma_chardev_data *file,
 	event.urdmad_dev_id = cep->urdmad_dev_id;
 	event.urdmad_qp_id = cep->urdmad_qp_id;
 	if (copy_to_user(buf, &event, sizeof(event))) {
-		spin_unlock_irq(&file->lock);
+		spin_unlock_bh(&file->lock);
 		return -EFAULT;
 	}
 
 	list_del(&cep->disconnect_entry);
-	spin_unlock_irq(&file->lock);
+	spin_unlock_bh(&file->lock);
 
 	siw_cep_put(cep);
 
@@ -212,7 +212,7 @@ static ssize_t do_read_established_event(struct urdma_chardev_data *file,
 	ssize_t rv;
 
 	if (count < sizeof(event)) {
-		spin_unlock_irq(&file->lock);
+		spin_unlock_bh(&file->lock);
 		return -EINVAL;
 	}
 
@@ -235,7 +235,7 @@ static ssize_t do_read_established_event(struct urdma_chardev_data *file,
 
 	list_del(&cep->established_entry);
 	list_add_tail(&cep->rtr_wait_entry, &file->rtr_wait_list);
-	spin_unlock_irq(&file->lock);
+	spin_unlock_bh(&file->lock);
 
 	/* Must not have IRQs disabled when querying routing tables. */
 	rv = fetch_dest_hwaddr(netdev, event.src_ipv4, event.dst_ipv4,
@@ -257,7 +257,7 @@ static ssize_t urdma_chardev_read(struct file *filp, char __user *buf,
 	ssize_t rv;
 
 	file = filp->private_data;
-	spin_lock_irq(&file->lock);
+	spin_lock_bh(&file->lock);
 	if (!file->dev) {
 		rv = -EINVAL;
 		goto unlock;
@@ -269,7 +269,7 @@ static ssize_t urdma_chardev_read(struct file *filp, char __user *buf,
 			rv = -EAGAIN;
 			goto unlock;
 		}
-		spin_unlock_irq(&file->lock);
+		spin_unlock_bh(&file->lock);
 
 		rv = wait_event_interruptible(file->wait_head,
 				(!list_empty(&file->established_list)
@@ -278,7 +278,7 @@ static ssize_t urdma_chardev_read(struct file *filp, char __user *buf,
 			return rv;
 		}
 
-		spin_lock_irq(&file->lock);
+		spin_lock_bh(&file->lock);
 		if (!file->dev) {
 			rv = -EINVAL;
 			goto unlock;
@@ -298,7 +298,7 @@ static ssize_t urdma_chardev_read(struct file *filp, char __user *buf,
 	}
 
 unlock:
-	spin_unlock_irq(&file->lock);
+	spin_unlock_bh(&file->lock);
 out:
 	return rv;
 }
@@ -323,7 +323,7 @@ static ssize_t urdma_chardev_write(struct file *filp, const char __user *buf,
 	}
 
 	file = filp->private_data;
-	spin_lock_irq(&file->lock);
+	spin_lock_bh(&file->lock);
 	if (!file->dev) {
 		rv = -EINVAL;
 		goto out;
@@ -346,7 +346,7 @@ static ssize_t urdma_chardev_write(struct file *filp, const char __user *buf,
 				break;
 			}
 		}
-		spin_unlock_irq(&file->lock);
+		spin_unlock_bh(&file->lock);
 		if (qp) {
 			rv = siw_qp_rtr(qp->cep);
 			siw_qp_put(qp);
@@ -363,7 +363,7 @@ static ssize_t urdma_chardev_write(struct file *filp, const char __user *buf,
 	rv = count;
 
 out:
-	spin_unlock_irq(&file->lock);
+	spin_unlock_bh(&file->lock);
 	return rv;
 }
 
@@ -373,7 +373,7 @@ static int urdma_chardev_release(struct inode *inodep, struct file *filp)
 	struct siw_cep *cep;
 	struct list_head *pos, *next;
 
-	spin_lock_irq(&file->lock);
+	spin_lock_bh(&file->lock);
 	list_for_each_safe(pos, next, &file->rtr_wait_list) {
 		cep = list_entry(pos, struct siw_cep, rtr_wait_entry);
 		pr_debug("chardev release: remove rtr wait event for cep %p\n",
@@ -393,7 +393,7 @@ static int urdma_chardev_release(struct inode *inodep, struct file *filp)
 		list_del(pos);
 		siw_cep_put(cep);
 	}
-	spin_unlock_irq(&file->lock);
+	spin_unlock_bh(&file->lock);
 	module_put(THIS_MODULE);
 	return 0;
 }
