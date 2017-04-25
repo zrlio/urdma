@@ -148,12 +148,10 @@ static inline struct siw_ucontext *siw_ctx_ofa2siw(struct ib_ucontext *ofa_ctx)
 }
 
 
-/*
- * caller holds qp->state_lock
- */
 int
 siw_qp_modify(struct siw_qp *qp, struct siw_qp_attrs *attrs,
 	      enum siw_qp_attr_mask mask)
+	__must_hold(qp->state_lock)
 {
 	/* Minimum attributes required for INIT/RTR to RTS transition */
 	static const enum siw_qp_attr_mask init_to_rts_mask
