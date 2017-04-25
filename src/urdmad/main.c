@@ -199,22 +199,6 @@ return_qp(struct usiw_port *dev, struct urdmad_qp *qp)
 
 
 static void
-handle_qp_disconnected_event(struct urdma_qp_disconnected_event *event, size_t count)
-{
-	struct usiw_port *dev;
-	struct urdmad_qp *qp;
-	int ret;
-
-	if (WARN_ONCE(count < sizeof(*event),
-			"Read only %zd/%zu bytes\n", count, sizeof(*event))) {
-		return;
-	}
-
-	RTE_LOG(DEBUG, USER1, "Got disconnected event for device %" PRIu16 " queue pair %" PRIu16 "\n",
-			event->urdmad_dev_id, event->urdmad_qp_id);
-} /* handle_qp_disconnected_event */
-
-static void
 handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 {
 	struct urdma_qp_rtr_event rtr_event;
@@ -368,14 +352,13 @@ chardev_data_ready(struct urdma_fd *fd)
 		return;
 	}
 
-	switch (event.event_type) {
-	case SIW_EVENT_QP_CONNECTED:
-		handle_qp_connected_event(&event, ret);
-		break;
-	case SIW_EVENT_QP_DISCONNECTED:
-		handle_qp_disconnected_event((struct urdma_qp_disconnected_event *)&event, ret);
-		break;
+	if (WARN_ONCE(event.event_type != SIW_EVENT_QP_CONNECTED,
+			"Received unexpected event_type %d from kernel\n",
+			event.event_type)) {
+		return;
 	}
+
+	handle_qp_connected_event(&event, ret);
 } /* chardev_data_ready */
 
 
