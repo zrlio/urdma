@@ -205,13 +205,8 @@ handle_qp_disconnected_event(struct urdma_qp_disconnected_event *event, size_t c
 	struct urdmad_qp *qp;
 	int ret;
 
-	if (count < sizeof(*event)) {
-		static bool warned = false;
-		if (!warned) {
-			RTE_LOG(ERR, USER1, "Read only %zd/%zu bytes\n",
-					count, sizeof(*event));
-			warned = true;
-		}
+	if (WARN_ONCE(count < sizeof(*event),
+			"Read only %zd/%zu bytes\n", count, sizeof(*event))) {
 		return;
 	}
 
@@ -230,13 +225,8 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 	struct urdmad_qp *qp;
 	ssize_t ret;
 
-	if (count < sizeof(*event)) {
-		static bool warned = false;
-		if (!warned) {
-			RTE_LOG(ERR, USER1, "Read only %zd/%zu bytes\n",
-					count, sizeof(*event));
-			warned = true;
-		}
+	if (WARN_ONCE(count < sizeof(*event),
+			"Read only %zd/%zu bytes\n", count, sizeof(*event))) {
 		return;
 	}
 
@@ -350,18 +340,11 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 	rtr_event.event_type = SIW_EVENT_QP_RTR;
 	rtr_event.kmod_qp_id = event->kmod_qp_id;
 	ret = write(driver->chardev.fd, &rtr_event, sizeof(rtr_event));
-	if (ret < 0 || (size_t)ret < sizeof(rtr_event)) {
-		static bool warned = false;
-		if (!warned) {
-			if (ret < 0) {
-				RTE_LOG(ERR, USER1, "Error writing event file: %s\n",
-						strerror(errno));
-			} else {
-				RTE_LOG(ERR, USER1, "Wrote only %zd/%zu bytes\n",
-						ret, sizeof(rtr_event));
-			}
-			warned = true;
-		}
+	if (WARN_ONCE(ret < 0, "Error writing event file: %s\n",
+							strerror(errno))) {
+		return;
+	} else if (WARN_ONCE((size_t)ret < sizeof(rtr_event),
+			"Wrote only %zd/%zu bytes\n", ret, sizeof(rtr_event))) {
 		return;
 	}
 	RTE_LOG(DEBUG, USER1, "Post RTR event for queue pair %" PRIu32 "; tx_queue=%" PRIu16 " rx_queue=%" PRIu16 "\n",
@@ -380,15 +363,8 @@ chardev_data_ready(struct urdma_fd *fd)
 	if (ret < 0 && errno == EAGAIN) {
 		return;
 	}
-	if (ret < 0) {
-		static bool warned = false;
-		if (!warned) {
-			if (ret < 0) {
-				RTE_LOG(ERR, USER1, "Error reading event file: %s\n",
-						strerror(errno));
-			}
-			warned = true;
-		}
+	if (WARN_ONCE(ret < 0, "Error reading event file: %s\n",
+							strerror(errno))) {
 		return;
 	}
 
@@ -624,13 +600,9 @@ do_poll(int timeout)
 			RTE_LOG(DEBUG, USER1, "epoll: event %x on fd %d\n",
 					event.events, fd->fd);
 			fd->data_ready(fd);
-		} else if (ret < 0) {
-			static bool warned = false;
-			if (!warned) {
-				RTE_LOG(ERR, USER1, "Error polling event file for reading: %s\n",
-						strerror(errno));
-				warned = true;
-			}
+		} else if (WARN_ONCE(ret < 0,
+				"Error polling event file for reading: %s\n",
+							strerror(errno))) {
 			return;
 		}
 	}
