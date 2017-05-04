@@ -2226,6 +2226,10 @@ kni_loop(void *arg)
 					/* start_qp() transitions to
 					 * usiw_qp_running */
 					start_qp(qp);
+					if (atomic_load(&qp->shm_qp->conn_state)
+							== usiw_qp_error) {
+						break;
+					}
 				case usiw_qp_running:
 					progress_qp(qp);
 					break;
