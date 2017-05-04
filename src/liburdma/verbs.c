@@ -1025,13 +1025,16 @@ usiw_destroy_qp(struct ibv_qp *ib_qp)
 {
 	struct usiw_qp *qp;
 	struct usiw_context *ctx;
+	unsigned int cur_state;
+	bool cmpxchg_res;
 	int ret;
 
 	ret = ibv_cmd_destroy_qp(ib_qp);
 
 	qp = container_of(ib_qp, struct usiw_qp, ib_qp);
 	ctx = qp->ctx;
-	if (atomic_load(&qp->shm_qp->conn_state) == usiw_qp_unbound) {
+	cur_state = atomic_load(&qp->shm_qp->conn_state);
+	if (cur_state == usiw_qp_unbound) {
 		assert(atomic_load(&ctx->qp_init_count) != 0);
 		atomic_fetch_sub(&ctx->qp_init_count, 1);
 	}
@@ -1039,7 +1042,13 @@ usiw_destroy_qp(struct ibv_qp *ib_qp)
 	if (qp->send_cq != qp->recv_cq) {
 		qp->send_cq->qp_count--;
 	}
-	atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
+	if (cur_state > usiw_qp_unbound && cur_state < usiw_qp_shutdown) {
+		do {
+			cmpxchg_res = atomic_compare_exchange_weak(
+						&qp->shm_qp->conn_state,
+						&cur_state, usiw_qp_error);
+		} while (!cmpxchg_res && cur_state < usiw_qp_shutdown);
+	}
 
 	rte_spinlock_lock(&ctx->qp_lock);
 	HASH_DEL(ctx->qp, qp);
