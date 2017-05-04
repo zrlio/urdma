@@ -2098,7 +2098,7 @@ usiw_do_destroy_qp(struct usiw_qp *qp)
 static void
 start_qp(struct usiw_qp *qp)
 {
-	unsigned int x;
+	unsigned int x, cur_state;
 	ssize_t ret;
 
 	rte_spinlock_lock(&qp->shm_qp->conn_event_lock);
@@ -2143,7 +2143,9 @@ start_qp(struct usiw_qp *qp)
 		goto free_txq;
 	}
 
-	atomic_store(&qp->shm_qp->conn_state, usiw_qp_running);
+	cur_state = usiw_qp_connected;
+	atomic_compare_exchange_strong(&qp->shm_qp->conn_state, &cur_state,
+				       usiw_qp_running);
 	atomic_fetch_sub(&qp->ctx->qp_init_count, 1);
 	goto unlock;
 

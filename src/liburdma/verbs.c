@@ -996,6 +996,7 @@ usiw_modify_qp(struct ibv_qp *ib_qp, struct ibv_qp_attr *attr, int attr_mask)
 {
 	struct usiw_qp *qp;
 	struct ibv_modify_qp cmd;
+	unsigned int cur_state, next_state;
 	int ret;
 
 	ret = ibv_cmd_modify_qp(ib_qp, attr, attr_mask, &cmd, sizeof(cmd));
@@ -1011,12 +1012,27 @@ usiw_modify_qp(struct ibv_qp *ib_qp, struct ibv_qp_attr *attr, int attr_mask)
 	switch (attr->qp_state) {
 	case IBV_QPS_SQD:
 	case IBV_QPS_ERR:
-		atomic_store(&qp->shm_qp->conn_state, usiw_qp_shutdown);
+		do {
+			cur_state = atomic_load(&qp->shm_qp->conn_state);
+			switch (cur_state) {
+			case usiw_qp_unbound:
+			case usiw_qp_connected:
+				next_state = usiw_qp_error;
+				break;
+			case usiw_qp_error:
+				goto out;
+			default:
+				next_state = usiw_qp_shutdown;
+				break;
+			}
+		} while (!atomic_compare_exchange_weak(&qp->shm_qp->conn_state,
+					&cur_state, next_state));
 		break;
 	default:
 		break;
 	}
 
+out:
 	return 0;
 } /* usiw_modify_qp */
 
