@@ -106,6 +106,7 @@ struct usiw_driver {
 
 	struct urdma_fd chardev;
 	struct urdma_fd listen;
+	struct urdma_fd timer;
 	LIST_HEAD(urdma_process_head, urdma_process) processes;
 	int epoll_fd;
 	int port_count;

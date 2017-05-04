@@ -92,10 +92,6 @@ struct siw_cep {
 	 */
 	struct list_head	listenq;
 
-	/* The list of connections that have been disconnected but we have not
-	 * yet notified userspace. */
-	struct list_head	disconnect_entry;
-
 	/* The list of connections that have been established but we have not
 	 * yet notified userspace. */
 	struct list_head	established_entry;

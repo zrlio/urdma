@@ -39,6 +39,7 @@
 #ifndef UTIL_H
 #define UTIL_H
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -49,6 +50,20 @@
 #else
 #define NDEBUG_UNUSED
 #endif
+
+#define DO_WARN_ONCE(cond, var, format, ...) ({ \
+	static bool var = false; \
+	if ((cond) && !var) { \
+		var = true; \
+		RTE_LOG(WARNING, USER1, format, __VA_ARGS__); \
+	}; cond; })
+
+#define PASTE(x, y) x##y
+
+/** Prints the given warning message (like fprintf(stderr, format, ...)) if cond
+ * is true, but only once per execution. */
+#define WARN_ONCE(cond, format, ...) \
+	DO_WARN_ONCE(cond, PASTE(xyzwarn_, __LINE__), format, __VA_ARGS__)
 
 int
 parse_ipv4_address(const char *str, uint32_t *address, int *prefix_len);

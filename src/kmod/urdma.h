@@ -80,7 +80,6 @@ struct urdma_chardev_data {
 	struct device		*dev;
 	spinlock_t		lock;
 	struct list_head	established_list;
-	struct list_head	disconnect_list;
 	struct list_head	rtr_wait_list;
 	wait_queue_head_t	wait_head;
 };

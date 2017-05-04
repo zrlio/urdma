@@ -37,6 +37,12 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+# Define to y to enable debug messages by default
+CONFIG_URDMA_DEBUG ?= n
+
+ccflags-y += -g -DPACKAGE_VERSION=$(PACKAGE_VERSION)
+ccflags-$(CONFIG_URDMA_DEBUG) += -DDEBUG
+
 obj-m += urdma.o
 
 urdma-objs := ae.o cm.o debug.o main.o mem.o obj.o qp.o verbs.o

@@ -68,6 +68,9 @@ char *
 urdma__config_file_get_sock_name(struct usiw_config *config);
 
 int
+urdma__config_file_get_timer_interval(struct usiw_config *config);
+
+int
 urdma__config_file_open(struct usiw_config *config);
 
 void

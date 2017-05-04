@@ -58,6 +58,7 @@ extern int siw_query_device(struct ib_device *, struct ib_device_attr *,
 			    struct ib_udata *);
 #endif
 
+extern void urdma_disassociate_ucontext(struct ib_ucontext *ctx);
 extern struct ib_ucontext *siw_alloc_ucontext(struct ib_device *,
 					      struct ib_udata *);
 extern int siw_dealloc_ucontext(struct ib_ucontext *);

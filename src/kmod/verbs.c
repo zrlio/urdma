@@ -209,6 +209,13 @@ out:
 }
 
 
+/* Empty implementation which allows verbs de-initialization to continue despite
+ * user applications continuing to run. */
+void urdma_disassociate_ucontext(struct ib_ucontext *ctx)
+{
+}
+
+
 struct ib_ucontext *siw_alloc_ucontext(struct ib_device *ofa_dev,
 				       struct ib_udata *udata)
 {

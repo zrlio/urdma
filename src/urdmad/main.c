@@ -53,6 +53,7 @@
 #include <sys/epoll.h>
 #include <sys/prctl.h>
 #include <sys/socket.h>
+#include <sys/timerfd.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -160,30 +161,15 @@ static void return_lcores(uint32_t *in_mask)
 
 
 static void
-handle_qp_disconnected_event(struct urdma_qp_disconnected_event *event, size_t count)
+return_qp(struct usiw_port *dev, struct urdmad_qp *qp)
 {
 	enum { mbuf_count = 4 };
 	struct rte_eth_fdir_filter fdirf;
 	struct rte_mbuf *mbuf[mbuf_count];
-	struct usiw_port *dev;
-	struct urdmad_qp *qp;
 	int ret;
 
-	if (count < sizeof(*event)) {
-		static bool warned = false;
-		if (!warned) {
-			RTE_LOG(ERR, USER1, "Read only %zd/%zu bytes\n",
-					count, sizeof(*event));
-			warned = true;
-		}
-		return;
-	}
-
-	RTE_LOG(DEBUG, USER1, "Got disconnected event for device %" PRIu16 " queue pair %" PRIu16 "\n",
-			event->urdmad_dev_id, event->urdmad_qp_id);
-
-	dev = &driver->ports[event->urdmad_dev_id];
-	qp = &dev->qp[event->urdmad_qp_id];
+	LIST_REMOVE(qp, urdmad__entry);
+	LIST_INSERT_HEAD(&dev->avail_qp, qp, urdmad__entry);
 
 	if (dev->flags & port_fdir) {
 		memset(&fdirf, 0, sizeof(fdirf));
@@ -209,7 +195,8 @@ handle_qp_disconnected_event(struct urdma_qp_disconnected_event *event, size_t c
 					mbuf, mbuf_count);
 		} while (ret > 0);
 	}
-} /* handle_qp_disconnected_event */
+} /* return_qp */
+
 
 static void
 handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
@@ -217,17 +204,13 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 	struct urdma_qp_rtr_event rtr_event;
 	struct rte_eth_fdir_filter fdirf;
 	struct rte_eth_rxq_info rxq_info;
+	struct rte_eth_txq_info txq_info;
 	struct usiw_port *dev;
 	struct urdmad_qp *qp;
 	ssize_t ret;
 
-	if (count < sizeof(*event)) {
-		static bool warned = false;
-		if (!warned) {
-			RTE_LOG(ERR, USER1, "Read only %zd/%zu bytes\n",
-					count, sizeof(*event));
-			warned = true;
-		}
+	if (WARN_ONCE(count < sizeof(*event),
+			"Read only %zd/%zu bytes\n", count, sizeof(*event))) {
 		return;
 	}
 
@@ -262,6 +245,13 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 		qp->rx_desc_count = dev->rx_desc_count;
 	} else {
 		qp->rx_desc_count = rxq_info.nb_desc;
+	}
+	ret = rte_eth_tx_queue_info_get(event->urdmad_dev_id,
+			event->urdmad_qp_id, &txq_info);
+	if (ret < 0) {
+		qp->tx_desc_count = dev->tx_desc_count;
+	} else {
+		qp->tx_desc_count = txq_info.nb_desc;
 	}
 	qp->rx_burst_size = dev->rx_burst_size;
 	if (qp->rx_burst_size > qp->rx_desc_count + 1) {
@@ -334,18 +324,11 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 	rtr_event.event_type = SIW_EVENT_QP_RTR;
 	rtr_event.kmod_qp_id = event->kmod_qp_id;
 	ret = write(driver->chardev.fd, &rtr_event, sizeof(rtr_event));
-	if (ret < 0 || (size_t)ret < sizeof(rtr_event)) {
-		static bool warned = false;
-		if (!warned) {
-			if (ret < 0) {
-				RTE_LOG(ERR, USER1, "Error writing event file: %s\n",
-						strerror(errno));
-			} else {
-				RTE_LOG(ERR, USER1, "Wrote only %zd/%zu bytes\n",
-						ret, sizeof(rtr_event));
-			}
-			warned = true;
-		}
+	if (WARN_ONCE(ret < 0, "Error writing event file: %s\n",
+							strerror(errno))) {
+		return;
+	} else if (WARN_ONCE((size_t)ret < sizeof(rtr_event),
+			"Wrote only %zd/%zu bytes\n", ret, sizeof(rtr_event))) {
 		return;
 	}
 	RTE_LOG(DEBUG, USER1, "Post RTR event for queue pair %" PRIu32 "; tx_queue=%" PRIu16 " rx_queue=%" PRIu16 "\n",
@@ -364,26 +347,18 @@ chardev_data_ready(struct urdma_fd *fd)
 	if (ret < 0 && errno == EAGAIN) {
 		return;
 	}
-	if (ret < 0) {
-		static bool warned = false;
-		if (!warned) {
-			if (ret < 0) {
-				RTE_LOG(ERR, USER1, "Error reading event file: %s\n",
-						strerror(errno));
-			}
-			warned = true;
-		}
+	if (WARN_ONCE(ret < 0, "Error reading event file: %s\n",
+							strerror(errno))) {
 		return;
 	}
 
-	switch (event.event_type) {
-	case SIW_EVENT_QP_CONNECTED:
-		handle_qp_connected_event(&event, ret);
-		break;
-	case SIW_EVENT_QP_DISCONNECTED:
-		handle_qp_disconnected_event((struct urdma_qp_disconnected_event *)&event, ret);
-		break;
+	if (WARN_ONCE(event.event_type != SIW_EVENT_QP_CONNECTED,
+			"Received unexpected event_type %d from kernel\n",
+			event.event_type)) {
+		return;
 	}
+
+	handle_qp_connected_event(&event, ret);
 } /* chardev_data_ready */
 
 
@@ -464,9 +439,7 @@ process_data_ready(struct urdma_fd *process_fd)
 		LIST_FOR_EACH(qp, &process->owned_qps, urdmad__entry, prev) {
 			RTE_LOG(DEBUG, USER1, "Return QP %" PRIu16 " to pool\n",
 					qp->qp_id);
-			LIST_REMOVE(qp, urdmad__entry);
-			LIST_INSERT_HEAD(&driver->ports[qp->dev_id].avail_qp,
-					qp, urdmad__entry);
+			return_qp(&driver->ports[qp->dev_id], qp);
 		}
 		return_lcores(process->core_mask);
 		goto err;
@@ -500,9 +473,7 @@ process_data_ready(struct urdma_fd *process_fd)
 		}
 		port = &driver->ports[dev_id];
 		qp = &port->qp[qp_id];
-		LIST_REMOVE(qp, urdmad__entry);
-		LIST_INSERT_HEAD(&driver->ports[dev_id].avail_qp, qp,
-					urdmad__entry);
+		return_qp(port, qp);
 		break;
 	case urdma_sock_hello_req:
 		fprintf(stderr, "HELLO on fd %d\n", process->fd.fd);
@@ -522,6 +493,7 @@ process_data_ready(struct urdma_fd *process_fd)
 err:
 	LIST_REMOVE(process, entry);
 	close(process->fd.fd);
+	free(process);
 } /* process_data_ready */
 
 
@@ -566,6 +538,38 @@ listen_data_ready(struct urdma_fd *listen_fd)
 
 
 static void
+timer_data_ready(struct urdma_fd *fd)
+{
+	struct rte_eth_stats stats;
+	unsigned int i;
+	uint64_t event_count;
+	int ret;
+
+	errno = EMSGSIZE;
+	ret = read(fd->fd, &event_count, sizeof(event_count));
+	if (ret < sizeof(event_count)) {
+		rte_exit(EXIT_FAILURE, "Error disarming timer: %s\n", strerror(errno));
+	}
+
+	for (i = 0; i < driver->port_count; i++) {
+		ret = rte_eth_stats_get(driver->ports[i].portid, &stats);
+		if (ret) {
+			continue;
+		}
+
+		if (stats.imissed || stats.ierrors || stats.oerrors
+							|| stats.rx_nombuf) {
+			RTE_LOG(NOTICE, USER1,
+				"port %u imissed=%" PRIu64 " ierrors=%" PRIu64 " oerrors=%" PRIu64 " rx_nombuf=%" PRIu64 "\n",
+				driver->ports[i].portid, stats.imissed,
+				stats.ierrors, stats.oerrors, stats.rx_nombuf);
+		}
+		rte_eth_stats_reset(driver->ports[i].portid);
+	}
+} /* timer_data_ready */
+
+
+static void
 do_poll(int timeout)
 {
 	struct epoll_event event;
@@ -579,13 +583,9 @@ do_poll(int timeout)
 			RTE_LOG(DEBUG, USER1, "epoll: event %x on fd %d\n",
 					event.events, fd->fd);
 			fd->data_ready(fd);
-		} else if (ret < 0) {
-			static bool warned = false;
-			if (!warned) {
-				RTE_LOG(ERR, USER1, "Error polling event file for reading: %s\n",
-						strerror(errno));
-				warned = true;
-			}
+		} else if (WARN_ONCE(ret < 0,
+				"Error polling event file for reading: %s\n",
+							strerror(errno))) {
 			return;
 		}
 	}
@@ -659,7 +659,7 @@ event_loop(void *arg)
 	int portid, ret;
 
 	while (1) {
-		do_poll(50);
+		do_poll(1);
 		for (portid = 0; portid < driver->port_count; ++portid) {
 			port = &driver->ports[portid];
 			ret = rte_kni_handle_request(port->kni);
@@ -1009,12 +1009,41 @@ setup_socket(const char *path)
 
 
 static void
+setup_timer(int interval_ms)
+{
+	struct itimerspec tv;
+	int ret;
+
+	driver->timer.fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
+	if (driver->timer.fd < 0) {
+		rte_exit(EXIT_FAILURE, "Could not open timer fd: %s\n",
+				strerror(errno));
+	}
+
+	tv.it_interval.tv_sec = interval_ms / 1000;
+	tv.it_interval.tv_nsec = (interval_ms % 1000) * 1000000;
+	memcpy(&tv.it_value, &tv.it_interval, sizeof(tv.it_value));
+
+	if (timerfd_settime(driver->timer.fd, 0, &tv, NULL) < 0) {
+		rte_exit(EXIT_FAILURE, "Could not arm timer fd %d: %s\n",
+				driver->timer.fd, strerror(errno));
+	}
+
+	driver->timer.data_ready = &timer_data_ready;
+	if (epoll_add(driver->epoll_fd, &driver->timer, EPOLLIN) < 0) {
+		rte_exit(EXIT_FAILURE, "Could not add timer fd %d to epoll set: %s\n",
+				driver->timer.fd, strerror(errno));
+	}
+} /* setup_timer */
+
+
+static void
 do_init_driver(void)
 {
 	struct usiw_port_config *port_config;
 	struct usiw_config config;
 	char *sock_name;
-	int portid, port_count;
+	int portid, port_count, timer_ms;
 	int retval;
 
 	retval = urdma__config_file_open(&config);
@@ -1040,6 +1069,11 @@ do_init_driver(void)
 		rte_exit(EXIT_FAILURE, "sock_name not found in configuration\n");
 	}
 
+	timer_ms = urdma__config_file_get_timer_interval(&config);
+	if (!timer_ms) {
+		timer_ms = 5000;
+	}
+
 	urdma__config_file_close(&config);
 
 	driver = calloc(1, sizeof(*driver)
@@ -1054,6 +1088,7 @@ do_init_driver(void)
 		rte_exit(EXIT_FAILURE, "Could not open epoll fd: %s\n",
 				strerror(errno));
 	}
+	setup_timer(timer_ms);
 	setup_socket(sock_name);
 	free(sock_name);
 	driver->chardev.data_ready = &chardev_data_ready;

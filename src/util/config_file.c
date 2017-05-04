@@ -371,6 +371,24 @@ urdma__config_file_get_sock_name(struct usiw_config *config)
 	return strdup(json_object_get_string(sock_name));
 } /* urdma__config_file_get_sock_name */
 
+int
+urdma__config_file_get_timer_interval(struct usiw_config *config)
+{
+	struct json_object *interval;
+
+	if (!json_object_object_get_ex(config->root, "stats_timer_interval",
+								&interval)) {
+		return 0;
+	}
+
+	if (!json_object_is_type(interval, json_type_int)) {
+		fprintf(stderr, "Configuration error: \"stats_timer_interval\" field not an integer\n");
+		return 0;
+	}
+
+	return json_object_get_int(interval);
+} /* urdma__config_file_get_timer_interval */
+
 
 /** Parses the given JSON configuration file for the IPv4 addresses to assign
  * to each interface.  An example configuration file looks like:
