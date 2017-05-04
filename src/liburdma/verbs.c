@@ -818,7 +818,7 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 		qp_init_attr->cap.max_recv_sge = 3;
 	}
 	sz = qp_init_attr->cap.max_send_sge * sizeof(struct iovec);
-	if (!qp_init_attr->cap.max_inline_data < sz) {
+	if (qp_init_attr->cap.max_inline_data < sz) {
 		qp_init_attr->cap.max_inline_data = sz;
 	} else if (qp_init_attr->cap.max_inline_data > sz) {
 		qp_init_attr->cap.max_send_sge
