@@ -166,7 +166,7 @@ return_qp(struct usiw_port *dev, struct urdmad_qp *qp)
 	enum { mbuf_count = 4 };
 	struct rte_eth_fdir_filter fdirf;
 	struct rte_mbuf *mbuf[mbuf_count];
-	int ret;
+	int ret, count;
 
 	LIST_REMOVE(qp, urdmad__entry);
 	LIST_INSERT_HEAD(&dev->avail_qp, qp, urdmad__entry);
@@ -190,10 +190,28 @@ return_qp(struct usiw_port *dev, struct urdmad_qp *qp)
 		}
 
 		/* Drain the queue of any outstanding messages. */
+		count = 0;
 		do {
 			ret = rte_eth_rx_burst(dev->portid, qp->rx_queue,
 					mbuf, mbuf_count);
+			count += ret;
 		} while (ret > 0);
+		if (count > 0) {
+			RTE_LOG(INFO, USER1, "Drained %d packets from qp %" PRIu32 "\n",
+					count, qp->qp_id);
+		}
+
+		ret = rte_eth_dev_rx_queue_stop(dev->portid, qp->rx_queue);
+		if (ret < 0) {
+			RTE_LOG(INFO, USER1, "Disable RX queue %u failed: %s\n",
+					qp->rx_queue, rte_strerror(ret));
+		}
+
+		ret = rte_eth_dev_tx_queue_stop(dev->portid, qp->tx_queue);
+		if (ret < 0) {
+			RTE_LOG(INFO, USER1, "Disable RX queue %u failed: %s\n",
+					qp->tx_queue, rte_strerror(ret));
+		}
 	}
 } /* return_qp */
 
