@@ -1599,6 +1599,7 @@ sweep_unacked_packets(struct usiw_qp *qp, uint64_t now)
 			if (pending->wqe) {
 				do_process_ack(qp, pending->wqe, pending);
 			}
+			pending->psn = UINT32_MAX;
 			rte_pktmbuf_free(sendmsg);
 			*ep->tx_head = NULL;
 			if (++ep->tx_head == end) {
