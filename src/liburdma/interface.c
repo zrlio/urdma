@@ -528,14 +528,15 @@ tx_pending_entry(struct ee_state *ep, uint32_t psn)
 
 static uint32_t
 send_ddp_segment(struct usiw_qp *qp, struct rte_mbuf *sendmsg,
-		struct ee_state *ep, struct usiw_send_wqe *wqe,
-		size_t payload_length)
+		struct read_response_state *readresp,
+		struct usiw_send_wqe *wqe, size_t payload_length)
 {
 	struct pending_datagram_info *pending;
-	uint32_t psn = ep->send_next_psn++;
+	uint32_t psn = qp->remote_ep.send_next_psn++;
 
 	pending = (struct pending_datagram_info *)(sendmsg + 1);
 	pending->wqe = wqe;
+	pending->readresp = readresp;
 	pending->transmit_count = 0;
 	pending->ddp_length = payload_length;
 	if (!qp->dev->flags & port_checksum_offload) {
@@ -545,10 +546,10 @@ send_ddp_segment(struct usiw_qp *qp, struct rte_mbuf *sendmsg,
 	}
 	pending->psn = psn;
 
-	assert(*tx_pending_entry(ep, psn) == NULL);
-	*tx_pending_entry(ep, psn) = sendmsg;
+	assert(*tx_pending_entry(&qp->remote_ep, psn) == NULL);
+	*tx_pending_entry(&qp->remote_ep, psn) = sendmsg;
 
-	resend_ddp_segment(qp, sendmsg, ep);
+	resend_ddp_segment(qp, sendmsg, &qp->remote_ep);
 	return psn;
 } /* send_ddp_segment */
 
@@ -898,8 +899,7 @@ do_rdmap_send(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 					wqe->bytes_sent);
 		}
 
-		send_ddp_segment(qp, sendmsg, wqe->remote_ep, wqe,
-				payload_length);
+		send_ddp_segment(qp, sendmsg, NULL, wqe, payload_length);
 		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> SEND transmit msn=%" PRIu32 " [%zu-%zu]\n",
 				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 				wqe->msn,
@@ -953,8 +953,7 @@ do_rdmap_write(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 					wqe->bytes_sent);
 		}
 
-		send_ddp_segment(qp, sendmsg, wqe->remote_ep, wqe,
-				payload_length);
+		send_ddp_segment(qp, sendmsg, NULL, wqe, payload_length);
 		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> RDMA WRITE transmit bytes %zu through %zu\n",
 				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 				wqe->bytes_sent,
@@ -1012,7 +1011,7 @@ do_rdmap_read_request(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 	new_rdmap->source_stag = rte_cpu_to_be_32(wqe->rkey);
 	new_rdmap->source_offset = rte_cpu_to_be_64(wqe->remote_addr);
 
-	send_ddp_segment(qp, sendmsg, wqe->remote_ep, wqe, 0);
+	send_ddp_segment(qp, sendmsg, NULL, wqe, 0);
 
 	wqe->state = SEND_WQE_WAIT;
 } /* do_rdmap_read_request */
@@ -1093,7 +1092,7 @@ do_rdmap_terminate(struct usiw_qp *qp, struct packet_context *orig,
 	if (payload) {
 		payload->ddp_seg_len = rte_cpu_to_be_16(orig->ddp_seg_length);
 	}
-	(void)send_ddp_segment(qp, sendmsg, orig->src_ep, NULL, 0);
+	(void)send_ddp_segment(qp, sendmsg, NULL, NULL, 0);
 } /* do_rdmap_terminate */
 
 
@@ -1263,7 +1262,7 @@ respond_rdma_read(struct usiw_qp *qp)
 			memcpy(PAYLOAD_OF(new_rdmap), readresp->vaddr,
 					payload_length);
 
-			(void)send_ddp_segment(qp, sendmsg, readresp->sink_ep,
+			(void)send_ddp_segment(qp, sendmsg, readresp,
 					NULL, payload_length);
 			readresp->vaddr += payload_length;
 			readresp->msg_size -= payload_length;
@@ -1612,17 +1611,41 @@ sweep_unacked_packets(struct usiw_qp *qp, uint64_t now)
 
 	p = ep->tx_head;
 	while (count < ep->tx_pending_size && (sendmsg = *p) != NULL) {
+		int ret, cstatus;
 		pending = (struct pending_datagram_info *)(sendmsg + 1);
 		if (now > pending->next_retransmit
-				&& resend_ddp_segment(qp, sendmsg, ep) < 0) {
-			RTE_LOG(NOTICE, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> retransmit limit (%d) exceeded psn=%" PRIu32 "\n",
+				&& (ret = resend_ddp_segment(qp, sendmsg, ep)) < 0) {
+			cstatus = IBV_WC_FATAL_ERR;
+			switch (ret) {
+			case -EIO:
+				cstatus = IBV_WC_RETRY_EXC_ERR;
+				RTE_LOG(NOTICE, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> retransmit limit (%d) exceeded psn=%" PRIu32 "\n",
 					qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 					RETRANSMIT_MAX,
 					pending->psn);
+				break;
+			case -ENOMEM:
+				RTE_LOG(NOTICE, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> OOM on retransmit psn=%" PRIu32 "\n",
+					qp->shm_qp->dev_id, qp->shm_qp->qp_id,
+					pending->psn);
+				break;
+			default:
+				RTE_LOG(NOTICE, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> unknown error on retransmit psn=%" PRIu32 ": %s\n",
+					qp->shm_qp->dev_id, qp->shm_qp->qp_id,
+					pending->psn, rte_strerror(-ret));
+			}
 			if (pending->wqe) {
 				rte_spinlock_lock(&qp->sq.lock);
-				post_send_cqe(qp, pending->wqe, IBV_WC_RETRY_EXC_ERR);
+				post_send_cqe(qp, pending->wqe, cstatus);
 				rte_spinlock_unlock(&qp->sq.lock);
+			} else if (pending->readresp) {
+				struct rdmap_tagged_packet *rdmap;
+				rdmap = rte_pktmbuf_mtod_offset(sendmsg, struct rdmap_tagged_packet *,
+						sizeof(struct ether_hdr) + sizeof(struct ipv4_hdr)
+						+ sizeof(struct udp_hdr) + sizeof(struct trp_hdr));
+				RTE_LOG(NOTICE, USER1, "was read response; L=%d bytes left=%" PRIu32 "\n",
+						DDP_GET_L(rdmap->head.ddp_flags),
+						pending->readresp->msg_size);
 			}
 			atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
 			if (p == ep->tx_head) {

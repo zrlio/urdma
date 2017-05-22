@@ -119,6 +119,7 @@ struct usiw_recv_wqe {
 struct pending_datagram_info {
 	uint64_t next_retransmit;
 	struct usiw_send_wqe *wqe;
+	struct read_response_state *readresp;
 	uint16_t transmit_count;
 	uint16_t ddp_length;
 	uint32_t ddp_raw_cksum;
