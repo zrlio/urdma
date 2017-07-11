@@ -95,4 +95,8 @@ typedef struct dma_attrs *dma_attrs_t;
 typedef unsigned long dma_attrs_t;
 #endif
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0)
+#define HAVE_CREATE_AH_UDATA 1
+#endif
+
 #endif
