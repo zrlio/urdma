@@ -58,6 +58,8 @@ src_liburdma_liburdma_la_SOURCES = \
 	src/liburdma/interface.h \
 	src/liburdma/verbs.c \
 	src/liburdma/verbs.h \
+	src/util/binheap.c \
+	src/util/binheap.h \
 	src/util/config_file.c \
 	src/util/config_file.h \
 	src/util/list.h \
@@ -140,6 +142,14 @@ src_kvstore_client_kvstore_client_CFLAGS = $(MACHINE_CFLAGS)
 src_kvstore_client_kvstore_client_CPPFLAGS = -I$(srcdir)/include -I$(srcdir)/src/util -I$(srcdir)/src/liburdma $(DPDK_CPPFLAGS)
 src_kvstore_client_kvstore_client_LDFLAGS = $(DPDK_LDFLAGS)
 src_kvstore_client_kvstore_client_LDADD = src/liburdma/liburdma.la $(DPDK_LIBS) -lm
+
+check_PROGRAMS = tests/binheap
+tests_binheap_SOURCES = tests/binheap.c \
+	src/util/binheap.c \
+	src/util/binheap.h
+tests_binheap_CPPFLAGS = -I$(srcdir)/src/util
+
+TESTS = tests/binheap
 
 # Disable the uninstall check since the kernel build system doesn't
 # provide a module uninstall target.
