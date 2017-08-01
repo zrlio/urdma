@@ -59,6 +59,7 @@
 #include <rte_spinlock.h>
 
 #include "urdmad_private.h"
+#include "binheap.h"
 #include "list.h"
 #include "verbs.h"
 
@@ -222,6 +223,7 @@ struct ee_state {
 
 	/* RX TRP state */
 	uint32_t recv_ack_psn;
+	struct binheap *recv_rresp_last_psn;
 
 	uint32_t trp_flags;
 	struct psn_range recv_sack_psn;

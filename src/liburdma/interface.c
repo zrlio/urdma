@@ -229,7 +229,7 @@ usiw_send_wqe_queue_lookup(struct usiw_send_wqe_queue *q,
 			}
 			break;
 		case usiw_wr_read:
-			if (wr_key_data == STAG_RDMA_READ(lptr->msn)) {
+			if (wr_key_data == lptr->local_stag) {
 				*wqe = lptr;
 				return 0;
 			}
@@ -974,9 +974,7 @@ do_rdmap_read_request(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 {
 	struct rdmap_readreq_packet *new_rdmap;
 	struct rte_mbuf *sendmsg;
-	struct ibv_mr *temp_mr;
 	unsigned int packet_length;
-	uint32_t rkey;
 
 	if (wqe->state != SEND_WQE_TRANSFER) {
 		return;
@@ -994,16 +992,6 @@ do_rdmap_read_request(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 		 * to send. */
 		return;
 	}
-
-	rkey = STAG_RDMA_READ(wqe->msn);
-	temp_mr = urdma_reg_mr_with_rkey(&qp->pd->pd, wqe->iov[0].iov_base,
-			wqe->iov[0].iov_len, IBV_ACCESS_REMOTE_WRITE,
-			rkey);
-	if (!temp_mr) {
-		/* FIXME: issue error completion */
-		atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
-		return;
-	}
 	qp->ord_active++;
 
 	sendmsg = rte_pktmbuf_alloc(qp->dev->tx_ddp_mempool);
@@ -1014,7 +1002,7 @@ do_rdmap_read_request(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 	new_rdmap->untagged.head.ddp_flags = DDP_V1_UNTAGGED_LAST_DF;
 	new_rdmap->untagged.head.rdmap_info
 		= rdmap_opcode_rdma_read_request | RDMAP_V1;
-	new_rdmap->untagged.head.sink_stag = rte_cpu_to_be_32(rkey);
+	new_rdmap->untagged.head.sink_stag = rte_cpu_to_be_32(wqe->local_stag);
 	new_rdmap->untagged.qn = rte_cpu_to_be_32(1);
 	new_rdmap->untagged.msn = rte_cpu_to_be_32(wqe->msn);
 	new_rdmap->untagged.mo = rte_cpu_to_be_32(0);
@@ -1361,6 +1349,42 @@ process_rdma_read_request(struct usiw_qp *qp, struct packet_context *orig)
 }	/* process_rdma_read_request */
 
 
+/** Complete the requested WQE if and only if all completion ordering rules
+ * have been met. */
+static void
+try_complete_wqe(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
+{
+	/* We cannot post the completion until all previous WQEs have
+	 * completed. */
+	if (wqe == qp->sq.active_head.tqh_first) {
+		rte_spinlock_lock(&qp->sq.lock);
+		if (wqe->flags & usiw_send_signaled) {
+			post_send_cqe(qp, wqe, IBV_WC_SUCCESS);
+		} else {
+			qp_free_send_wqe(qp, wqe, true);
+		}
+		rte_spinlock_unlock(&qp->sq.lock);
+		if (wqe->opcode == usiw_wr_read) {
+			assert(qp->ord_active > 0);
+			qp->ord_active--;
+		}
+	}
+} /* try_complete_wqe */
+
+
+static struct usiw_send_wqe *
+find_first_rdma_read(struct usiw_qp *qp)
+{
+	struct usiw_send_wqe *lptr, **prev;
+	TAILQ_FOR_EACH(lptr, &qp->sq.active_head, active, prev) {
+		if (lptr->opcode == usiw_wr_read) {
+			return lptr;
+		}
+	}
+	return NULL;
+}	/* find_first_rdma_read */
+
+
 static void
 process_rdma_read_response(struct usiw_qp *qp, struct packet_context *orig)
 {
@@ -1370,12 +1394,13 @@ process_rdma_read_response(struct usiw_qp *qp, struct packet_context *orig)
 	uint32_t rdma_length;
 	int ret;
 
+	/* This ensures that at least one RDMA READ Request is active for this
+	 * STag. We don't need to know exactly which one; this just ensures
+	 * that we don't accept a random RDMA READ Response. */
 	rdmap = (struct rdmap_tagged_packet *)orig->rdmap;
-	/* FIXME: stag != msn; need to disambiguate */
 	ret = usiw_send_wqe_queue_lookup(&qp->sq,
 			usiw_wr_read, rte_be_to_cpu_32(rdmap->head.sink_stag),
 			&read_wqe);
-
 	if (ret < 0 || !read_wqe || read_wqe->opcode != usiw_wr_read) {
 		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Unexpected RDMA READ response!\n",
 			qp->shm_qp->dev_id, qp->shm_qp->qp_id);
@@ -1383,26 +1408,12 @@ process_rdma_read_response(struct usiw_qp *qp, struct packet_context *orig)
 		return;
 	}
 
-	rdma_length = orig->ddp_seg_length - sizeof(*rdmap);
-
-	read_wqe->bytes_sent += rdma_length;
-	assert(read_wqe->bytes_sent <= read_wqe->iov[0].iov_len);
-	if (read_wqe->bytes_sent == read_wqe->iov[0].iov_len) {
-		/* We have received the last datagram */
-		mr = usiw_mr_lookup(qp->pd, STAG_RDMA_READ(read_wqe->msn));
-		if (mr) {
-			usiw_dereg_mr_real(qp->pd, mr);
-		}
-
-		rte_spinlock_lock(&qp->sq.lock);
-		if (read_wqe->flags & usiw_send_signaled) {
-			post_send_cqe(qp, read_wqe, IBV_WC_SUCCESS);
-		} else {
-			qp_free_send_wqe(qp, read_wqe, true);
-		}
-		rte_spinlock_unlock(&qp->sq.lock);
-		assert(qp->ord_active > 0);
-		qp->ord_active--;
+	/* If this was the last segment of an RDMA READ Response message, insert
+	 * its PSN into the heap. Next time we receive a burst of packets, we
+	 * will retrieve this PSN from the heap if we have received all prior
+	 * packets and complete the corresponding WQE in the correct order. */
+	if (DDP_GET_L(rdmap->head.ddp_flags)) {
+		binheap_insert(qp->remote_ep.recv_rresp_last_psn, orig->psn);
 	}
 }	/* process_rdma_read_response */
 
@@ -1516,25 +1527,6 @@ out:
 		qp_shutdown(qp);
 	}
 } /* process_terminate */
-
-
-/** Complete the requested WQE if and only if all completion ordering rules
- * have been met. */
-static void
-try_complete_wqe(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
-{
-	/* We cannot post the completion until all previous WQEs have
-	 * completed. */
-	if (wqe == qp->sq.active_head.tqh_first) {
-		rte_spinlock_lock(&qp->sq.lock);
-		if (wqe->flags & usiw_send_signaled) {
-			post_send_cqe(qp, wqe, IBV_WC_SUCCESS);
-		} else {
-			qp_free_send_wqe(qp, wqe, true);
-		}
-		rte_spinlock_unlock(&qp->sq.lock);
-	}
-} /* try_complete_wqe */
 
 
 static void
@@ -1991,6 +1983,7 @@ process_receive_queue(struct usiw_qp *qp, void *prefetch_addr, uint64_t *now)
 	return rx_count;
 }
 
+
 /* Make forward progress on the queue pair.  This does not guarantee that
  * everything that could be done will be done, but rather that if this function
  * is called at a regular interval, user operations will eventually complete
@@ -2000,6 +1993,7 @@ progress_qp(struct usiw_qp *qp)
 {
 	struct usiw_send_wqe *send_wqe, **prev;
 	uint64_t now;
+	uint32_t psn;
 	int scount, ret;
 
 	/* Receive loop fills in now for us */
@@ -2007,6 +2001,30 @@ progress_qp(struct usiw_qp *qp)
 
 	/* Call any timers only once per millisecond */
 	sweep_unacked_packets(qp, now);
+
+	/* Process RDMA READ Response last segments. */
+	while (!binheap_empty(qp->remote_ep.recv_rresp_last_psn)) {
+		binheap_peek(qp->remote_ep.recv_rresp_last_psn, &psn);
+		if (psn < qp->remote_ep.recv_ack_psn) {
+			/* We have received all prior packets, so since we have
+			 * received the RDMA READ Response segment with L=1, we
+			 * are guaranteed to have placed all data corresponding
+			 * to this RDMA READ Response, and can complete the
+			 * corresponding WQE. The heap ensures that we process
+			 * the segments in the correct order, and
+			 * try_complete_wqe() ensures that we do not complete an
+			 * RDMA READ request out of order. */
+			send_wqe = find_first_rdma_read(qp);
+			if (!(WARN_ONCE(!send_wqe,
+					"No RDMA READ request pending\n"))) {
+				send_wqe->state = SEND_WQE_COMPLETE;
+				try_complete_wqe(qp, send_wqe);
+			}
+			binheap_pop(qp->remote_ep.recv_rresp_last_psn);
+		} else {
+			break;
+		}
+	}
 
 	scount = 0;
 	TAILQ_FOR_EACH(send_wqe, &qp->sq.active_head, active, prev) {
@@ -2081,6 +2099,7 @@ usiw_do_destroy_qp(struct usiw_qp *qp)
 
 	usiw_recv_wqe_queue_destroy(&qp->rq0);
 	usiw_send_wqe_queue_destroy(&qp->sq);
+	free(qp->remote_ep.recv_rresp_last_psn);
 	free(qp->readresp_store);
 
 	memset(&msg, 0, sizeof(msg));
@@ -2124,12 +2143,17 @@ start_qp(struct usiw_qp *qp)
 	}
 	qp->remote_ep.tx_head = qp->remote_ep.tx_pending;
 
+	qp->remote_ep.recv_rresp_last_psn = binheap_new(qp->shm_qp->ord_max);
+	if (!qp->remote_ep.recv_rresp_last_psn) {
+		goto free_tx_pending;
+	}
+
 	qp->txq = calloc(qp->shm_qp->tx_burst_size, sizeof(*qp->txq));
 	if (!qp->txq) {
 		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Set up txq failed: %s\n",
 						qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 						strerror(errno));
-		goto free_tx_pending;
+		goto free_recv_rresp_last_psn;
 	}
 	qp->txq_end = qp->txq;
 
@@ -2151,6 +2175,8 @@ start_qp(struct usiw_qp *qp)
 
 free_txq:
 	free(qp->txq);
+free_recv_rresp_last_psn:
+	free(qp->remote_ep.recv_rresp_last_psn);
 free_tx_pending:
 	free(qp->remote_ep.tx_pending);
 free_readresp_store:
