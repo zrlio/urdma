@@ -1404,13 +1404,22 @@ usiw_num_completion_vectors(void)
 	return max_socket_id + 1;
 } /* usiw_num_completion_vectors */
 
+/** Returns statistics for the given queue pair. Note that recv_count_histo is
+ * dynamically allocated and should be free'd after use. */
 void
 urdma_query_qp_stats(const struct ibv_qp *restrict ib_qp,
 		struct urdma_qp_stats *restrict stats)
 {
 	struct usiw_qp *qp = container_of(ib_qp, struct usiw_qp, ib_qp);
-	memcpy(stats, &qp->stats, sizeof(*stats));
-} /* usiw_port_get_stats */
+	size_t histo_size = sizeof(*qp->stats.recv_count_histo) *
+		(qp->stats.recv_max_burst_size + 1);
+	stats->recv_count_histo = malloc(histo_size);
+	if (stats->recv_count_histo) {
+		memcpy(stats->recv_count_histo,
+			&qp->stats.recv_count_histo, histo_size);
+	}
+	stats->recv_max_burst_size = qp->stats.recv_max_burst_size;
+} /* urdma_query_qp_stats */
 
 
 int
