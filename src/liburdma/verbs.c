@@ -1405,22 +1405,52 @@ usiw_num_completion_vectors(void)
 } /* usiw_num_completion_vectors */
 
 /** Returns statistics for the given queue pair. Note that recv_count_histo is
- * dynamically allocated and should be free'd after use. */
+ * dynamically allocated and should be free'd after use.
+ *
+ * This function is deprecated and urdma_query_qp_stats_ex() should be used
+ * instead of this function. */
 void
 urdma_query_qp_stats(const struct ibv_qp *restrict ib_qp,
 		struct urdma_qp_stats *restrict stats)
 {
 	struct usiw_qp *qp = container_of(ib_qp, struct usiw_qp, ib_qp);
-	size_t histo_size = sizeof(*qp->stats.recv_count_histo) *
-		(qp->stats.recv_max_burst_size + 1);
+	size_t histo_size = sizeof(*qp->stats.base.recv_count_histo) *
+		(qp->stats.base.recv_max_burst_size + 1);
 	stats->recv_count_histo = malloc(histo_size);
 	if (stats->recv_count_histo) {
 		memcpy(stats->recv_count_histo,
-			&qp->stats.recv_count_histo, histo_size);
+			&qp->stats.base.recv_count_histo, histo_size);
 	}
-	stats->recv_max_burst_size = qp->stats.recv_max_burst_size;
-} /* urdma_query_qp_stats */
+	stats->recv_max_burst_size = qp->stats.base.recv_max_burst_size;
+} /* usiw_query_qp_stats */
 
+/** Returns statistics for the given queue pair. The returned structure must be
+ * freed after use with urdma_query_qp_stats_ex(). */
+struct urdma_qp_stats_ex *
+urdma_query_qp_stats_ex(const struct ibv_qp *ib_qp)
+{
+	struct usiw_qp *qp = container_of(ib_qp, struct usiw_qp, ib_qp);
+	struct urdma_qp_stats_ex *stats = malloc(sizeof(*stats));
+	if (stats) {
+		stats->size = sizeof(*stats);
+		urdma_query_qp_stats(ib_qp, &stats->base);
+		if (!stats->base.recv_count_histo) {
+			free(stats);
+			return NULL;
+		}
+		stats->recv_psn_gap_count = qp->stats.recv_psn_gap_count;
+		stats->recv_retransmit_count = qp->stats.recv_retransmit_count;
+		stats->recv_sack_count = qp->stats.recv_sack_count;
+	}
+	return stats;
+} /* urdma_query_qp_stats_ex */
+
+void
+urdma_free_qp_stats_ex(struct urdma_qp_stats_ex *stats)
+{
+	free(stats->base.recv_count_histo);
+	free(stats);
+} /* urdma_free_qp_stats_ex */
 
 int
 usiw_init_context(struct verbs_device *device, struct ibv_context *context,

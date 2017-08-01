@@ -1801,11 +1801,12 @@ process_data_packet(struct usiw_qp *qp, struct rte_mbuf *mbuf)
 		break;
 	case trp_sack:
 		/* This is a selective acknowledgement */
-		RTE_LOG(NOTICE, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> receive SACK [%" PRIu32 ", %" PRIu32 "); send_ack_psn %" PRIu32 "\n",
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> receive SACK [%" PRIu32 ", %" PRIu32 "); send_ack_psn %" PRIu32 "\n",
 				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 				rte_be_to_cpu_32(trp_hdr->psn),
 				rte_be_to_cpu_32(trp_hdr->ack_psn),
 				ctx.src_ep->send_last_acked_psn);
+		qp->stats.recv_sack_count++;
 		process_trp_sack(ctx.src_ep, rte_be_to_cpu_32(trp_hdr->psn),
 				rte_be_to_cpu_32(trp_hdr->ack_psn));
 		return;
@@ -1852,10 +1853,11 @@ process_data_packet(struct usiw_qp *qp, struct rte_mbuf *mbuf)
 		/* We detected a sequence number gap.  Try to build a
 		 * contiguous range so we can send a SACK to lower the number
 		 * of retransmissions. */
-		RTE_LOG(INFO, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> receive psn %" PRIu32 "; next expected psn %" PRIu32 "\n",
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> receive psn %" PRIu32 "; next expected psn %" PRIu32 "\n",
 				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 				ctx.psn,
 				ctx.src_ep->recv_ack_psn);
+		qp->stats.recv_psn_gap_count++;
 		if (ctx.src_ep->trp_flags & trp_recv_missing) {
 			if (ctx.psn == ctx.src_ep->recv_sack_psn.max) {
 				ctx.src_ep->recv_sack_psn.max = ctx.psn + 1;
@@ -1897,9 +1899,10 @@ process_data_packet(struct usiw_qp *qp, struct rte_mbuf *mbuf)
 	} else {
 		/* This is a retransmission of a packet which we have already
 		 * acknowledged; throw it away. */
-		RTE_LOG(NOTICE, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> got retransmission psn %" PRIu32 "; expected psn %" PRIu32 "\n",
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> got retransmission psn %" PRIu32 "; expected psn %" PRIu32 "\n",
 						qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 						ctx.psn, ctx.src_ep->recv_ack_psn);
+		qp->stats.recv_retransmit_count++;
 		return;
 	}
 
@@ -1985,7 +1988,7 @@ process_receive_queue(struct usiw_qp *qp, void *prefetch_addr, uint64_t *now)
 	} else {
 		rx_count = 0;
 	}
-	qp->stats.recv_count_histo[rx_count]++;
+	qp->stats.base.recv_count_histo[rx_count]++;
 	if (rx_count != 0) {
 		rte_prefetch0(rte_pktmbuf_mtod(rxmbuf[0], void *));
 		if (now) {
@@ -2113,6 +2116,18 @@ usiw_do_destroy_qp(struct usiw_qp *qp)
 {
 	struct urdmad_sock_qp_msg msg;
 
+	if (getenv("URDMA_DEBUG")) {
+		fprintf(stderr, "<dev=%" PRIx16" qp=%" PRIx16 "> recv_psn_gap_count %" PRIuMAX "\n",
+				qp->dev->portid, qp->shm_qp->qp_id,
+				qp->stats.recv_psn_gap_count);
+		fprintf(stderr, "<dev=%" PRIx16" qp=%" PRIx16 "> recv_retransmit_count %" PRIuMAX "\n",
+				qp->dev->portid, qp->shm_qp->qp_id,
+				qp->stats.recv_retransmit_count);
+		fprintf(stderr, "<dev=%" PRIx16" qp=%" PRIx16 "> recv_sack_count %" PRIuMAX "\n",
+				qp->dev->portid, qp->shm_qp->qp_id,
+				qp->stats.recv_sack_count);
+	}
+
 	if (atomic_fetch_sub(&qp->recv_cq->refcnt, 1) == 1) {
 		urdma_do_destroy_cq(qp->recv_cq);
 	}
@@ -2133,7 +2148,7 @@ usiw_do_destroy_qp(struct usiw_qp *qp)
 	msg.hdr.qp_id = rte_cpu_to_be_16(qp->shm_qp->qp_id);
 	msg.ptr = rte_cpu_to_be_64((uintptr_t)qp->shm_qp);
 	send(qp->dev->urdmad_fd, &msg, sizeof(msg), 0);
-	free(qp->stats.recv_count_histo);
+	free(qp->stats.base.recv_count_histo);
 	free(qp->txq);
 	free(qp);
 } /* usiw_do_destroy_qp */
@@ -2182,10 +2197,10 @@ start_qp(struct usiw_qp *qp)
 	}
 	qp->txq_end = qp->txq;
 
-	qp->stats.recv_max_burst_size = qp->shm_qp->rx_burst_size;
-	qp->stats.recv_count_histo = calloc(qp->stats.recv_max_burst_size + 1,
-			sizeof(*qp->stats.recv_count_histo));
-	if (!qp->stats.recv_count_histo) {
+	qp->stats.base.recv_max_burst_size = qp->shm_qp->rx_burst_size;
+	qp->stats.base.recv_count_histo = calloc(qp->stats.base.recv_max_burst_size + 1,
+			sizeof(*qp->stats.base.recv_count_histo));
+	if (!qp->stats.base.recv_count_histo) {
 		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Set up recv_count_histo failed: %s\n",
 						qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 						strerror(errno));

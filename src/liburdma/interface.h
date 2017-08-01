@@ -295,7 +295,7 @@ struct usiw_qp {
 	struct usiw_send_wqe_queue sq;
 
 	struct rte_eth_fdir_filter fdir_filter;
-        struct urdma_qp_stats stats;
+        struct urdma_qp_stats_ex stats;
 
 	uint64_t timer_last;
 	struct usiw_recv_wqe_queue rq0;
