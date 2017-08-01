@@ -536,6 +536,9 @@ our_eal_master_thread(void *sem)
 	eal_argv[eal_argc - 1] = format_coremask(driver->lcore_mask,
 						 RTE_DIM(driver->lcore_mask));
 
+	/* Send log messages to stderr instead of syslog */
+	rte_openlog_stream(stderr);
+
 	/* rte_eal_init does nothing and returns -1 if it was already called
 	 * (although this behavior is not documented).  rte_eal_init also
 	 * crashes the whole program if it fails for any other reason, so we

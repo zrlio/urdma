@@ -1170,9 +1170,22 @@ do_init_driver(void)
 } /* do_init_driver */
 
 
+static void usage(const char *argv0)
+{
+	printf("  %-20s%s\n", "--systemd",
+			"Assume we are running from systemd");
+	printf("%22cDump log messages to stderr but not syslog\n", ' ');
+	fflush(stdout);
+} /* usage */
+
+
 int
 main(int argc, char *argv[])
 {
+	char **arg;
+
+	rte_set_application_usage_hook(&usage);
+
 	/* We cannot access /proc/self/pagemap as non-root if we are not
 	 * dumpable
 	 *
@@ -1181,6 +1194,23 @@ main(int argc, char *argv[])
 	 * run */
 	if (prctl(PR_SET_DUMPABLE, 1, 0, 0, 0) < 0) {
 		perror("WARNING: set dumpable flag failed; DPDK may not initialize properly");
+	}
+
+	/* Scan command line for --systemd option. We can't use getopt_long()
+	 * because we must know about this argument *before* we call
+	 * rte_eal_init(), which consumes most command line arguments. */
+	for (arg = argv; *arg != NULL; ++arg) {
+		if (!strcmp(*arg, "--systemd")) {
+			/* If we are running under systemd, stderr is
+			 * automatically logged to the systemd journal and thus
+			 * also logging to syslog (which DPDK does by default)
+			 * results in duplicate log messages. By preserving
+			 * stderr, we ensure that any error messages printed by
+			 * a library (such as glibc heap corruption dumps) make
+			 * it to the journal. */
+			rte_openlog_stream(stderr);
+			break;
+		}
 	}
 
 	/* rte_eal_init does nothing and returns -1 if it was already called
