@@ -151,6 +151,8 @@ tests_binheap_CPPFLAGS = -I$(srcdir)/src/util
 
 TESTS = tests/binheap
 
+doc_DATA = doc/urdma-schema.json
+
 # Disable the uninstall check since the kernel build system doesn't
 # provide a module uninstall target.
 distuninstallcheck:
