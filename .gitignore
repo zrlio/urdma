@@ -15,4 +15,7 @@ urdma*.tar*
 .libs
 *.la
 *.lo
+*.log
 *.o
+*.o.d
+*.trs

@@ -59,6 +59,7 @@
 #include <rte_spinlock.h>
 
 #include "urdmad_private.h"
+#include "binheap.h"
 #include "list.h"
 #include "verbs.h"
 
@@ -118,6 +119,7 @@ struct usiw_recv_wqe {
 struct pending_datagram_info {
 	uint64_t next_retransmit;
 	struct usiw_send_wqe *wqe;
+	struct read_response_state *readresp;
 	uint16_t transmit_count;
 	uint16_t ddp_length;
 	uint32_t ddp_raw_cksum;
@@ -222,6 +224,7 @@ struct ee_state {
 
 	/* RX TRP state */
 	uint32_t recv_ack_psn;
+	struct binheap *recv_rresp_last_psn;
 
 	uint32_t trp_flags;
 	struct psn_range recv_sack_psn;
