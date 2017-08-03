@@ -353,14 +353,37 @@ free_args:
 } /* urdma__config_file_get_eal_args */
 
 
+static char *
+get_default_sock_name(void)
+{
+	static const char *default_sock_name = "/urdma/urdma.sock";
+	char *sock_path;
+	char *runtime_dir;
+	size_t len;
+
+	runtime_dir = getenv("XDG_RUNTIME_DIR");
+	if (!runtime_dir || !(*runtime_dir)) {
+		return NULL;
+	}
+
+	len = strlen(runtime_dir);
+	sock_path = malloc(len + strlen(default_sock_name) + 1);
+	if (!sock_path) {
+		return NULL;
+	}
+
+	strncpy(sock_path, runtime_dir, len + 1);
+	return strcat(sock_path, default_sock_name);
+} /* get_default_sock_name */
+
+
 char *
 urdma__config_file_get_sock_name(struct usiw_config *config)
 {
 	struct json_object *sock_name;
 
 	if (!json_object_object_get_ex(config->root, "socket", &sock_name)) {
-		fprintf(stderr, "Configuration error: JSON root object has no \"socket\" field\n");
-		return NULL;
+		return get_default_sock_name();
 	}
 
 	if (!json_object_is_type(sock_name, json_type_string)) {

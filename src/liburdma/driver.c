@@ -345,6 +345,7 @@ free_arg_list(int argc, char **argv)
 static bool
 do_config(char **sock_name, int *eal_argc, char ***eal_argv)
 {
+	static const size_t hostnamesize = HOST_NAME_MAX;
 	struct usiw_config config;
 	bool result = false;
 	int ret;
@@ -371,12 +372,14 @@ do_config(char **sock_name, int *eal_argc, char ***eal_argv)
 	 * [0] "<procname>"
 	 * [1..argc-1] "<argv>"
 	 * [argc] "--proc-type=secondary"
-	 * [argc+1] "-c"
-	 * [argc+2] "<coremask>"
-	 * [argc+3] NULL
+	 * [argc+1] "--file-prefix"
+	 * [argc+2] "<hostname>"
+	 * [argc+3] "-c"
+	 * [argc+4] "<coremask>"
+	 * [argc+5] NULL
 	 */
 	*eal_argc = urdma__config_file_get_eal_args(&config, NULL);
-	*eal_argv = calloc(*eal_argc + 4, sizeof(**eal_argv));
+	*eal_argv = calloc(*eal_argc + 6, sizeof(**eal_argv));
 	if (!(*eal_argv)) {
 		goto free_sock_name;
 	}
@@ -387,6 +390,17 @@ do_config(char **sock_name, int *eal_argc, char ***eal_argv)
 		goto free_eal_args;
 	}
 	if (!((*eal_argv)[*eal_argc] = strdup("--proc-type=secondary"))) {
+		goto free_eal_args;
+	}
+	(*eal_argc)++;
+	if (!((*eal_argv)[*eal_argc] = strdup("--file-prefix"))) {
+		goto free_eal_args;
+	}
+	(*eal_argc)++;
+	if (!((*eal_argv)[*eal_argc] = malloc(hostnamesize))) {
+		goto free_eal_args;
+	}
+	if (gethostname((*eal_argv)[*eal_argc], hostnamesize)) {
 		goto free_eal_args;
 	}
 	(*eal_argc)++;

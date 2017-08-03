@@ -167,13 +167,13 @@ all-local: src/urdmad/urdmad.service
 MOSTLYCLEANFILES = src/urdmad/urdmad.service
 
 install-data-hook:
-	$(MKDIR_P) $(DESTDIR)$(prefix)/lib/systemd/system
-	$(INSTALL) -m644 src/urdmad/urdmad.service $(DESTDIR)$(prefix)/lib/systemd/system
-	@echo You will need to reload systemd and enable this service
-	@echo systemctl daemon-reload
-	@echo systemctl enable urdmad
+	$(MKDIR_P) $(DESTDIR)$(prefix)/lib/systemd/user
+	$(INSTALL) -m644 src/urdmad/urdmad.service $(DESTDIR)$(prefix)/lib/systemd/user
+	@echo You will need to reload systemd and start this service
+	@echo systemctl --user daemon-reload
+	@echo systemctl --user start urdmad
 
 uninstall-hook:
-	$(RM) $(DESTDIR)$(prefix)/lib/systemd/system/urdmad.service
+	$(RM) $(DESTDIR)$(prefix)/lib/systemd/user/urdmad.service
 
 SUBDIRS = src/kmod
