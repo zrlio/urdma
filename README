@@ -69,10 +69,14 @@ like this, with appropriate values substituted in:
 
 Finally, the urdmad service must be running:
 
-    $ sudo systemctl start urdmad
+    $ systemctl --user start urdmad
 
 This will cause devices to appear in your "ip link" output, and cause
 uverbs devices to appear in /sys/class/infiniband_verbs.
+
+Or you can manually run urdmad as root; in this case you will need to
+run every verbs application as root to pick up the DPDK configuration
+which cannot be relocated.
 
 Known Issues
 ------------
