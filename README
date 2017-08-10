@@ -62,7 +62,7 @@ To run an application with this driver, the KNI and urdma modules must be loaded
 You will need to create a file ${sysconfdir}/rdma/urdma.json that looks
 like this, with appropriate values substituted in:
 
-    { "ports": { "ipv4_address": "10.2.0.100" },
+    { "ports": [ { "ipv4_address": "10.2.0.100" } ],
       "sock_name": "/run/urdma.sock",
       "eal_args": { "log-level": 7 }
     }
