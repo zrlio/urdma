@@ -135,11 +135,15 @@ fi
 MACHINE_CFLAGS=$urdma_cv_cflags_machine
 AC_SUBST([MACHINE_CFLAGS])
 
+AC_MSG_CHECKING([for Linux kernel source tree])
 if test ${KERNELDIR}x = x; then
 	KERNELDIR="/lib/modules/`uname -r`/build"
 fi
 if test ! -f ${KERNELDIR}/Makefile; then
-	AC_MSG_ERROR([urdma requires a kernel source tree.  Install kernel-devel or equivalent])
+	AC_MSG_RESULT([no])
+	AC_MSG_ERROR([urdma requires a Linux kernel source tree.  Install kernel-devel or equivalent])
+else
+	AC_MSG_RESULT([${KERNELDIR}])
 fi
 
 AC_ARG_ENABLE([debug], [AS_HELP_STRING([--enable-debug],
