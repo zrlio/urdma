@@ -49,6 +49,7 @@
 
 #include <infiniband/driver.h>
 
+#include <rte_config.h>
 #include <rte_ethdev.h>
 #include <rte_errno.h>
 #include <rte_ip.h>

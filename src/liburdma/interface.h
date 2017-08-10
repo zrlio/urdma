@@ -50,6 +50,7 @@
 
 #include <uthash.h>
 
+#include <rte_config.h>
 #include <rte_ethdev.h>
 #include <rte_ether.h>
 #include <rte_kni.h>

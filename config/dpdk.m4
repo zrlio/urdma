@@ -50,7 +50,7 @@ if test ${RTE_TARGET}x = x; then
 	AC_MSG_ERROR([urdma requires DPDK.  Set RTE_TARGET to the DPDK compilation target])
 fi
 
-DPDK_CPPFLAGS="-I${RTE_SDK}/${RTE_TARGET}/include -include rte_config.h"
+DPDK_CPPFLAGS="-I${RTE_SDK}/${RTE_TARGET}/include"
 AC_SUBST([DPDK_CPPFLAGS])
 DPDK_LDFLAGS="-L${RTE_SDK}/${RTE_TARGET}/lib"
 AC_SUBST([DPDK_LDFLAGS])

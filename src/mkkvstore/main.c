@@ -56,6 +56,7 @@
 
 #include <math.h>
 
+#include <rte_config.h>
 #include <rte_malloc.h>
 #include <rte_eal.h>
 #include <rte_jhash.h>
