@@ -91,6 +91,23 @@ Known Issues
                 --mca btl_openib_receive_queues P,65536,256,192,128 \
 		${mpi_app} ${mpi_app_args}...
 
+ - If running DPDK sample applications succeeds, but running urdmad
+   fails with "Configuration expects N devices but found only 0", the
+   DPDK PMD drivers are probably not being loaded at runtime by default.
+   If this is the case then you will probably need to load them by hand,
+   by adding an argument to urdmad like:
+
+     urdmad -d ${RTE_SDK}/${RTE_TARGET}/lib/libpmd_net_i40e.so.1
+
+   and adding the equivalent to urdma.json:
+
+     "eal_args": { /* ... */, "d": "..." }
+
+   To avoid this, you can set CONFIG_RTE_EAL_PMD_PATH to a directory
+   like /usr/local/lib/dpdk-pmds when building DPDK, and the place the
+   PMD .so files into that directory after DPDK is installed. DPDK will
+   then auto-load all .so files in that directory as PMD libraries.
+
  - There is a potential race condition with completion channels, where a
    completion event can get lost, and thus a thread waiting on
    ibv_get_cq_event() will never wake up, leading to a deadlock.  A cause has
