@@ -73,13 +73,13 @@ rm -f conftest.make])
 if test "x$urdma_cv_cflags_machine" = "xnot found"; then
 	AC_MSG_ERROR([Could not detect DPDK compiler flags; check your DPDK installation])
 fi
-MACHINE_CFLAGS=$urdma_cv_cflags_machine
-AC_SUBST([MACHINE_CFLAGS])
+DPDK_CFLAGS=$urdma_cv_cflags_machine
+AC_SUBST([DPDK_CFLAGS])
 
 old_CFLAGS="${CFLAGS}"
 old_CPPFLAGS="${CPPFLAGS}"
 old_LDFLAGS="${LDFLAGS}"
-CFLAGS="${CFLAGS} ${MACHINE_CFLAGS}"
+CFLAGS="${CFLAGS} ${DPDK_CFLAGS}"
 CPPFLAGS="${CPPFLAGS} ${DPDK_CPPFLAGS}"
 LDFLAGS="${CPPFLAGS} ${DPDK_LDFLAGS}"
 AC_CHECK_HEADERS([rte_ethdev.h], [],
@@ -123,7 +123,7 @@ _dpdkcf_old_CPPFLAGS="${CPPFLAGS}"
 _dpdkcf_old_LDFLAGS="${LDFLAGS}"
 _dpdkcf_old_LIBS="${LIBS}"
 
-CFLAGS="${CFLAGS} ${MACHINE_CFLAGS}"
+CFLAGS="${CFLAGS} ${DPDK_CFLAGS}"
 CPPFLAGS="${CPPFLAGS} ${DPDK_CPPFLAGS}"
 LDFLAGS="${CPPFLAGS} ${DPDK_LDFLAGS}"
 LIBS="${DPDK_LIBS} ${LIBS}"
