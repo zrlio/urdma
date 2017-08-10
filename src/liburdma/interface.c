@@ -1128,7 +1128,7 @@ dequeue_recv_wqes(struct usiw_qp *qp)
 	struct usiw_recv_wqe *wqe[qp->rq0.max_wr + 1];
 	unsigned int i, ret;
 
-	while ((ret = rte_ring_dequeue_burst(qp->rq0.ring, (void **)wqe,
+	while ((ret = RING_DEQUEUE_BURST(qp->rq0.ring, (void **)wqe,
 						qp->rq0.max_wr + 1)) > 0) {
 		for (i = 0; i < ret; i++) {
 			wqe[i]->remote_ep = &qp->remote_ep;
@@ -1980,7 +1980,7 @@ process_receive_queue(struct usiw_qp *qp, void *prefetch_addr, uint64_t *now)
 				qp->shm_qp->rx_queue,
 				rxmbuf, qp->shm_qp->rx_burst_size);
 	} else if (qp->remote_ep.rx_queue) {
-		rx_count = rte_ring_dequeue_burst(qp->remote_ep.rx_queue,
+		rx_count = RING_DEQUEUE_BURST(qp->remote_ep.rx_queue,
 				(void **)rxmbuf, qp->shm_qp->rx_burst_size);
 	} else {
 		rx_count = 0;
@@ -2259,7 +2259,7 @@ kni_loop(void *arg)
 	driver = arg;
 	sem_wait(&driver->go);
 	while (1) {
-		count = rte_ring_dequeue_burst(driver->new_ctxs, ctxs_to_add,
+		count = RING_DEQUEUE_BURST(driver->new_ctxs, ctxs_to_add,
 					     NEW_CTX_MAX);
 		for (i = 0; i < count; ++i) {
 			h = (struct usiw_context_handle *)ctxs_to_add[i];

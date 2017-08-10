@@ -120,38 +120,123 @@ undefined) AC_MSG_ERROR([urdma requires DPDK >= $1]) ;; #(
 esac
 ])
 
-
 CFLAGS="${old_CFLAGS}"
 CPPFLAGS="${old_CPPFLAGS}"
 LDFLAGS="${old_LDFLAGS}"
 LIBS=${old_LIBS}
 ]) # URDMA_LIB_DPDK
 
-# DPDK_CHECK_FUNC(FUNCTION, [ACTION-IF-FOUND], [ACTION-IF-NOT-FOUND])
-# -------------------------------------------------------------------
-# Like AC_CHECK_FUNC, but add DPDK_LIBS, DPDK_CFLAGS, DPDK_CPPFLAGS, and
-# DPDK_LDFLAGS to their respective variables first and restore them
-# afterward.
-AC_DEFUN([DPDK_CHECK_FUNC],
+# _WITH_DPDK_FLAGS(PROGRAM)
+# -------------------------
+# Runs the m4 code inside with DPDK_LIBS, DPDK_CFLAGS, DPDK_CPPFLAGS,
+# and DPDK_LDFLAGS set to their respective variables first and restores
+# them afterward.
+AC_DEFUN([_WITH_DPDK_FLAGS],
 [
-_dpdkcf_old_CFLAGS="${CFLAGS}"
-_dpdkcf_old_CPPFLAGS="${CPPFLAGS}"
-_dpdkcf_old_LDFLAGS="${LDFLAGS}"
-_dpdkcf_old_LIBS="${LIBS}"
+_dpdk_old_CFLAGS="${CFLAGS}"
+_dpdk_old_CPPFLAGS="${CPPFLAGS}"
+_dpdk_old_LDFLAGS="${LDFLAGS}"
+_dpdk_old_LIBS="${LIBS}"
 
 CFLAGS="${CFLAGS} ${DPDK_CFLAGS}"
 CPPFLAGS="${CPPFLAGS} ${DPDK_CPPFLAGS}"
 LDFLAGS="${CPPFLAGS} ${DPDK_LDFLAGS}"
 LIBS="${DPDK_LIBS} ${LIBS}"
 
+$1
+
+CFLAGS="${_dpdk_old_CFLAGS}"
+CPPFLAGS="${_dpdk_old_CPPFLAGS}"
+LDFLAGS="${_dpdk_old_LDFLAGS}"
+LIBS=${_dpdk_old_LIBS}
+]) _WITH_DPDK_FLAGS
+
+# DPDK_CHECK_FUNC(FUNCTION, [ACTION-IF-FOUND], [ACTION-IF-NOT-FOUND])
+# -------------------------------------------------------------------
+# Like AC_CHECK_FUNC, but add DPDK_LIBS, DPDK_CFLAGS, DPDK_CPPFLAGS, and
+# DPDK_LDFLAGS to their respective variables first and restore them
+# afterward.
+AC_DEFUN([DPDK_CHECK_FUNC], [
+_WITH_DPDK_FLAGS([
 m4_case([$#],
 	[1], [AC_CHECK_FUNC([$1])],
 	[2], [AC_CHECK_FUNC([$1], [$2])],
 	[3], [AC_CHECK_FUNC([$1], [$2], [$3])],
 	[m4_fatal([DPDK_CHECK_FUNC requires 1-3 arguments])])
+])]) # DPDK_CHECK_FUNC
 
-CFLAGS="${_dpdkcf_old_CFLAGS}"
-CPPFLAGS="${_dpdkcf_old_CPPFLAGS}"
-LDFLAGS="${_dpdkcf_old_LDFLAGS}"
-LIBS=${_dpdkcf_old_LIBS}
-]) # DPDK_CHECK_FUNC
+# _DPDK_FUNC_RING_BURST
+# ---------------------
+# Private internal macro used by DPDK_FUNC_RTE_RING_DEQUEUE_BURST and
+# DPDK_FUNC_RTE_RING_ENQUEUE_BURST. Takes a single argument with the
+# function to test.
+AC_DEFUN([_DPDK_FUNC_RING_BURST],
+[_WITH_DPDK_FLAGS([
+dnl cv_name will expand to the correct cache variable name throughout
+dnl the text of this macro; it is undefined at the end.
+m4_define([cv_name], [dpdk_cv_func_which_$1])
+AC_CACHE_CHECK([how many arguments $1 takes],
+	cv_name,
+	[AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <rte_ring.h>]],
+					 [$1@{:@@:}@;])],
+	[[# No-argument case is invalid and means we didn't find a prototype]]
+	[cv_name=no],
+	[AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <rte_ring.h>]],
+					 [$1@{:@NULL, NULL, 1, NULL@:}@;])],
+	[cv_name=4],
+	[AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <rte_ring.h>]],
+					 [$1@{:@NULL, NULL, 1@:}@;])],
+	[cv_name=3],
+	[cv_name=no])])])])
+m4_undefine([cv_name])
+])]) # _DPDK_FUNC_RING_BURST
+
+# DPDK_FUNC_RTE_RING_DEQUEUE_BURST
+# --------------------------------
+# Checks how many arguments rte_ring_dequeue_burst() takes. Defines
+# HAVE_RTE_RING_DEQUEUE_BURST if the function exists, and defines one of
+# HAVE_FUNC_RTE_RING_DEQUEUE_BURST_3 or HAVE_FUNC_RTE_RING_DEQUEUE_BURST_4
+# depending on whether or not this function takes the fourth argument
+# added in DPDK 17.05. This macro defines the cache variable
+# dpdk_cv_func_which_rte_ring_dequeue_burst to "no" or the number of
+# arguments it takes.
+AC_DEFUN([DPDK_FUNC_RTE_RING_DEQUEUE_BURST],
+[
+_DPDK_FUNC_RING_BURST([rte_ring_dequeue_burst])
+if test "x$dpdk_cv_func_which_rte_ring_dequeue_burst" != "xno"; then
+	AC_DEFINE([HAVE_RTE_RING_DEQUEUE_BURST], [1],
+		  [Define to 1 if DPDK provides rte_ring_dequeue_burst])
+fi
+if test "x$dpdk_cv_func_which_rte_ring_dequeue_burst" = "x4"; then
+	AC_DEFINE([HAVE_FUNC_RTE_RING_DEQUEUE_BURST_4], [1],
+		  [Define to 1 if rte_ring_dequeue_burst takes 4 arguments])
+elif test "x$dpdk_cv_func_which_rte_ring_dequeue_burst" = "x3"; then
+	AC_DEFINE([HAVE_FUNC_RTE_RING_DEQUEUE_BURST_3], [1],
+		  [Define to 1 if rte_ring_dequeue_burst takes 3 arguments])
+fi
+]) # DPDK_FUNC_RTE_RING_DEQUEUE_BURST
+
+# DPDK_FUNC_RTE_RING_ENQUEUE_BURST
+# --------------------------------
+# Checks how many arguments rte_ring_enqueue_burst() takes. Defines
+# HAVE_RTE_RING_ENQUEUE_BURST if the function exists, and defines one of
+# HAVE_FUNC_RTE_RING_ENQUEUE_BURST_3 or HAVE_FUNC_RTE_RING_ENQUEUE_BURST_4
+# depending on whether or not this function takes the fourth argument
+# added in DPDK 17.05. This macro defines the cache variable
+# dpdk_cv_func_which_rte_ring_dequeue_burst to "no" or the number of
+# arguments it takes.
+AC_DEFUN([DPDK_FUNC_RTE_RING_ENQUEUE_BURST],
+[
+_DPDK_FUNC_RING_BURST([rte_ring_enqueue_burst])
+if test "x$dpdk_cv_func_which_rte_ring_enqueue_burst" != "xno"; then
+	AC_DEFINE([HAVE_RTE_RING_ENQUEUE_BURST], [1],
+		  [Define to 1 if DPDK provides rte_ring_enqueue_burst])
+fi
+if test "x$dpdk_cv_func_which_rte_ring_enqueue_burst" = "x4"; then
+	AC_DEFINE([HAVE_FUNC_RTE_RING_ENQUEUE_BURST_4], [1],
+		  [Define to 1 if rte_ring_enqueue_burst takes 4 arguments])
+elif test "x$dpdk_cv_func_which_rte_ring_enqueue_burst" = "x3"; then
+	AC_DEFINE([HAVE_FUNC_RTE_RING_ENQUEUE_BURST_3], [1],
+		  [Define to 1 if rte_ring_enqueue_burst takes 3 arguments])
+fi
+]) # DPDK_FUNC_RTE_RING_ENQUEUE_BURST

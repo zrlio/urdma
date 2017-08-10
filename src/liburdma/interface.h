@@ -81,6 +81,22 @@
 #define STAG_TYPE_RDMA_READ (UINT32_C(0x01) << 24)
 #define STAG_RDMA_READ(x) (STAG_TYPE_RDMA_READ | ((x) & STAG_MASK))
 
+#if defined(HAVE_FUNC_RTE_RING_DEQUEUE_BURST_4)
+#define RING_DEQUEUE_BURST(a, b, c) (rte_ring_dequeue_burst((a), (b), (c), NULL))
+#elif defined(HAVE_FUNC_RTE_RING_DEQUEUE_BURST_3)
+#define RING_DEQUEUE_BURST(a, b, c) (rte_ring_dequeue_burst((a), (b), (c)))
+#else
+#error rte_ring_dequeue_burst not available
+#endif
+
+#if defined(HAVE_FUNC_RTE_RING_ENQUEUE_BURST_4)
+#define RING_ENQUEUE_BURST(a, b, c) (rte_ring_enqueue_burst((a), (b), (c), NULL))
+#elif defined(HAVE_FUNC_RTE_RING_ENQUEUE_BURST_3)
+#define RING_ENQUEUE_BURST(a, b, c) (rte_ring_enqueue_burst((a), (b), (c)))
+#else
+#error rte_ring_enqueue_burst not available
+#endif
+
 struct usiw_context;
 struct usiw_device;
 struct usiw_qp;

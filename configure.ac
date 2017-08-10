@@ -187,6 +187,14 @@ URDMA_LIB_DPDK([16.07])
 
 DPDK_CHECK_FUNC([rte_kni_init], [],
 	      [AC_MSG_ERROR([urdma requires that DPDK be built with KNI support])])
+DPDK_FUNC_RTE_RING_DEQUEUE_BURST
+if test "x$dpdk_cv_func_which_rte_ring_dequeue_burst" = "xno"; then
+	AC_MSG_ERROR([urdma requires rte_ring_dequeue_burst; check your DPDK installation])
+fi
+DPDK_FUNC_RTE_RING_ENQUEUE_BURST
+if test "x$dpdk_cv_func_which_rte_ring_enqueue_burst" = "xno"; then
+	AC_MSG_ERROR([urdma requires rte_ring_enqueue_burst; check your DPDK installation])
+fi
 
 AC_CONFIG_FILES([Makefile src/kmod/Makefile])
 AC_OUTPUT
