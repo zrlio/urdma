@@ -34,8 +34,8 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# URDMA_LIB_DPDK
-# --------------
+# URDMA_LIB_DPDK([VERSION])
+# -------------------------
 # Checks that we have DPDK, and optionally checks that the version is at
 # least the one requested. Note that this macro will abort if DPDK is
 # not found; fixing this would take more effort than it is worth.
@@ -82,24 +82,45 @@ old_LDFLAGS="${LDFLAGS}"
 CFLAGS="${CFLAGS} ${DPDK_CFLAGS}"
 CPPFLAGS="${CPPFLAGS} ${DPDK_CPPFLAGS}"
 LDFLAGS="${CPPFLAGS} ${DPDK_LDFLAGS}"
-AC_CHECK_HEADERS([rte_ethdev.h], [],
-[AC_MSG_ERROR([urdma requires DPDK >= 16.07])])
 
 old_LIBS="${LIBS}"
 LIBS="-ldpdk ${LIBS}"
-AC_MSG_CHECKING([for DPDK 16.07 built as shared libraries])
-AC_LINK_IFELSE([AC_LANG_PROGRAM(
-[[#include <rte_eal.h>
- #include <rte_ethdev.h>]],
-[[int main(int argc, char *argv[]) {
-	struct rte_eth_dev_info info;
-	rte_eal_init(argc, argv);
-	info.nb_rx_queues = 1;
-	return 0;
-}]])],
-	[AC_MSG_RESULT([yes])],
-	[AC_MSG_RESULT([no])]
-	[AC_MSG_ERROR([urdma requires DPDK >= 16.07])])
+
+AC_CHECK_HEADERS([rte_version.h], [],
+		 [AC_MSG_ERROR([urdma requires DPDK >= $1])])
+
+AC_CACHE_CHECK([for DPDK release version m4_if(m4_eval([$# >= 1]), 1, [at least $1])],
+       [urdma_cv_librelver_dpdk],
+       [[dummy=if$$
+	cat <<_URDMA_EOF > $dummy.c
+#include <rte_version.h>
+#if defined(RTE_VER_YEAR) && defined(RTE_VER_MONTH)
+dpdk_major_version RTE_VER_YEAR
+dpdk_minor_version RTE_VER_MONTH
+#elif defined(RTE_VER_MAJOR) && defined(RTE_VER_MINOR)
+dpdk_major_version RTE_VER_MAJOR
+dpdk_minor_version RTE_VER_MINOR
+#else
+undefined
+#endif
+_URDMA_EOF
+	_dpdk_out=`$CC $CPPFLAGS -E $dummy.c 2> /dev/null | tail -n 2 >$dummy.i`
+	_dpdk_major=`grep '^dpdk_major_version' $dummy.i | cut -d' ' -f2`
+	_dpdk_minor=`grep '^dpdk_minor' $dummy.i | cut -d' ' -f2`
+	if test $_dpdk_major -lt 16; then
+		_fmt="%d.%d"
+	else
+		_fmt="%d.%02d"
+	fi
+	urdma_cv_librelver_dpdk=`printf "${_fmt}" ${_dpdk_major} ${_dpdk_minor}`
+	rm -f $dummy.c $dummy.i]])
+m4_if(m4_eval([$# >= 1]), 1,
+[case $urdma_cv_librelver_dpdk in #(
+undefined) AC_MSG_ERROR([urdma requires DPDK >= $1]) ;; #(
+*) AX_COMPARE_VERSION([$1], [le], [$urdma_cv_librelver_dpdk], [],
+		      [AC_MSG_ERROR([urdma requires DPDK >= $1])])
+esac
+])
 
 
 LIBS=${old_LIBS}
