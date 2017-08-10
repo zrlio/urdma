@@ -101,13 +101,6 @@ AC_LINK_IFELSE([AC_LANG_PROGRAM(
 	[AC_MSG_RESULT([no])]
 	[AC_MSG_ERROR([urdma requires DPDK >= 16.07])])
 
-AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <rte_kni.h>]],
-	       [[int main(int argc, char *argv[]) {
-			rte_eal_init(argc, argv);
-			rte_kni_init(1);
-			return 0;
-		}]])], [],
-[AC_MSG_ERROR([urdma requires that DPDK be built with KNI support])])
 
 LIBS=${old_LIBS}
 DPDK_LIBS="-Wl,--whole-archive,-ldpdk,--no-whole-archive"
@@ -116,4 +109,33 @@ AC_SUBST([DPDK_LIBS])
 CFLAGS="${old_CFLAGS}"
 CPPFLAGS="${old_CPPFLAGS}"
 LDFLAGS="${old_LDFLAGS}"
-])
+]) # URDMA_LIB_DPDK
+
+# DPDK_CHECK_FUNC(FUNCTION, [ACTION-IF-FOUND], [ACTION-IF-NOT-FOUND])
+# -------------------------------------------------------------------
+# Like AC_CHECK_FUNC, but add DPDK_LIBS, DPDK_CFLAGS, DPDK_CPPFLAGS, and
+# DPDK_LDFLAGS to their respective variables first and restore them
+# afterward.
+AC_DEFUN([DPDK_CHECK_FUNC],
+[
+_dpdkcf_old_CFLAGS="${CFLAGS}"
+_dpdkcf_old_CPPFLAGS="${CPPFLAGS}"
+_dpdkcf_old_LDFLAGS="${LDFLAGS}"
+_dpdkcf_old_LIBS="${LIBS}"
+
+CFLAGS="${CFLAGS} ${MACHINE_CFLAGS}"
+CPPFLAGS="${CPPFLAGS} ${DPDK_CPPFLAGS}"
+LDFLAGS="${CPPFLAGS} ${DPDK_LDFLAGS}"
+LIBS="${DPDK_LIBS} ${LIBS}"
+
+m4_case([$#],
+	[1], [AC_CHECK_FUNC([$1])],
+	[2], [AC_CHECK_FUNC([$1], [$2])],
+	[3], [AC_CHECK_FUNC([$1], [$2], [$3])],
+	[m4_fatal([DPDK_CHECK_FUNC requires 1-3 arguments])])
+
+CFLAGS="${_dpdkcf_old_CFLAGS}"
+CPPFLAGS="${_dpdkcf_old_CPPFLAGS}"
+LDFLAGS="${_dpdkcf_old_LDFLAGS}"
+LIBS=${_dpdkcf_old_LIBS}
+]) # DPDK_CHECK_FUNC

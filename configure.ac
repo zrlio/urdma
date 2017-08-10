@@ -185,6 +185,9 @@ AC_CHECK_DECLS([SOCK_CLOEXEC], [], [], [AC_INCLUDES_DEFAULT()]
 
 URDMA_LIB_DPDK
 
+DPDK_CHECK_FUNC([rte_kni_init], [],
+	      [AC_MSG_ERROR([urdma requires that DPDK be built with KNI support])])
+
 AC_CONFIG_FILES([Makefile src/kmod/Makefile])
 AC_OUTPUT
 
