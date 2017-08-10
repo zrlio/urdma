@@ -83,9 +83,15 @@ unexpected value ATOMIC_INT_LOCK_FREE
 _URDMA_EOF
 		urdma_cv_c_atomic_int_lock_free=`$CC $CPPFLAGS -E $dummy.c 2> /dev/null | tail -1`
 		rm -f $dummy.c]])
-if test "x$urdma_cv_c_atomic_int_lock_free" != xyes; then
-      AC_MSG_ERROR([you must use a compiler that makes atomic_int lock free])
-fi
+case "$urdma_cv_c_atomic_int_lock_free" in #(
+yes) ;; #(
+no)
+	AC_MSG_ERROR([you must use a compiler that makes atomic_int lock free])
+	;; #(
+*)
+	AC_MSG_WARN([your compiler does not guarantee that atomics work in multiprocess context])
+	;;
+esac
 
 AC_PROG_INSTALL
 AC_PROG_MAKE_SET
