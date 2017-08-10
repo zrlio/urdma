@@ -50,10 +50,9 @@ if test ${RTE_TARGET}x = x; then
 	AC_MSG_ERROR([urdma requires DPDK.  Set RTE_TARGET to the DPDK compilation target])
 fi
 
-DPDK_CPPFLAGS="-I${RTE_SDK}/${RTE_TARGET}/include"
-AC_SUBST([DPDK_CPPFLAGS])
-DPDK_LDFLAGS="-L${RTE_SDK}/${RTE_TARGET}/lib"
-AC_SUBST([DPDK_LDFLAGS])
+AC_SUBST([DPDK_CPPFLAGS], ["-I${RTE_SDK}/${RTE_TARGET}/include"])
+AC_SUBST([DPDK_LDFLAGS], ["-L${RTE_SDK}/${RTE_TARGET}/lib"])
+AC_SUBST([DPDK_LIBS], ["-Wl,--whole-archive,-ldpdk,--no-whole-archive -ldpdk"])
 
 AC_CACHE_CHECK([for DPDK machine compiler flags],
 [urdma_cv_cflags_machine], [cat >conftest.make <<_EOF
@@ -79,12 +78,11 @@ AC_SUBST([DPDK_CFLAGS])
 old_CFLAGS="${CFLAGS}"
 old_CPPFLAGS="${CPPFLAGS}"
 old_LDFLAGS="${LDFLAGS}"
+old_LIBS="${LIBS}"
 CFLAGS="${CFLAGS} ${DPDK_CFLAGS}"
 CPPFLAGS="${CPPFLAGS} ${DPDK_CPPFLAGS}"
 LDFLAGS="${CPPFLAGS} ${DPDK_LDFLAGS}"
-
-old_LIBS="${LIBS}"
-LIBS="-ldpdk ${LIBS}"
+LIBS="${DPDK_LIBS} ${LIBS}"
 
 AC_CHECK_HEADERS([rte_version.h], [],
 		 [AC_MSG_ERROR([urdma requires DPDK >= $1])])
@@ -123,13 +121,10 @@ esac
 ])
 
 
-LIBS=${old_LIBS}
-DPDK_LIBS="-Wl,--whole-archive,-ldpdk,--no-whole-archive"
-AC_SUBST([DPDK_LIBS])
-
 CFLAGS="${old_CFLAGS}"
 CPPFLAGS="${old_CPPFLAGS}"
 LDFLAGS="${old_LDFLAGS}"
+LIBS=${old_LIBS}
 ]) # URDMA_LIB_DPDK
 
 # DPDK_CHECK_FUNC(FUNCTION, [ACTION-IF-FOUND], [ACTION-IF-NOT-FOUND])
