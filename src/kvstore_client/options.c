@@ -49,6 +49,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <rte_config.h>
 #include <rte_common.h>
 
 #include "options.h"

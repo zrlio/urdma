@@ -65,7 +65,7 @@ src_liburdma_liburdma_la_SOURCES = \
 	src/util/list.h \
 	src/util/util.c \
 	src/util/util.h
-src_liburdma_liburdma_la_CFLAGS = $(MACHINE_CFLAGS)
+src_liburdma_liburdma_la_CFLAGS = $(DPDK_CFLAGS)
 src_liburdma_liburdma_la_CPPFLAGS = -Durdma_confdir='"$(sysconfdir)/rdma"' -I$(srcdir)/include -I$(srcdir)/src/util $(LIBNL3_CFLAGS) $(JSON_C_CFLAGS) $(DPDK_CPPFLAGS)
 src_liburdma_liburdma_la_LDFLAGS = -avoid-version \
 	-release @IBV_DEVICE_LIBRARY_EXTENSION@ $(DPDK_LDFLAGS)
@@ -82,7 +82,7 @@ src_urdmad_urdmad_SOURCES = \
 	src/util/config_file.c \
 	src/util/config_file.h \
 	src/util/list.h
-src_urdmad_urdmad_CFLAGS = $(MACHINE_CFLAGS)
+src_urdmad_urdmad_CFLAGS = $(DPDK_CFLAGS)
 src_urdmad_urdmad_CPPFLAGS = -Durdma_confdir='"$(sysconfdir)/rdma"' -I$(srcdir)/include -I$(srcdir)/src/util $(LIBNL3_CFLAGS) $(JSON_C_CFLAGS) $(DPDK_CPPFLAGS)
 src_urdmad_urdmad_LDFLAGS = $(DPDK_LDFLAGS)
 src_urdmad_urdmad_LDADD = $(LIBNL3_LIBS) $(JSON_C_LIBS) $(DPDK_LIBS)
@@ -92,7 +92,7 @@ src_udp_pingpong_udp_pingpong_SOURCES = \
 	src/udp_pingpong/main.c \
 	src/util/util.c \
 	src/util/util.h
-src_udp_pingpong_udp_pingpong_CFLAGS = $(MACHINE_CFLAGS)
+src_udp_pingpong_udp_pingpong_CFLAGS = $(DPDK_CFLAGS)
 src_udp_pingpong_udp_pingpong_CPPFLAGS = -I$(srcdir)/include -I$(srcdir)/src/util $(DPDK_CPPFLAGS)
 src_udp_pingpong_udp_pingpong_LDFLAGS = $(DPDK_LDFLAGS)
 src_udp_pingpong_udp_pingpong_LDADD = $(DPDK_LIBS)
@@ -102,7 +102,7 @@ src_mkkvstore_mkkvstore_SOURCES = \
 	src/mkkvstore/main.c \
 	src/util/util.c \
 	src/util/util.h
-src_mkkvstore_mkkvstore_CFLAGS = $(MACHINE_CFLAGS)
+src_mkkvstore_mkkvstore_CFLAGS = $(DPDK_CFLAGS)
 src_mkkvstore_mkkvstore_CPPFLAGS = -I$(srcdir)/include -I$(srcdir)/src/util $(DPDK_CPPFLAGS)
 src_mkkvstore_mkkvstore_LDFLAGS = $(DPDK_LDFLAGS)
 src_mkkvstore_mkkvstore_LDADD = $(DPDK_LIBS) -lm
@@ -110,7 +110,7 @@ src_mkkvstore_mkkvstore_LDADD = $(DPDK_LIBS) -lm
 bin_PROGRAMS += src/verbs_pingpong/verbs_pingpong
 src_verbs_pingpong_verbs_pingpong_SOURCES = \
 	src/verbs_pingpong/main.c
-src_verbs_pingpong_verbs_pingpong_CFLAGS = $(MACHINE_CFLAGS)
+src_verbs_pingpong_verbs_pingpong_CFLAGS = $(DPDK_CFLAGS)
 src_verbs_pingpong_verbs_pingpong_CPPFLAGS = -I$(srcdir)/include -I$(srcdir)/src/liburdma $(DPDK_CPPFLAGS)
 src_verbs_pingpong_verbs_pingpong_LDFLAGS = $(DPDK_LDFLAGS)
 src_verbs_pingpong_verbs_pingpong_LDADD = $(DPDK_LIBS)
@@ -126,7 +126,7 @@ src_kvstore_server_kvstore_server_SOURCES = \
 	src/kvstore_server/options.h \
 	src/util/util.c \
 	src/util/util.h
-src_kvstore_server_kvstore_server_CFLAGS = $(MACHINE_CFLAGS)
+src_kvstore_server_kvstore_server_CFLAGS = $(DPDK_CFLAGS)
 src_kvstore_server_kvstore_server_CPPFLAGS = -I$(srcdir)/include -I$(srcdir)/src/util -I$(srcdir)/src/liburdma $(DPDK_CPPFLAGS)
 src_kvstore_server_kvstore_server_LDFLAGS = $(DPDK_LDFLAGS)
 src_kvstore_server_kvstore_server_LDADD = src/liburdma/liburdma.la $(DPDK_LIBS) -lm
@@ -138,7 +138,7 @@ src_kvstore_client_kvstore_client_SOURCES = \
 	src/kvstore_client/options.h \
 	src/util/util.c \
 	src/util/util.h
-src_kvstore_client_kvstore_client_CFLAGS = $(MACHINE_CFLAGS)
+src_kvstore_client_kvstore_client_CFLAGS = $(DPDK_CFLAGS)
 src_kvstore_client_kvstore_client_CPPFLAGS = -I$(srcdir)/include -I$(srcdir)/src/util -I$(srcdir)/src/liburdma $(DPDK_CPPFLAGS)
 src_kvstore_client_kvstore_client_LDFLAGS = $(DPDK_LDFLAGS)
 src_kvstore_client_kvstore_client_LDADD = src/liburdma/liburdma.la $(DPDK_LIBS) -lm
@@ -150,6 +150,8 @@ tests_binheap_SOURCES = tests/binheap.c \
 tests_binheap_CPPFLAGS = -I$(srcdir)/src/util
 
 TESTS = tests/binheap
+
+doc_DATA = doc/urdma-schema.json
 
 # Disable the uninstall check since the kernel build system doesn't
 # provide a module uninstall target.

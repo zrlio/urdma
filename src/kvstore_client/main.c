@@ -53,6 +53,7 @@
 #include <infiniband/verbs.h>
 #include <rdma/rdma_cma.h>
 
+#include <rte_config.h>
 #include <rte_eal.h>
 #include <rte_errno.h>
 #include <rte_ethdev.h>

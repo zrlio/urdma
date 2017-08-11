@@ -46,7 +46,7 @@ fi
 if [ -f .version ]; then
 	cat .version
 elif [ -d .git ]; then
-	echo -n $(git describe --abbrev=12)
+	echo -n $(git describe --abbrev=12 | sed -e 's/^v//')
 else
 	printf 'unknown\n' >&2
 	exit 1

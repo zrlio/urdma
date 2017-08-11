@@ -1,0 +1,70 @@
+{
+    "$schema": "http://json-schema.org/draft-04/schema#",
+    "type": "object",
+    "properties": {
+        "ports": {
+            "type": "array",
+	    "description": "NIC ports to enable",
+            "minItems": 1,
+            "items": { "$ref": "#/definitions/port" },
+            "uniqueItems": true
+        },
+        "eal_args": {
+            "type": "object",
+	    "description": "EAL arguments for subprocesses",
+            "properties": {
+                "log-level": {
+		    "type": "number",
+		    "description": "Maximum log level to display"
+		}
+            }
+        },
+	"stats_timer_interval": {
+            "type": "integer",
+            "description": "Interval for urdmad to dump dropped packet statistics"
+	},
+        "socket": {
+            "type": "string",
+            "description": "The location of the socket file for urdmad"
+        }
+    },
+    "additionalProperties": false,
+    "required": [ "ports" ],
+    "definitions": {
+        "port": {
+            "type": "object",
+	    "description": "Settings for the given Ethernet port",
+            "properties": {
+                "ipv4_address": {
+		    "type": "string",
+		    "description": "IPv4 address to assign to the port"
+		},
+                "mtu": {
+		    "type": "number",
+		    "description": "MTU for the Ethernet port (1500 or 9000)"
+		},
+                "max_qp": {
+		    "type": "number",
+		    "description": "Maximum number of queue pairs to allocate"
+		},
+                "rx_desc_count": {
+		    "type": "number",
+		    "description": "Descriptors per receive queue"
+		},
+                "tx_desc_count": {
+		    "type": "number",
+		    "description": "Descriptors per transmit queue"
+		},
+                "rx_burst_size": {
+		    "type": "number",
+		    "description": "Number of packets to receive at once"
+		},
+                "tx_burst_size": {
+		    "type": "number",
+		    "description": "Number of packets to send at once"
+		}
+            },
+	    "additionalProperties": false
+        }
+    }
+}

@@ -49,6 +49,7 @@
 
 #include <infiniband/driver.h>
 
+#include <rte_config.h>
 #include <rte_ethdev.h>
 #include <rte_errno.h>
 #include <rte_ip.h>
@@ -588,12 +589,12 @@ do_poll_cq(struct usiw_cq *cq, int num_entries, struct usiw_wc *wc)
 	void *cqe[num_entries];
 	int count, x, ret;
 
-	count = rte_ring_dequeue_burst(cq->cqe_ring, cqe, num_entries);
+	count = RING_DEQUEUE_BURST(cq->cqe_ring, cqe, num_entries);
 	if (count >= 0) {
 		for (x = 0; x < count; ++x) {
 			memcpy(&wc[x], cqe[x], sizeof(struct usiw_wc));
 		}
-		ret = rte_ring_enqueue_burst(cq->free_ring, cqe, count);
+		ret = RING_ENQUEUE_BURST(cq->free_ring, cqe, count);
 		assert(ret == count);
 		if (ret < 0) {
 			count = ret;
