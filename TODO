@@ -1,4 +1,9 @@
-libusiw
+build system
+  - Explicitly link in DPDK libraries instead of using -ldpdk as a
+    shortcut, to avoid interference from distributions which use
+    --as-needed by default.
+
+liburdma
   - Choose rte_mempool sizes dynamically, and choose maximum number of queue
     pairs and tx/rx ring size according to the rte_mempool size
   - Add static inlines to wrap all container_of()'s

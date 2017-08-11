@@ -115,6 +115,24 @@ Known Issues
    PMD .so files into that directory after DPDK is installed. DPDK will
    then auto-load all .so files in that directory as PMD libraries.
 
+ - DPDK 17.05 introduced the concept of mempool drivers. If you see a
+   message like this using DPDK >= 17.05:
+
+     MBUF: error setting mempool handler
+     EAL: Error - exiting with code: 1
+     Cause: Cannot create rx mempool for port 0 with 8064 mbufs: Invalid argument
+
+   then you do not have a mempool driver by default. This occurs
+   because the linker has been configured with --as-needed by default on
+   some distributions, and since the mempool and PMD drivers do not
+   declare any symbols, the linker has no way of knowing that we depend
+   on the presence of a mempool driver.
+
+   Like the PMD issue above, you can pass -d to load the default
+   librte_mempool_ring driver on the command line, or set
+   CONFIG_RTE_EAL_PMD_PATH and place mempool driver(s) into that
+   directory.
+
  - There is a potential race condition with completion channels, where a
    completion event can get lost, and thus a thread waiting on
    ibv_get_cq_event() will never wake up, leading to a deadlock.  A cause has
