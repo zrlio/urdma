@@ -716,7 +716,7 @@ setup_base_filters(struct usiw_port *iface)
 	retval = rte_eth_dev_filter_ctrl(iface->portid, RTE_ETH_FILTER_FDIR,
 			RTE_ETH_FILTER_SET, &filter_info);
 	if (retval != 0) {
-		rte_exit(EXIT_FAILURE, "Could not set fdir filter info on port %" PRIu16 ": %s\n",
+		RTE_LOG(WARNING, USER1, "Could not set fdir filter info on port %" PRIu16 ": %s\n",
 				iface->portid, strerror(-retval));
 	}
 } /* setup_base_filters */
