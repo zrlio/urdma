@@ -74,6 +74,9 @@
 #include "urdmad_private.h"
 #include "urdma_kabi.h"
 
+/* ixgbe and e1000 drivers require space for a VLAN tag in the receive mbufs;
+ * in the case of ixgbe this is twice the space of the VLAN header */
+static const size_t urdma_vlan_space = 8;
 
 static struct usiw_driver *driver;
 
@@ -713,7 +716,7 @@ setup_base_filters(struct usiw_port *iface)
 	retval = rte_eth_dev_filter_ctrl(iface->portid, RTE_ETH_FILTER_FDIR,
 			RTE_ETH_FILTER_SET, &filter_info);
 	if (retval != 0) {
-		rte_exit(EXIT_FAILURE, "Could not set fdir filter info on port %" PRIu16 ": %s\n",
+		RTE_LOG(WARNING, USER1, "Could not set fdir filter info on port %" PRIu16 ": %s\n",
 				iface->portid, strerror(-retval));
 	}
 } /* setup_base_filters */
@@ -731,6 +734,7 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 	struct rte_eth_txconf txconf;
 	struct rte_eth_rxconf rxconf;
 	struct rte_eth_conf port_conf;
+	size_t mbuf_size;
 	int socket_id;
 	int retval;
 	uint16_t q;
@@ -863,11 +867,23 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 				urdmad__entry);
 	}
 
+	/* We must allocate an mbuf large enough to hold the maximum possible
+	 * received packet. Note that the 64-byte headroom does *not* count for
+	 * incoming packets. Note that the MTU as set by urdma and DPDK does
+	 * *not* include the Ethernet header, CRC, or VLAN tag, but the drivers
+	 * require space for these in the receive buffer. */
+	mbuf_size = RTE_PKTMBUF_HEADROOM + port_config->mtu
+		+ ETHER_HDR_LEN + ETHER_CRC_LEN + urdma_vlan_space;
+
 	snprintf(name, RTE_MEMPOOL_NAMESIZE,
 			"port_%u_rx_mempool", iface->portid);
+	RTE_LOG(DEBUG, USER1, "create rx mempool for port %" PRIu16 " with %u mbufs of size %zu\n",
+				iface->portid,
+				2 * iface->max_qp * iface->rx_desc_count,
+				mbuf_size);
 	iface->rx_mempool = rte_pktmbuf_pool_create(name,
 		2 * iface->max_qp * iface->rx_desc_count,
-		0, 0, RTE_PKTMBUF_HEADROOM + port_config->mtu, socket_id);
+		0, 0, mbuf_size, socket_id);
 	if (iface->rx_mempool == NULL)
 		rte_exit(EXIT_FAILURE, "Cannot create rx mempool for port %" PRIu16 " with %u mbufs: %s\n",
 				iface->portid,
@@ -876,10 +892,13 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 
 	snprintf(name, RTE_MEMPOOL_NAMESIZE,
 			"port_%u_tx_mempool", iface->portid);
+	RTE_LOG(DEBUG, USER1, "create tx mempool for port %" PRIu16 " with %u mbufs of size %zu plus %u bytes private data\n",
+				iface->portid,
+				2 * iface->max_qp * iface->rx_desc_count,
+				mbuf_size, PENDING_DATAGRAM_INFO_SIZE);
 	iface->tx_ddp_mempool = rte_pktmbuf_pool_create(name,
 		2 * iface->max_qp * iface->tx_desc_count,
-		0, PENDING_DATAGRAM_INFO_SIZE,
-		RTE_PKTMBUF_HEADROOM + port_config->mtu, socket_id);
+		0, PENDING_DATAGRAM_INFO_SIZE, mbuf_size, socket_id);
 	if (iface->tx_ddp_mempool == NULL)
 		rte_exit(EXIT_FAILURE, "Cannot create tx mempool for port %" PRIu16 " with %u mbufs: %s\n",
 				iface->portid,
