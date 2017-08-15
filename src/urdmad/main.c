@@ -614,7 +614,7 @@ do_poll(int timeout)
 } /* do_poll */
 
 
-static void
+static int
 kni_process_burst(struct usiw_port *port,
 		struct rte_mbuf **rxmbuf, int count)
 {
@@ -648,7 +648,7 @@ kni_process_burst(struct usiw_port *port,
 	for (i = 0; i < count; ++i)
 		rte_pktmbuf_dump(stderr, rxmbuf[i], 128);
 #endif
-	rte_kni_tx_burst(port->kni, rxmbuf, count);
+	return rte_kni_tx_burst(port->kni, rxmbuf, count);
 } /* kni_process_burst */
 
 
@@ -656,19 +656,40 @@ static void
 do_xchg_packets(struct usiw_port *port)
 {
 	struct rte_mbuf *rxmbuf[port->rx_burst_size];
-	unsigned int count;
+	unsigned int rcount, scount;
 
-	count = rte_kni_rx_burst(port->kni,
+	rcount = rte_kni_rx_burst(port->kni,
 			rxmbuf, port->rx_burst_size);
-	if (count) {
-		rte_eth_tx_burst(port->portid, 0,
-			rxmbuf, count);
+	if (rcount) {
+#ifdef DEBUG_PACKET_HEADERS
+		int i;
+		RTE_LOG(DEBUG, USER1, "port %d: send %d packets\n",
+				port->portid, rcount);
+		for (i = 0; i < rcount; ++i)
+			rte_pktmbuf_dump(stderr, rxmbuf[i], 128);
+#endif
+		scount = rte_eth_tx_burst(port->portid, 0,
+			rxmbuf, rcount);
+		if (scount < rcount) {
+			RTE_LOG(WARNING, USER1, "rte_eth_tx_burst only %d of %d packets\n",
+					scount, rcount);
+			for (; scount < rcount; scount++) {
+				rte_pktmbuf_free(rxmbuf[scount]);
+			}
+		}
 	}
 
-	count = rte_eth_rx_burst(port->portid, 0,
+	rcount = rte_eth_rx_burst(port->portid, 0,
 				rxmbuf, port->rx_burst_size);
-	if (count) {
-		kni_process_burst(port, rxmbuf, count);
+	if (rcount) {
+		scount = kni_process_burst(port, rxmbuf, rcount);
+		if (scount < rcount) {
+			RTE_LOG(WARNING, USER1, "rte_kni_tx_burst only %d of %d packets\n",
+					scount, rcount);
+			for (; scount < rcount; scount++) {
+				rte_pktmbuf_free(rxmbuf[scount]);
+			}
+		}
 	}
 } /* do_xchng_packets */
 
