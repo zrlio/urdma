@@ -602,8 +602,6 @@ do_poll(int timeout)
 		ret = epoll_wait(driver->epoll_fd, &event, 1, timeout);
 		if (ret > 0) {
 			fd = event.data.ptr;
-			RTE_LOG(DEBUG, USER1, "epoll: event %x on fd %d\n",
-					event.events, fd->fd);
 			fd->data_ready(fd);
 		} else if (WARN_ONCE(ret < 0,
 				"Error polling event file for reading: %s\n",
