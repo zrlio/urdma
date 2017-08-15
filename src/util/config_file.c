@@ -118,12 +118,31 @@ get_uint_value(struct json_object *parent, int index,
 	return 0;
 } /* get_uint_value */
 
+/* Parse a PCI address of form [XXXX:]XX:XX.X */
+static int
+parse_pci_addr(const char *str, struct rte_pci_addr *dev_addr)
+{
+	static const size_t len_with_domain = 12;
+	static const size_t len_without_domain = 7;
+	size_t len;
+
+	len = strlen(str);
+	if (len == len_with_domain) {
+		return eal_parse_pci_DomBDF(str, dev_addr);
+	} else if (len == len_without_domain) {
+		return eal_parse_pci_BDF(str, dev_addr);
+	} else {
+		return -EINVAL;
+	}
+} /* parse_pci_addr */
+
 int
 urdma__config_file_get_ports(struct usiw_config *config,
 			     struct usiw_port_config **port_config)
 {
 	struct json_object *ports, *port, *obj;
-	int port_count, i;
+	int port_count, i, ret;
+	bool can_use_index = true;
 
 	if (!json_object_object_get_ex(config->root, "ports", &ports)) {
 		fprintf(stderr, "Configuration error: JSON root object has no \"ports\" field\n");
@@ -145,6 +164,26 @@ urdma__config_file_get_ports(struct usiw_config *config,
 		if (!json_object_is_type(port, json_type_object)) {
 			fprintf(stderr, "Configuration error: port array element %d is not hash\n",
 					i);
+			return -EINVAL;
+		}
+		if (json_object_object_get_ex(port, "pci_address", &obj)) {
+			(*port_config)[i].id_type = urdma_port_id_pci;
+			can_use_index = false;
+
+			if (!json_object_is_type(obj, json_type_string)) {
+				fprintf(stderr, "Configuration error: pci_address is not string\n");
+				return -EINVAL;
+			}
+
+			if ((ret = parse_pci_addr(json_object_get_string(obj),
+					&(*port_config)[i].pci_address)) != 0) {
+				fprintf(stderr, "Configuration error: pci_address must be of form [XXXX:]XX:XX.X\n");
+				return -EINVAL;
+			}
+		} else if (can_use_index) {
+			(*port_config)[i].id_type = urdma_port_id_index;
+		} else {
+			fprintf(stderr, "Configuration error: must specify pci_address for ALL ports\n");
 			return -EINVAL;
 		}
 		if (!json_object_object_get_ex(port, "ipv4_address", &obj)) {

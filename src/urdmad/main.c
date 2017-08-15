@@ -1075,13 +1075,31 @@ setup_timer(int interval_ms)
 } /* setup_timer */
 
 
+
+static int
+lookup_ethdev_by_pci_addr(struct rte_pci_addr *addr)
+{
+	struct rte_eth_dev_info info;
+	int x, count;
+
+	count = rte_eth_dev_count();
+	for (x = 0; x < count; ++x) {
+		rte_eth_dev_info_get(x, &info);
+		if (!rte_eal_compare_pci_addr(addr, &info.pci_dev->addr)) {
+			return x;
+		}
+	}
+	return -ENODEV;
+} /* lookup_ethdev_by_pci_addr */
+
+
 static void
 do_init_driver(void)
 {
 	struct usiw_port_config *port_config;
 	struct usiw_config config;
 	char *sock_name;
-	int portid, port_count, timer_ms;
+	int i, portid, port_count, timer_ms;
 	int retval;
 
 	retval = urdma__config_file_open(&config);
@@ -1142,13 +1160,37 @@ do_init_driver(void)
 	rte_kni_init(driver->port_count);
 
 	driver->progress_lcore = 1;
-	for (portid = 0; portid < driver->port_count; ++portid) {
-		driver->ports[portid].portid = portid;
+	for (i = 0; i < driver->port_count; ++i) {
+		switch (port_config[i].id_type) {
+		case urdma_port_id_index:
+			portid = i;
+			break;
+		case urdma_port_id_pci:
+			portid = lookup_ethdev_by_pci_addr(
+						&port_config[i].pci_address);
+			if (portid < 0) {
+				rte_exit(EXIT_FAILURE, "No DPDK ethdev with PCI address " PCI_PRI_FMT "\n",
+					port_config[i].pci_address.domain,
+					port_config[i].pci_address.bus,
+					port_config[i].pci_address.devid,
+					port_config[i].pci_address.function);
+			}
+			RTE_LOG(DEBUG, USER1, "Resolve PCI address " PCI_PRI_FMT " to portid %d\n",
+					port_config[i].pci_address.domain,
+					port_config[i].pci_address.bus,
+					port_config[i].pci_address.devid,
+					port_config[i].pci_address.function,
+					portid);
+			break;
+		default:
+			abort();
+		}
+		driver->ports[i].portid = portid;
 		rte_eth_macaddr_get(portid,
-				&driver->ports[portid].ether_addr);
-		rte_eth_dev_info_get(portid, &driver->ports[portid].dev_info);
+				&driver->ports[i].ether_addr);
+		rte_eth_dev_info_get(portid, &driver->ports[i].dev_info);
 
-		usiw_port_init(&driver->ports[portid], &port_config[portid]);
+		usiw_port_init(&driver->ports[i], &port_config[i]);
 	}
 	rte_eal_remote_launch(event_loop, driver, driver->progress_lcore);
 	/* FIXME: cannot free driver beyond this point since it is being
@@ -1158,9 +1200,9 @@ do_init_driver(void)
 		rte_exit(EXIT_FAILURE, "Could not setup KNI context: %s\n",
 					strerror(-retval));
 	}
-	for (portid = 0; portid < driver->port_count; portid++) {
-		retval = usiw_set_ipv4_addr(driver, &driver->ports[portid],
-				&port_config[portid]);
+	for (i = 0; i < driver->port_count; i++) {
+		retval = usiw_set_ipv4_addr(driver, &driver->ports[i],
+				&port_config[i]);
 		if (retval < 0) {
 			rte_exit(EXIT_FAILURE, "Could not set port %u IPv4 address: %s\n",
 					portid, strerror(-retval));

@@ -38,12 +38,20 @@
  */
 
 #include <stdio.h>
+#include <rte_pci.h>
 
 enum { ipv4_addr_len_max = 20 };
+
+enum urdma_port_id_type {
+	urdma_port_id_index = 0,
+	urdma_port_id_pci = 1,
+};
 
 struct json_object;
 
 struct usiw_port_config {
+	int id_type;
+	struct rte_pci_addr pci_address;
 	unsigned int mtu;
 	unsigned int rx_desc_count;
 	unsigned int tx_desc_count;
