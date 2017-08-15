@@ -233,6 +233,7 @@ port_init(struct port *iface, unsigned int port,
 	iface->portid = port;
 	rte_eth_dev_info_get(iface->portid, &dev_info);
 	port_dump_info(stderr, &dev_info);
+	fprintf(stderr, "\n");
 	if ((dev_info.tx_offload_capa & required_tx_offloads)
 			!= (required_tx_offloads)) {
 		fprintf(stderr, "Port %u does not support checksum offload; disabling\n",
