@@ -168,14 +168,56 @@ static void
 return_qp(struct usiw_port *dev, struct urdmad_qp *qp)
 {
 	enum { mbuf_count = 4 };
-	struct rte_eth_fdir_filter fdirf;
 	struct rte_mbuf *mbuf[mbuf_count];
 	int ret, count;
 
 	LIST_REMOVE(qp, urdmad__entry);
 	LIST_INSERT_HEAD(&dev->avail_qp, qp, urdmad__entry);
 
-	if (dev->flags & port_fdir) {
+	if (dev->flags & port_5tuple) {
+		struct rte_eth_ntuple_filter ntuple;
+		memset(&ntuple, 0, sizeof(ntuple));
+		ntuple.flags = RTE_5TUPLE_FLAGS;
+		ntuple.dst_ip = dev->ipv4_addr;
+		ntuple.dst_ip_mask = UINT32_MAX;
+		ntuple.dst_port = qp->local_udp_port;
+		ntuple.dst_port_mask = UINT16_MAX;
+		ntuple.proto = IPPROTO_UDP;
+		ntuple.proto_mask = UINT8_MAX;
+		ntuple.priority = 1;
+		ntuple.queue = qp->rx_queue;
+
+		ret = rte_eth_dev_filter_ctrl(dev->portid,
+				RTE_ETH_FILTER_NTUPLE, RTE_ETH_FILTER_DELETE,
+				&ntuple);
+
+		if (ret) {
+			RTE_LOG(WARNING, USER1, "Could not delete 5tuple filter for qp %" PRIu32 ": %s\n",
+					qp->qp_id, rte_strerror(-ret));
+		}
+	} else if (dev->flags & port_2tuple) {
+		struct rte_eth_ntuple_filter ntuple;
+		memset(&ntuple, 0, sizeof(ntuple));
+		ntuple.flags = RTE_2TUPLE_FLAGS;
+		ntuple.dst_port = qp->local_udp_port;
+		ntuple.dst_port_mask = UINT16_MAX;
+		ntuple.proto = IPPROTO_UDP;
+		ntuple.proto_mask = UINT8_MAX;
+		ntuple.priority = 1;
+		ntuple.queue = qp->rx_queue;
+
+		ret = rte_eth_dev_filter_ctrl(dev->portid,
+				RTE_ETH_FILTER_NTUPLE, RTE_ETH_FILTER_DELETE,
+				&ntuple);
+
+		if (ret != 0) {
+			RTE_LOG(CRIT, USER1, "Could not delete 2tuple UDP filter for qp %" PRIu32 ": %s\n",
+					qp->qp_id, rte_strerror(-ret));
+			rte_spinlock_unlock(&qp->conn_event_lock);
+			return;
+		}
+	} else if (dev->flags & port_fdir) {
+		struct rte_eth_fdir_filter fdirf;
 		memset(&fdirf, 0, sizeof(fdirf));
 		fdirf.input.flow_type = RTE_ETH_FLOW_NONFRAG_IPV4_UDP;
 		fdirf.input.flow.udp4_flow.ip.dst_ip = dev->ipv4_addr;
@@ -192,39 +234,61 @@ return_qp(struct usiw_port *dev, struct urdmad_qp *qp)
 			RTE_LOG(DEBUG, USER1, "Could not delete fdir filter for qp %" PRIu32 ": %s\n",
 					qp->qp_id, rte_strerror(-ret));
 		}
+	}
 
-		/* Drain the queue of any outstanding messages. */
-		count = 0;
-		do {
-			ret = rte_eth_rx_burst(dev->portid, qp->rx_queue,
-					mbuf, mbuf_count);
-			count += ret;
-		} while (ret > 0);
-		if (count > 0) {
-			RTE_LOG(INFO, USER1, "Drained %d packets from qp %" PRIu32 "\n",
-					count, qp->qp_id);
-		}
+	/* Drain the queue of any outstanding messages. */
+	count = 0;
+	do {
+		ret = rte_eth_rx_burst(dev->portid, qp->rx_queue,
+				mbuf, mbuf_count);
+		count += ret;
+	} while (ret > 0);
+	if (count > 0) {
+		RTE_LOG(INFO, USER1, "Drained %d packets from qp %" PRIu32 "\n",
+				count, qp->qp_id);
+	}
 
-		ret = rte_eth_dev_rx_queue_stop(dev->portid, qp->rx_queue);
-		if (ret < 0 && ret != -ENOTSUP) {
-			RTE_LOG(INFO, USER1, "Disable RX queue %u failed: %s\n",
-					qp->rx_queue, rte_strerror(-ret));
-		}
+	ret = rte_eth_dev_rx_queue_stop(dev->portid, qp->rx_queue);
+	if (ret < 0 && ret != -ENOTSUP) {
+		RTE_LOG(INFO, USER1, "Disable RX queue %u failed: %s\n",
+				qp->rx_queue, rte_strerror(-ret));
+	}
 
-		ret = rte_eth_dev_tx_queue_stop(dev->portid, qp->tx_queue);
-		if (ret < 0 && ret != -ENOTSUP) {
-			RTE_LOG(INFO, USER1, "Disable RX queue %u failed: %s\n",
-					qp->tx_queue, rte_strerror(-ret));
-		}
+	ret = rte_eth_dev_tx_queue_stop(dev->portid, qp->tx_queue);
+	if (ret < 0 && ret != -ENOTSUP) {
+		RTE_LOG(INFO, USER1, "Disable RX queue %u failed: %s\n",
+				qp->tx_queue, rte_strerror(-ret));
 	}
 } /* return_qp */
+
+
+static int
+add_2tuple_filter(unsigned int portid, unsigned int dest_udp_port,
+		unsigned int rx_queue)
+{
+	struct rte_eth_ntuple_filter ntuple;
+	memset(&ntuple, 0, sizeof(ntuple));
+	ntuple.flags = RTE_2TUPLE_FLAGS;
+	ntuple.dst_port = dest_udp_port;
+	ntuple.dst_port_mask = UINT16_MAX;
+	ntuple.proto = IPPROTO_UDP;
+	ntuple.proto_mask = UINT8_MAX;
+	ntuple.priority = 1;
+	ntuple.queue = rx_queue;
+
+	RTE_LOG(DEBUG, USER1, "ntuple: assign rx queue %" PRIu16 ": UDP port %" PRIu16 "\n",
+				ntuple.queue,
+				rte_be_to_cpu_16(dest_udp_port));
+	return rte_eth_dev_filter_ctrl(portid,
+			RTE_ETH_FILTER_NTUPLE, RTE_ETH_FILTER_ADD,
+			&ntuple);
+} /* add_2tuple_filter */
 
 
 static void
 handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 {
 	struct urdma_qp_rtr_event rtr_event;
-	struct rte_eth_fdir_filter fdirf;
 	struct rte_eth_rxq_info rxq_info;
 	struct rte_eth_txq_info txq_info;
 	struct usiw_port *dev;
@@ -284,7 +348,49 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 		qp->tx_burst_size = dev->tx_desc_count;
 	}
 	memcpy(&qp->remote_ether_addr, event->dst_ether, ETHER_ADDR_LEN);
-	if (dev->flags & port_fdir) {
+	if (dev->flags & port_5tuple) {
+		struct rte_eth_ntuple_filter ntuple;
+		memset(&ntuple, 0, sizeof(ntuple));
+		ntuple.flags = RTE_5TUPLE_FLAGS;
+		ntuple.dst_ip = dev->ipv4_addr;
+		ntuple.dst_ip_mask = UINT32_MAX;
+		ntuple.dst_port = qp->local_udp_port;
+		ntuple.dst_port_mask = UINT16_MAX;
+		ntuple.proto = IPPROTO_UDP;
+		ntuple.proto_mask = UINT8_MAX;
+		ntuple.priority = 1;
+		ntuple.queue = qp->rx_queue;
+
+		RTE_LOG(DEBUG, USER1, "ntuple: assign rx queue %" PRIu16 ": IP address %" PRIx32 ", UDP port %" PRIu16 "\n",
+					ntuple.queue,
+					rte_be_to_cpu_32(dev->ipv4_addr),
+					rte_be_to_cpu_16(event->src_port));
+		ret = rte_eth_dev_filter_ctrl(dev->portid,
+				RTE_ETH_FILTER_NTUPLE, RTE_ETH_FILTER_ADD,
+				&ntuple);
+		if (ret == -ENOTSUP) {
+			dev->flags = (dev->flags & ~port_5tuple) | port_2tuple;
+			ret = add_2tuple_filter(dev->portid,
+						qp->local_udp_port,
+						qp->rx_queue);
+		}
+		if (ret != 0) {
+			RTE_LOG(CRIT, USER1, "Could not add ntuple UDP filter: %s\n",
+					rte_strerror(-ret));
+			rte_spinlock_unlock(&qp->conn_event_lock);
+			return;
+		}
+	} else if (dev->flags & port_2tuple) {
+		ret = add_2tuple_filter(dev->portid, qp->local_udp_port,
+				qp->rx_queue);
+		if (ret != 0) {
+			RTE_LOG(CRIT, USER1, "Could not add 2tuple UDP filter: %s\n",
+					rte_strerror(-ret));
+			rte_spinlock_unlock(&qp->conn_event_lock);
+			return;
+		}
+	} else if (dev->flags & port_fdir) {
+		struct rte_eth_fdir_filter fdirf;
 		memset(&fdirf, 0, sizeof(fdirf));
 		fdirf.input.flow_type = RTE_ETH_FLOW_NONFRAG_IPV4_UDP;
 		fdirf.input.flow.udp4_flow.ip.dst_ip = dev->ipv4_addr;
@@ -305,23 +411,6 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 			rte_spinlock_unlock(&qp->conn_event_lock);
 			return;
 		}
-
-		/* Start the queues now that we have bound to an interface */
-		ret = rte_eth_dev_rx_queue_start(event->urdmad_dev_id, event->rxq);
-		if (ret < 0 && ret != -ENOTSUP) {
-			RTE_LOG(DEBUG, USER1, "Enable RX queue %u failed: %s\n",
-					event->rxq, rte_strerror(-ret));
-			rte_spinlock_unlock(&qp->conn_event_lock);
-			return;
-		}
-
-		ret = rte_eth_dev_tx_queue_start(event->urdmad_dev_id, event->txq);
-		if (ret < 0 && ret != -ENOTSUP) {
-			RTE_LOG(DEBUG, USER1, "Enable RX queue %u failed: %s\n",
-					event->txq, rte_strerror(-ret));
-			rte_spinlock_unlock(&qp->conn_event_lock);
-			return;
-		}
 #if 0
 	} else {
 		char name[RTE_RING_NAMESIZE];
@@ -338,6 +427,23 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 			return;
 		}
 #endif
+	}
+
+	/* Start the queues now that we have bound to an interface */
+	ret = rte_eth_dev_rx_queue_start(event->urdmad_dev_id, event->rxq);
+	if (ret < 0 && ret != -ENOTSUP) {
+		RTE_LOG(DEBUG, USER1, "Enable RX queue %u failed: %s\n",
+				event->rxq, rte_strerror(-ret));
+		rte_spinlock_unlock(&qp->conn_event_lock);
+		return;
+	}
+
+	ret = rte_eth_dev_tx_queue_start(event->urdmad_dev_id, event->txq);
+	if (ret < 0 && ret != -ENOTSUP) {
+		RTE_LOG(DEBUG, USER1, "Enable RX queue %u failed: %s\n",
+				event->txq, rte_strerror(-ret));
+		rte_spinlock_unlock(&qp->conn_event_lock);
+		return;
 	}
 
 	atomic_store(&qp->conn_state, usiw_qp_connected);
@@ -776,6 +882,15 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 		port_conf.rxmode.hw_ip_checksum = 1;
 	}
 	if (rte_eth_dev_filter_supported(iface->portid,
+						RTE_ETH_FILTER_NTUPLE) == 0) {
+		/* ntuple can be 5tuple or 2tuple; we assume 5tuple and then
+		 * fall back to 2tuple if 5tuple fails */
+		iface->flags |= port_5tuple;
+		RTE_LOG(DEBUG, USER1,
+			"port %" PRIu16 " supports ntuple filters\n",
+			iface->portid);
+		port_conf.fdir_conf.mode = RTE_FDIR_MODE_NONE;
+	} else if (rte_eth_dev_filter_supported(iface->portid,
 						RTE_ETH_FILTER_FDIR) == 0) {
 		iface->flags |= port_fdir;
 		port_conf.fdir_conf.mode = RTE_FDIR_MODE_PERFECT;
