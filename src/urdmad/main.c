@@ -765,6 +765,9 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 		port_conf.fdir_conf.mask.src_port_mask = 0;
 		port_conf.fdir_conf.mask.dst_port_mask = UINT16_MAX;
 	} else {
+		RTE_LOG(NOTICE, USER1,
+			"port %" PRIu16 " does not support Flow Director\n",
+			iface->portid);
 		port_conf.fdir_conf.mode = RTE_FDIR_MODE_NONE;
 	}
 
