@@ -831,10 +831,12 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 
 	qp = calloc(1, sizeof(*qp));
 	if (!qp) {
+		RTE_LOG(DEBUG, USER1, "calloc QP struct failed\n");
 		goto errout;
 	}
 	qp->shm_qp = port_get_next_qp(ctx->dev);
 	if (!qp->shm_qp) {
+		RTE_LOG(DEBUG, USER1, "alloc QP number failed\n");
 		goto free_user_qp;
 	}
 
@@ -849,6 +851,7 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 			&cmd.ibv, sizeof(cmd), &resp.ibv, sizeof(resp));
 	if (retval != 0) {
 		errno = retval;
+		RTE_LOG(DEBUG, USER1, "uverbs create_qp failed\n");
 		goto return_user_qp;
 	}
 
@@ -875,6 +878,7 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 			&qp->sq, qp_init_attr->cap.max_send_wr,
 			qp_init_attr->cap.max_send_sge);
 	if (retval != 0) {
+		RTE_LOG(DEBUG, USER1, "create SEND WQ failed\n");
 		errno = -retval;
 		goto free_txq;
 	}
@@ -884,6 +888,7 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 			&qp->rq0, qp_init_attr->cap.max_recv_wr,
 			qp_init_attr->cap.max_recv_sge);
 	if (retval != 0) {
+		RTE_LOG(DEBUG, USER1, "create RECV WQ failed\n");
 		errno = -retval;
 		goto free_txq;
 	}
