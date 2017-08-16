@@ -206,13 +206,13 @@ return_qp(struct usiw_port *dev, struct urdmad_qp *qp)
 		}
 
 		ret = rte_eth_dev_rx_queue_stop(dev->portid, qp->rx_queue);
-		if (ret < 0) {
+		if (ret < 0 && ret != -ENOTSUP) {
 			RTE_LOG(INFO, USER1, "Disable RX queue %u failed: %s\n",
 					qp->rx_queue, rte_strerror(ret));
 		}
 
 		ret = rte_eth_dev_tx_queue_stop(dev->portid, qp->tx_queue);
-		if (ret < 0) {
+		if (ret < 0 && ret != -ENOTSUP) {
 			RTE_LOG(INFO, USER1, "Disable RX queue %u failed: %s\n",
 					qp->tx_queue, rte_strerror(ret));
 		}
@@ -308,7 +308,7 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 
 		/* Start the queues now that we have bound to an interface */
 		ret = rte_eth_dev_rx_queue_start(event->urdmad_dev_id, event->rxq);
-		if (ret < 0) {
+		if (ret < 0 && ret != -ENOTSUP) {
 			RTE_LOG(DEBUG, USER1, "Enable RX queue %u failed: %s\n",
 					event->rxq, rte_strerror(ret));
 			rte_spinlock_unlock(&qp->conn_event_lock);
@@ -316,7 +316,7 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 		}
 
 		ret = rte_eth_dev_tx_queue_start(event->urdmad_dev_id, event->txq);
-		if (ret < 0) {
+		if (ret < 0 && ret != -ENOTSUP) {
 			RTE_LOG(DEBUG, USER1, "Enable RX queue %u failed: %s\n",
 					event->txq, rte_strerror(ret));
 			rte_spinlock_unlock(&qp->conn_event_lock);
