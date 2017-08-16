@@ -190,7 +190,7 @@ return_qp(struct usiw_port *dev, struct urdmad_qp *qp)
 
 		if (ret) {
 			RTE_LOG(DEBUG, USER1, "Could not delete fdir filter for qp %" PRIu32 ": %s\n",
-					qp->qp_id, rte_strerror(ret));
+					qp->qp_id, rte_strerror(-ret));
 		}
 
 		/* Drain the queue of any outstanding messages. */
@@ -208,13 +208,13 @@ return_qp(struct usiw_port *dev, struct urdmad_qp *qp)
 		ret = rte_eth_dev_rx_queue_stop(dev->portid, qp->rx_queue);
 		if (ret < 0) {
 			RTE_LOG(INFO, USER1, "Disable RX queue %u failed: %s\n",
-					qp->rx_queue, rte_strerror(ret));
+					qp->rx_queue, rte_strerror(-ret));
 		}
 
 		ret = rte_eth_dev_tx_queue_stop(dev->portid, qp->tx_queue);
 		if (ret < 0) {
 			RTE_LOG(INFO, USER1, "Disable RX queue %u failed: %s\n",
-					qp->tx_queue, rte_strerror(ret));
+					qp->tx_queue, rte_strerror(-ret));
 		}
 	}
 } /* return_qp */
@@ -310,7 +310,7 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 		ret = rte_eth_dev_rx_queue_start(event->urdmad_dev_id, event->rxq);
 		if (ret < 0) {
 			RTE_LOG(DEBUG, USER1, "Enable RX queue %u failed: %s\n",
-					event->rxq, rte_strerror(ret));
+					event->rxq, rte_strerror(-ret));
 			rte_spinlock_unlock(&qp->conn_event_lock);
 			return;
 		}
@@ -318,7 +318,7 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 		ret = rte_eth_dev_tx_queue_start(event->urdmad_dev_id, event->txq);
 		if (ret < 0) {
 			RTE_LOG(DEBUG, USER1, "Enable RX queue %u failed: %s\n",
-					event->txq, rte_strerror(ret));
+					event->txq, rte_strerror(-ret));
 			rte_spinlock_unlock(&qp->conn_event_lock);
 			return;
 		}
