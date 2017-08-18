@@ -53,6 +53,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include <rte_config.h>
 #include <rte_log.h>
 
 #include "nvm.h"
