@@ -973,13 +973,10 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 
 	/* Data TX queue requires checksum offload, and startup is deferred */
 	memcpy(&txconf, &iface->dev_info.default_txconf, sizeof(txconf));
-	txconf.txq_flags = ETH_TXQ_FLAGS_NOVLANOFFL
-			| ETH_TXQ_FLAGS_NOXSUMSCTP
-			| ETH_TXQ_FLAGS_NOXSUMTCP;
-	if (!(iface->flags & port_checksum_offload)) {
-		RTE_LOG(DEBUG, USER1, "Port %u does not support checksum offload; disabling\n",
-				iface->portid);
-		txconf.txq_flags |= ETH_TXQ_FLAGS_NOXSUMUDP;
+	txconf.txq_flags &= ~(ETH_TXQ_FLAGS_NOMULTSEGS|ETH_TXQ_FLAGS_NOREFCOUNT
+				|ETH_TXQ_FLAGS_NOMULTMEMP);
+	if (iface->flags & port_checksum_offload) {
+		txconf.txq_flags &= ~ETH_TXQ_FLAGS_NOXSUMUDP;
 	}
 	txconf.tx_deferred_start = 1;
 	for (q = 1; q <= iface->max_qp; q++) {
