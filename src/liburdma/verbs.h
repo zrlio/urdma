@@ -71,6 +71,22 @@ struct urdma_qp_stats {
 		/**< The maximum burst size that usiw requests from DPDK. */
 };
 
+struct urdma_qp_stats_ex {
+	size_t size;
+		/**< The size of this structure filled in by urdma. Any fields
+		 * beyond this size are undefined. */
+	struct urdma_qp_stats base;
+		/**< Base stats from initial (non-versioned) stats
+		 * structure. */
+	uintmax_t recv_psn_gap_count;
+		/**< The number of times a packet was received with a PSN that
+		 * was not the next expected PSN. */
+	uintmax_t recv_retransmit_count;
+		/**< The number of received retransmissions. */
+	uintmax_t recv_sack_count;
+		/**< The number of received SACK packets. */
+};
+
 struct ibv_mr *
 urdma_reg_mr_with_rkey(struct ibv_pd *pd, void *addr, size_t len, int access,
 		uint32_t rkey);
@@ -104,5 +120,8 @@ urdma_accl_post_read(struct ibv_qp *qp, void *addr, size_t length,
 void
 urdma_query_qp_stats(const struct ibv_qp *restrict qp,
 		struct urdma_qp_stats *restrict stats);
+
+struct urdma_qp_stats_ex *
+urdma_query_qp_stats_ex(const struct ibv_qp *qp);
 
 #endif

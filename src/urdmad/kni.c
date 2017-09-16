@@ -213,9 +213,60 @@ usiw_port_change_mtu(uint8_t port_id, unsigned int new_mtu)
 	return rte_eth_dev_set_mtu(port_id, new_mtu);
 } /* usiw_port_change_mtu */
 
+static const char *
+link_speed_str(uint8_t portid, struct rte_eth_link *link_info)
+{
+	const char *speed_str;
+
+	switch (link_info->link_speed) {
+	case ETH_SPEED_NUM_100G:
+		speed_str = "100 Gbps";
+		break;
+	case ETH_SPEED_NUM_56G:
+		speed_str = "56 Gbps";
+		break;
+	case ETH_SPEED_NUM_50G:
+		speed_str = "50 Gbps";
+		break;
+	case ETH_SPEED_NUM_40G:
+		speed_str = "40 Gbps";
+		break;
+	case ETH_SPEED_NUM_25G:
+		speed_str = "25 Gbps";
+		break;
+	case ETH_SPEED_NUM_20G:
+		speed_str = "20 Gbps";
+		break;
+	case ETH_SPEED_NUM_10G:
+		speed_str = "10 Gbps";
+		break;
+	case ETH_SPEED_NUM_5G:
+		speed_str = "5 Gbps";
+		break;
+	case ETH_SPEED_NUM_2_5G:
+		speed_str = "2.5 Gbps";
+		break;
+	case ETH_SPEED_NUM_1G:
+		speed_str = "1 Gbps";
+		break;
+	case ETH_SPEED_NUM_100M:
+		speed_str = "100 Mbps";
+		break;
+	case ETH_SPEED_NUM_10M:
+		speed_str = "10 Mbps";
+		break;
+	default:
+		speed_str = "unknown";
+		break;
+	}
+	return speed_str;
+} /* link_speed_str */
+
 static int
 usiw_port_change_state(uint8_t port_id, uint8_t if_up)
 {
+	struct rte_eth_link link_info;
+	const char *speed_str;
 	uint16_t mtu;
 	int ret;
 
@@ -227,8 +278,14 @@ usiw_port_change_state(uint8_t port_id, uint8_t if_up)
 
 	ret = rte_eth_dev_get_mtu(port_id, &mtu);
 	assert(ret == 0);
-	RTE_LOG(NOTICE, USER1, "port %" PRIu8 " up mtu=%" PRIu16 "\n",
-			port_id, mtu);
+	rte_eth_link_get_nowait(port_id, &link_info);
+	if (link_info.link_status) {
+		speed_str = link_speed_str(port_id, &link_info);
+		RTE_LOG(NOTICE, USER1, "port %" PRIu8 " up mtu=%" PRIu16 " speed %s\n",
+				port_id, mtu, speed_str);
+	} else {
+		RTE_LOG(NOTICE, USER1, "port %" PRIu8 " down\n", port_id);
+	}
 	return 0;
 } /* usiw_port_change_mtu */
 

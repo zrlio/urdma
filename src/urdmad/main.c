@@ -190,7 +190,7 @@ return_qp(struct usiw_port *dev, struct urdmad_qp *qp)
 
 		if (ret) {
 			RTE_LOG(DEBUG, USER1, "Could not delete fdir filter for qp %" PRIu32 ": %s\n",
-					qp->qp_id, rte_strerror(ret));
+					qp->qp_id, rte_strerror(-ret));
 		}
 
 		/* Drain the queue of any outstanding messages. */
@@ -208,13 +208,13 @@ return_qp(struct usiw_port *dev, struct urdmad_qp *qp)
 		ret = rte_eth_dev_rx_queue_stop(dev->portid, qp->rx_queue);
 		if (ret < 0 && ret != -ENOTSUP) {
 			RTE_LOG(INFO, USER1, "Disable RX queue %u failed: %s\n",
-					qp->rx_queue, rte_strerror(ret));
+					qp->rx_queue, rte_strerror(-ret));
 		}
 
 		ret = rte_eth_dev_tx_queue_stop(dev->portid, qp->tx_queue);
 		if (ret < 0 && ret != -ENOTSUP) {
 			RTE_LOG(INFO, USER1, "Disable RX queue %u failed: %s\n",
-					qp->tx_queue, rte_strerror(ret));
+					qp->tx_queue, rte_strerror(-ret));
 		}
 	}
 } /* return_qp */
@@ -310,7 +310,7 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 		ret = rte_eth_dev_rx_queue_start(event->urdmad_dev_id, event->rxq);
 		if (ret < 0 && ret != -ENOTSUP) {
 			RTE_LOG(DEBUG, USER1, "Enable RX queue %u failed: %s\n",
-					event->rxq, rte_strerror(ret));
+					event->rxq, rte_strerror(-ret));
 			rte_spinlock_unlock(&qp->conn_event_lock);
 			return;
 		}
@@ -318,7 +318,7 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 		ret = rte_eth_dev_tx_queue_start(event->urdmad_dev_id, event->txq);
 		if (ret < 0 && ret != -ENOTSUP) {
 			RTE_LOG(DEBUG, USER1, "Enable RX queue %u failed: %s\n",
-					event->txq, rte_strerror(ret));
+					event->txq, rte_strerror(-ret));
 			rte_spinlock_unlock(&qp->conn_event_lock);
 			return;
 		}
@@ -602,8 +602,6 @@ do_poll(int timeout)
 		ret = epoll_wait(driver->epoll_fd, &event, 1, timeout);
 		if (ret > 0) {
 			fd = event.data.ptr;
-			RTE_LOG(DEBUG, USER1, "epoll: event %x on fd %d\n",
-					event.events, fd->fd);
 			fd->data_ready(fd);
 		} else if (WARN_ONCE(ret < 0,
 				"Error polling event file for reading: %s\n",
@@ -788,6 +786,9 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 		port_conf.fdir_conf.mask.src_port_mask = 0;
 		port_conf.fdir_conf.mask.dst_port_mask = UINT16_MAX;
 	} else {
+		RTE_LOG(NOTICE, USER1,
+			"port %" PRIu16 " does not support Flow Director\n",
+			iface->portid);
 		port_conf.fdir_conf.mode = RTE_FDIR_MODE_NONE;
 	}
 
@@ -1093,13 +1094,31 @@ setup_timer(int interval_ms)
 } /* setup_timer */
 
 
+
+static int
+lookup_ethdev_by_pci_addr(struct rte_pci_addr *addr)
+{
+	struct rte_eth_dev_info info;
+	int x, count;
+
+	count = rte_eth_dev_count();
+	for (x = 0; x < count; ++x) {
+		rte_eth_dev_info_get(x, &info);
+		if (!rte_eal_compare_pci_addr(addr, &info.pci_dev->addr)) {
+			return x;
+		}
+	}
+	return -ENODEV;
+} /* lookup_ethdev_by_pci_addr */
+
+
 static void
 do_init_driver(void)
 {
 	struct usiw_port_config *port_config;
 	struct usiw_config config;
 	char *sock_name;
-	int portid, port_count, timer_ms;
+	int i, portid, port_count, timer_ms;
 	int retval;
 
 	retval = urdma__config_file_open(&config);
@@ -1160,13 +1179,37 @@ do_init_driver(void)
 	rte_kni_init(driver->port_count);
 
 	driver->progress_lcore = 1;
-	for (portid = 0; portid < driver->port_count; ++portid) {
-		driver->ports[portid].portid = portid;
+	for (i = 0; i < driver->port_count; ++i) {
+		switch (port_config[i].id_type) {
+		case urdma_port_id_index:
+			portid = i;
+			break;
+		case urdma_port_id_pci:
+			portid = lookup_ethdev_by_pci_addr(
+						&port_config[i].pci_address);
+			if (portid < 0) {
+				rte_exit(EXIT_FAILURE, "No DPDK ethdev with PCI address " PCI_PRI_FMT "\n",
+					port_config[i].pci_address.domain,
+					port_config[i].pci_address.bus,
+					port_config[i].pci_address.devid,
+					port_config[i].pci_address.function);
+			}
+			RTE_LOG(DEBUG, USER1, "Resolve PCI address " PCI_PRI_FMT " to portid %d\n",
+					port_config[i].pci_address.domain,
+					port_config[i].pci_address.bus,
+					port_config[i].pci_address.devid,
+					port_config[i].pci_address.function,
+					portid);
+			break;
+		default:
+			abort();
+		}
+		driver->ports[i].portid = portid;
 		rte_eth_macaddr_get(portid,
-				&driver->ports[portid].ether_addr);
-		rte_eth_dev_info_get(portid, &driver->ports[portid].dev_info);
+				&driver->ports[i].ether_addr);
+		rte_eth_dev_info_get(portid, &driver->ports[i].dev_info);
 
-		usiw_port_init(&driver->ports[portid], &port_config[portid]);
+		usiw_port_init(&driver->ports[i], &port_config[i]);
 	}
 	rte_eal_remote_launch(event_loop, driver, driver->progress_lcore);
 	/* FIXME: cannot free driver beyond this point since it is being
@@ -1176,9 +1219,9 @@ do_init_driver(void)
 		rte_exit(EXIT_FAILURE, "Could not setup KNI context: %s\n",
 					strerror(-retval));
 	}
-	for (portid = 0; portid < driver->port_count; portid++) {
-		retval = usiw_set_ipv4_addr(driver, &driver->ports[portid],
-				&port_config[portid]);
+	for (i = 0; i < driver->port_count; i++) {
+		retval = usiw_set_ipv4_addr(driver, &driver->ports[i],
+				&port_config[i]);
 		if (retval < 0) {
 			rte_exit(EXIT_FAILURE, "Could not set port %u IPv4 address: %s\n",
 					portid, strerror(-retval));
@@ -1188,9 +1231,22 @@ do_init_driver(void)
 } /* do_init_driver */
 
 
+static void usage(const char *argv0)
+{
+	printf("  %-20s%s\n", "--systemd",
+			"Assume we are running from systemd");
+	printf("%22cDump log messages to stderr but not syslog\n", ' ');
+	fflush(stdout);
+} /* usage */
+
+
 int
 main(int argc, char *argv[])
 {
+	char **arg;
+
+	rte_set_application_usage_hook(&usage);
+
 	/* We cannot access /proc/self/pagemap as non-root if we are not
 	 * dumpable
 	 *
@@ -1199,6 +1255,23 @@ main(int argc, char *argv[])
 	 * run */
 	if (prctl(PR_SET_DUMPABLE, 1, 0, 0, 0) < 0) {
 		perror("WARNING: set dumpable flag failed; DPDK may not initialize properly");
+	}
+
+	/* Scan command line for --systemd option. We can't use getopt_long()
+	 * because we must know about this argument *before* we call
+	 * rte_eal_init(), which consumes most command line arguments. */
+	for (arg = argv; *arg != NULL; ++arg) {
+		if (!strcmp(*arg, "--systemd")) {
+			/* If we are running under systemd, stderr is
+			 * automatically logged to the systemd journal and thus
+			 * also logging to syslog (which DPDK does by default)
+			 * results in duplicate log messages. By preserving
+			 * stderr, we ensure that any error messages printed by
+			 * a library (such as glibc heap corruption dumps) make
+			 * it to the journal. */
+			rte_openlog_stream(stderr);
+			break;
+		}
 	}
 
 	/* rte_eal_init does nothing and returns -1 if it was already called

@@ -35,6 +35,10 @@
             "type": "object",
             "description": "Settings for the given Ethernet port",
             "properties": {
+                "pci_address": {
+                    "type": "string",
+                    "description": "PCI address of port to match"
+                },
                 "ipv4_address": {
                     "type": "string",
                     "description": "IPv4 address to assign to the port"

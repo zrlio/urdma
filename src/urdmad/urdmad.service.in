@@ -3,7 +3,7 @@ Description=Create and manage virtual urdma devices
 
 [Service]
 Type=simple
-ExecStart=@bindir@/urdmad --file-prefix=%H --proc-type=primary -l0-1 --log-level=8 --base-virtaddr=0x700000000000
+ExecStart=@bindir@/urdmad --file-prefix=%H --proc-type=primary -l0-1 --log-level=8 --base-virtaddr=0x700000000000 -- --systemd
 LimitMEMLOCK=infinity
 RuntimeDirectory=urdma
 

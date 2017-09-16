@@ -831,10 +831,12 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 
 	qp = calloc(1, sizeof(*qp));
 	if (!qp) {
+		RTE_LOG(DEBUG, USER1, "calloc QP struct failed\n");
 		goto errout;
 	}
 	qp->shm_qp = port_get_next_qp(ctx->dev);
 	if (!qp->shm_qp) {
+		RTE_LOG(DEBUG, USER1, "alloc QP number failed\n");
 		goto free_user_qp;
 	}
 
@@ -849,6 +851,7 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 			&cmd.ibv, sizeof(cmd), &resp.ibv, sizeof(resp));
 	if (retval != 0) {
 		errno = retval;
+		RTE_LOG(DEBUG, USER1, "uverbs create_qp failed\n");
 		goto return_user_qp;
 	}
 
@@ -875,6 +878,7 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 			&qp->sq, qp_init_attr->cap.max_send_wr,
 			qp_init_attr->cap.max_send_sge);
 	if (retval != 0) {
+		RTE_LOG(DEBUG, USER1, "create SEND WQ failed\n");
 		errno = -retval;
 		goto free_txq;
 	}
@@ -884,6 +888,7 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 			&qp->rq0, qp_init_attr->cap.max_recv_wr,
 			qp_init_attr->cap.max_recv_sge);
 	if (retval != 0) {
+		RTE_LOG(DEBUG, USER1, "create RECV WQ failed\n");
 		errno = -retval;
 		goto free_txq;
 	}
@@ -1404,14 +1409,53 @@ usiw_num_completion_vectors(void)
 	return max_socket_id + 1;
 } /* usiw_num_completion_vectors */
 
+/** Returns statistics for the given queue pair. Note that recv_count_histo is
+ * dynamically allocated and should be free'd after use.
+ *
+ * This function is deprecated and urdma_query_qp_stats_ex() should be used
+ * instead of this function. */
 void
 urdma_query_qp_stats(const struct ibv_qp *restrict ib_qp,
 		struct urdma_qp_stats *restrict stats)
 {
 	struct usiw_qp *qp = container_of(ib_qp, struct usiw_qp, ib_qp);
-	memcpy(stats, &qp->stats, sizeof(*stats));
-} /* usiw_port_get_stats */
+	size_t histo_size = sizeof(*qp->stats.base.recv_count_histo) *
+		(qp->stats.base.recv_max_burst_size + 1);
+	stats->recv_count_histo = malloc(histo_size);
+	if (stats->recv_count_histo) {
+		memcpy(stats->recv_count_histo,
+			&qp->stats.base.recv_count_histo, histo_size);
+	}
+	stats->recv_max_burst_size = qp->stats.base.recv_max_burst_size;
+} /* usiw_query_qp_stats */
 
+/** Returns statistics for the given queue pair. The returned structure must be
+ * freed after use with urdma_query_qp_stats_ex(). */
+struct urdma_qp_stats_ex *
+urdma_query_qp_stats_ex(const struct ibv_qp *ib_qp)
+{
+	struct usiw_qp *qp = container_of(ib_qp, struct usiw_qp, ib_qp);
+	struct urdma_qp_stats_ex *stats = malloc(sizeof(*stats));
+	if (stats) {
+		stats->size = sizeof(*stats);
+		urdma_query_qp_stats(ib_qp, &stats->base);
+		if (!stats->base.recv_count_histo) {
+			free(stats);
+			return NULL;
+		}
+		stats->recv_psn_gap_count = qp->stats.recv_psn_gap_count;
+		stats->recv_retransmit_count = qp->stats.recv_retransmit_count;
+		stats->recv_sack_count = qp->stats.recv_sack_count;
+	}
+	return stats;
+} /* urdma_query_qp_stats_ex */
+
+void
+urdma_free_qp_stats_ex(struct urdma_qp_stats_ex *stats)
+{
+	free(stats->base.recv_count_histo);
+	free(stats);
+} /* urdma_free_qp_stats_ex */
 
 int
 usiw_init_context(struct verbs_device *device, struct ibv_context *context,
