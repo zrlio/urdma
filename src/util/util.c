@@ -148,6 +148,27 @@ static const struct flag_descr all_speed_capa[] = {
 	{ .flag = 0, .name = NULL },
 };
 
+#define stringify(x) #x
+#define str_case(x) case (x): { return stringify(x); break; }
+
+static const char *dpdk_filter_type_str(int x)
+{
+	switch (x) {
+	str_case(RTE_ETH_FILTER_NONE);
+	str_case(RTE_ETH_FILTER_MACVLAN);
+	str_case(RTE_ETH_FILTER_ETHERTYPE);
+	str_case(RTE_ETH_FILTER_FLEXIBLE);
+	str_case(RTE_ETH_FILTER_SYN);
+	str_case(RTE_ETH_FILTER_NTUPLE);
+	str_case(RTE_ETH_FILTER_TUNNEL);
+	str_case(RTE_ETH_FILTER_FDIR);
+	str_case(RTE_ETH_FILTER_HASH);
+	str_case(RTE_ETH_FILTER_L2_TUNNEL);
+	default:
+		return "unknown";
+	}
+} /* dpdk_filter_type_str */
+
 static void dump_flags(FILE *stream, const struct flag_descr *flags, uint32_t v)
 {
 	const struct flag_descr *ptr;

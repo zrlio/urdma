@@ -56,6 +56,8 @@
 enum usiw_port_flags {
 	port_checksum_offload = 1,
 	port_fdir = 2,
+	port_2tuple = 4,
+	port_5tuple = 8,
 };
 
 LIST_HEAD(urdmad_qp_head, urdmad_qp);
