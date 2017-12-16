@@ -278,7 +278,7 @@ usiw_port_change_state(uint8_t port_id, uint8_t if_up)
 
 	ret = rte_eth_dev_get_mtu(port_id, &mtu);
 	assert(ret == 0);
-	rte_eth_link_get_nowait(port_id, &link_info);
+	rte_eth_link_get(port_id, &link_info);
 	if (link_info.link_status) {
 		speed_str = link_speed_str(port_id, &link_info);
 		RTE_LOG(NOTICE, USER1, "port %" PRIu8 " up mtu=%" PRIu16 " speed %s\n",
