@@ -60,19 +60,19 @@ static inline void siw_cq_get(struct siw_cq *cq)
 {
 	kref_get(&cq->hdr.ref);
 	pr_debug(DBG_OBJ "(CQ%d): New refcount: %d\n",
-		OBJ_ID(cq), atomic_read(&cq->hdr.ref.refcount));
+		OBJ_ID(cq), kref_read(&cq->hdr.ref));
 }
 static inline void siw_qp_get(struct siw_qp *qp)
 {
 	kref_get(&qp->hdr.ref);
 	pr_debug(DBG_OBJ "(QP%d): New refcount: %d\n",
-		OBJ_ID(qp), atomic_read(&qp->hdr.ref.refcount));
+		OBJ_ID(qp), kref_read(&qp->hdr.ref));
 }
 static inline void siw_pd_get(struct siw_pd *pd)
 {
 	kref_get(&pd->hdr.ref);
 	pr_debug(DBG_OBJ "(PD%d): New refcount: %d\n",
-		OBJ_ID(pd), atomic_read(&pd->hdr.ref.refcount));
+		OBJ_ID(pd), kref_read(&pd->hdr.ref));
 }
 
 extern void siw_remove_obj(spinlock_t *lock, struct idr *idr,

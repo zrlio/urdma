@@ -99,4 +99,8 @@ typedef unsigned long dma_attrs_t;
 #define HAVE_CREATE_AH_UDATA 1
 #endif
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 11, 0)
+#define kref_read(ref) (atomic_read(&((ref)->refcount)))
+#endif
+
 #endif

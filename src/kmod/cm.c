@@ -403,9 +403,9 @@ out:
 void siw_cep_put(struct siw_cep *cep)
 {
 	pr_debug(DBG_OBJ DBG_CM "(CEP 0x%p): New refcount: %d\n",
-		cep, atomic_read(&cep->ref.refcount) - 1);
+		cep, kref_read(&cep->ref) - 1);
 
-	if (WARN_ON_ONCE(atomic_read(&cep->ref.refcount) < 1)) {
+	if (WARN_ON_ONCE(kref_read(&cep->ref) < 1)) {
 		return;
 	}
 	kref_put(&cep->ref, __siw_cep_dealloc);
@@ -415,7 +415,7 @@ void siw_cep_get(struct siw_cep *cep)
 {
 	kref_get(&cep->ref);
 	pr_debug(DBG_OBJ DBG_CM "(CEP 0x%p): New refcount: %d\n",
-		cep, atomic_read(&cep->ref.refcount));
+		cep, kref_read(&cep->ref));
 }
 
 

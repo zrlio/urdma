@@ -148,7 +148,7 @@ struct siw_cq *siw_cq_id2obj(struct siw_dev *sdev, int id)
 	struct siw_objhdr *obj = siw_get_obj(&sdev->cq_idr, id);
 	if (obj) {
 		pr_debug(DBG_OBJ "(CQ%d): New refcount: %d\n",
-			obj->id, atomic_read(&obj->ref.refcount));
+			obj->id, kref_read(&obj->ref));
 		return container_of(obj, struct siw_cq, hdr);
 	}
 
@@ -160,7 +160,7 @@ struct siw_qp *siw_qp_id2obj(struct siw_dev *sdev, int id)
 	struct siw_objhdr *obj = siw_get_obj(&sdev->qp_idr, id);
 	if (obj) {
 		pr_debug(DBG_OBJ "(QP%d): New refcount: %d\n",
-			obj->id, atomic_read(&obj->ref.refcount));
+			obj->id, kref_read(&obj->ref));
 		return container_of(obj, struct siw_qp, hdr);
 	}
 
@@ -258,20 +258,20 @@ static void siw_free_pd(struct kref *ref)
 void siw_cq_put(struct siw_cq *cq)
 {
 	pr_debug(DBG_OBJ "(CQ%d): Old refcount: %d\n",
-		OBJ_ID(cq), atomic_read(&cq->hdr.ref.refcount));
+		OBJ_ID(cq), kref_read(&cq->hdr.ref));
 	kref_put(&cq->hdr.ref, siw_free_cq);
 }
 
 void siw_qp_put(struct siw_qp *qp)
 {
 	pr_debug(DBG_OBJ "(QP%d): Old refcount: %d\n",
-		QP_ID(qp), atomic_read(&qp->hdr.ref.refcount));
+		QP_ID(qp), kref_read(&qp->hdr.ref));
 	kref_put(&qp->hdr.ref, siw_free_qp);
 }
 
 void siw_pd_put(struct siw_pd *pd)
 {
 	pr_debug(DBG_OBJ "(PD%d): Old refcount: %d\n",
-		OBJ_ID(pd), atomic_read(&pd->hdr.ref.refcount));
+		OBJ_ID(pd), kref_read(&pd->hdr.ref));
 	kref_put(&pd->hdr.ref, siw_free_pd);
 }
