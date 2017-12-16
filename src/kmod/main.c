@@ -86,7 +86,9 @@ static void usiw_device_release(struct device *dev)
 }
 
 static struct device usiw_generic_dma_device = {
+#ifdef HAVE_DEVICE_ARCHDATA_DMA_OPS
 	.archdata.dma_ops	= &usiw_dma_generic_ops,
+#endif
 	.init_name		= "urdma",
 	.release		= usiw_device_release
 };
@@ -441,7 +443,7 @@ static void siw_device_destroy(struct siw_dev *sdev)
 			sdev->ofa_dev.name,
 			sdev->netdev ? sdev->netdev->name : "(unattached)");
 
-	put_device(sdev->ofa_dev.dma_device);
+	put_device(ib_dma_device(sdev->ofa_dev));
 	siw_idr_release(sdev);
 	kfree(sdev->ofa_dev.iwcm);
 	if (sdev->netdev)
@@ -554,7 +556,7 @@ static struct siw_dev *siw_device_create(struct net_device *netdev)
 	ofa_dev->phys_port_cnt = 1;
 
 	ofa_dev->num_comp_vectors = 1;
-	ofa_dev->dma_device = get_device(&usiw_generic_dma_device);
+	ib_dma_device(*ofa_dev) = get_device(&usiw_generic_dma_device);
 	ofa_dev->query_device = siw_query_device;
 	ofa_dev->query_port = siw_query_port;
 #ifdef HAVE_IB_GET_PORT_IMMUTABLE
@@ -609,7 +611,9 @@ static struct siw_dev *siw_device_create(struct net_device *netdev)
 	ofa_dev->post_send = siw_post_send;
 	ofa_dev->post_recv = siw_post_receive;
 
+#ifdef HAVE_DEVICE_ARCHDATA_DMA_OPS
 	ofa_dev->dma_ops = &siw_dma_mapping_ops;
+#endif
 
 	ofa_dev->iwcm->connect = siw_connect;
 	ofa_dev->iwcm->accept = siw_accept;
