@@ -442,11 +442,16 @@ int siw_dealloc_pd(struct ib_pd *ofa_pd)
 	return 0;
 }
 
+#ifdef HAVE_STRUCT_RDMA_AH_ATTR
+struct ib_ah *siw_create_ah(struct ib_pd *pd, struct rdma_ah_attr *attr,
+				   struct ib_udata *data)
+#else
 struct ib_ah *siw_create_ah(struct ib_pd *pd, struct ib_ah_attr *attr
 #ifdef HAVE_CREATE_AH_UDATA
 			    , struct ib_udata *data
 #endif
 			   )
+#endif
 {
 	return ERR_PTR(-ENOSYS);
 }

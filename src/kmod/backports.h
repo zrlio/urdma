@@ -108,4 +108,8 @@ typedef unsigned long dma_attrs_t;
 #define ib_dma_device(rdma_dev) ((rdma_dev).dev.parent)
 #endif
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)
+#define HAVE_STRUCT_RDMA_AH_ATTR 1
+#endif
+
 #endif
