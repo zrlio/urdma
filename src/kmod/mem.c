@@ -305,6 +305,7 @@ static int siw_dma_generic_supported(struct device *dev, u64 mask)
 	return 1;
 }
 
+#ifdef HAVE_DMA_MAP_OPS_SET_DMA_MASK
 static int siw_dma_generic_set_mask(struct device *dev, u64 mask)
 {
 	if (!dev->dma_mask || !dma_supported(dev, mask))
@@ -314,6 +315,7 @@ static int siw_dma_generic_set_mask(struct device *dev, u64 mask)
 
 	return 0;
 }
+#endif
 
 struct dma_map_ops usiw_dma_generic_ops = {
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 4, 0)
@@ -333,6 +335,8 @@ struct dma_map_ops usiw_dma_generic_ops = {
 	.sync_sg_for_device	= siw_generic_sync_sg_for_device,
 	.mapping_error		= siw_dma_generic_mapping_error,
 	.dma_supported		= siw_dma_generic_supported,
+#ifdef HAVE_DMA_MAP_OPS_SET_DMA_MASK
 	.set_dma_mask		= siw_dma_generic_set_mask,
+#endif
 	.is_phys		= 1
 };

@@ -112,4 +112,8 @@ typedef unsigned long dma_attrs_t;
 #define HAVE_STRUCT_RDMA_AH_ATTR 1
 #endif
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 13, 0)
+#define HAVE_DMA_MAP_OPS_SET_DMA_MASK 1
+#endif
+
 #endif
