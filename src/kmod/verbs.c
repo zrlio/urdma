@@ -96,12 +96,6 @@ static inline struct siw_cq *siw_cq_ofa2siw(struct ib_cq *ofa_cq)
 	return container_of(ofa_cq, struct siw_cq, ofa_cq);
 }
 
-int
-siw_mmap(struct ib_ucontext *ctx, struct vm_area_struct *vma)
-{
-	return -ENOSYS;
-}
-
 static ssize_t siw_event_file_write(struct file *filp, const char __user *buf,
 		size_t count, loff_t *pos)
 {

@@ -114,7 +114,6 @@ extern int siw_query_srq(struct ib_srq *, struct ib_srq_attr *);
 extern int siw_destroy_srq(struct ib_srq *);
 extern int siw_post_srq_recv(struct ib_srq *, struct ib_recv_wr *,
 			     struct ib_recv_wr **);
-extern int siw_mmap(struct ib_ucontext *, struct vm_area_struct *);
 
 #ifndef HAVE_IB_PROCESS_MAD_SIZES
 extern int siw_no_mad(struct ib_device *, int, u8, struct ib_wc *, struct ib_grh *,

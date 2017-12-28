@@ -568,7 +568,6 @@ static struct siw_dev *siw_device_create(struct net_device *netdev)
 	ofa_dev->query_gid = siw_query_gid;
 	ofa_dev->alloc_ucontext = siw_alloc_ucontext;
 	ofa_dev->dealloc_ucontext = siw_dealloc_ucontext;
-	ofa_dev->mmap = siw_mmap;
 	ofa_dev->alloc_pd = siw_alloc_pd;
 	ofa_dev->dealloc_pd = siw_dealloc_pd;
 	ofa_dev->create_ah = siw_create_ah;
