@@ -1612,7 +1612,7 @@ sweep_unacked_packets(struct usiw_qp *qp, uint64_t now)
 	}
 
 	p = ep->tx_head;
-	while (count < ep->tx_pending_size && (sendmsg = *p) != NULL) {
+	while (count++ < ep->tx_pending_size && (sendmsg = *p) != NULL) {
 		int ret, cstatus;
 		pending = (struct pending_datagram_info *)(sendmsg + 1);
 		if (now > pending->next_retransmit
