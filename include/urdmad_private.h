@@ -45,9 +45,9 @@
 
 #include <stdatomic.h>
 #include <stdint.h>
+#include <pthread.h>
 
 #include <rte_ether.h>
-#include <rte_spinlock.h>
 
 /** Internal state machine of the queue pair. */
 enum urdma_qp_state {
@@ -74,7 +74,7 @@ struct urdmad_qp {
 	uint8_t ird_max;
 		/**< Negotiated maximum number of incoming RDMA READ
 		 * requests. */
-	rte_spinlock_t conn_event_lock;
+	pthread_mutex_t conn_event_lock;
 		/**< Protects conn_state and related variables. */
 
 	uint16_t dev_id;

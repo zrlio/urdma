@@ -294,7 +294,7 @@ do_setup_qp(struct urdma_qp_connected_event *event, struct usiw_port *dev,
 	struct rte_eth_txq_info txq_info;
 	int ret;
 
-	rte_spinlock_lock(&qp->conn_event_lock);
+	pthread_mutex_lock(&qp->conn_event_lock);
 	assert(event->src_port != 0);
 	assert(event->src_ipv4 == dev->ipv4_addr);
 	assert(event->rxq == qp->rx_queue);
@@ -416,7 +416,7 @@ do_setup_qp(struct urdma_qp_connected_event *event, struct usiw_port *dev,
 	ret = 0;
 
 unlock:
-	rte_spinlock_unlock(&qp->conn_event_lock);
+	pthread_mutex_unlock(&qp->conn_event_lock);
 	return ret;
 } /* setup_qp */
 
@@ -830,6 +830,7 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 		= DEV_TX_OFFLOAD_UDP_CKSUM|DEV_TX_OFFLOAD_IPV4_CKSUM;
 
 	char name[RTE_MEMPOOL_NAMESIZE];
+	pthread_mutexattr_t mutexattr;
 	struct rte_eth_txconf txconf;
 	struct rte_eth_rxconf rxconf;
 	struct rte_eth_conf port_conf;
@@ -968,14 +969,36 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 		rte_exit(EXIT_FAILURE, "Cannot allocate QP array: %s\n",
 				rte_strerror(rte_errno));
 	}
+	retval = pthread_mutexattr_init(&mutexattr);
+	if (retval) {
+		rte_exit(EXIT_FAILURE,
+			"Cannot allocate mutex attribute object: %s\n",
+			rte_strerror(rte_errno));
+	}
+	retval = pthread_mutexattr_setpshared(&mutexattr, PTHREAD_PROCESS_SHARED);
+	if (retval) {
+		rte_exit(EXIT_FAILURE,
+			"Cannot enable process shared mutex attribute: %s\n",
+			rte_strerror(rte_errno));
+	}
 	for (q = 1; q <= iface->max_qp; ++q) {
 		iface->qp[q].qp_id = q;
 		iface->qp[q].tx_queue = q;
 		iface->qp[q].rx_queue = q;
 		atomic_init(&iface->qp[q].conn_state, 0);
-		rte_spinlock_init(&iface->qp[q].conn_event_lock);
+		retval = pthread_mutex_init(&iface->qp[q].conn_event_lock, &mutexattr);
+		if (retval) {
+			rte_exit(EXIT_FAILURE, "Cannot create mutex: %s\n",
+				rte_strerror(rte_errno));
+		}
 		LIST_INSERT_HEAD(&iface->avail_qp, &iface->qp[q],
 				urdmad__entry);
+	}
+	retval = pthread_mutexattr_destroy(&mutexattr);
+	if (retval) {
+		rte_exit(EXIT_FAILURE,
+			"Cannot destroy mutex attribute object: %s\n",
+			rte_strerror(rte_errno));
 	}
 
 	/* We must allocate an mbuf large enough to hold the maximum possible
