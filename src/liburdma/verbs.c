@@ -1051,9 +1051,10 @@ usiw_destroy_qp(struct ibv_qp *ib_qp)
 	bool cmpxchg_res;
 	int ret;
 
+	qp = container_of(ib_qp, struct usiw_qp, ib_qp);
+	pthread_mutex_lock(&qp->shm_qp->conn_event_lock);
 	ret = ibv_cmd_destroy_qp(ib_qp);
 
-	qp = container_of(ib_qp, struct usiw_qp, ib_qp);
 	ctx = qp->ctx;
 	cur_state = atomic_load(&qp->shm_qp->conn_state);
 	if (cur_state == usiw_qp_unbound) {
@@ -1071,6 +1072,7 @@ usiw_destroy_qp(struct ibv_qp *ib_qp)
 						&cur_state, usiw_qp_error);
 		} while (!cmpxchg_res && cur_state < usiw_qp_shutdown);
 	}
+	pthread_mutex_unlock(&qp->shm_qp->conn_event_lock);
 
 	rte_spinlock_lock(&ctx->qp_lock);
 	HASH_DEL(ctx->qp, qp);
