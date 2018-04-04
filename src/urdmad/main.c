@@ -213,7 +213,6 @@ return_qp(struct usiw_port *dev, struct urdmad_qp *qp)
 		if (ret != 0) {
 			RTE_LOG(CRIT, USER1, "Could not delete 2tuple UDP filter for qp %" PRIu32 ": %s\n",
 					qp->qp_id, rte_strerror(-ret));
-			rte_spinlock_unlock(&qp->conn_event_lock);
 			return;
 		}
 	} else if (dev->flags & port_fdir) {
