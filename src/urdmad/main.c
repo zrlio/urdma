@@ -284,27 +284,15 @@ add_2tuple_filter(unsigned int portid, unsigned int dest_udp_port,
 } /* add_2tuple_filter */
 
 
-static void
-handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
+/* Perfoms connection setup as part of the connection established event. This
+ * function takes the conn_event_lock and releases it before exiting. */
+static int
+do_setup_qp(struct urdma_qp_connected_event *event, struct usiw_port *dev,
+		struct urdmad_qp *qp)
 {
-	struct urdma_qp_rtr_event rtr_event;
 	struct rte_eth_rxq_info rxq_info;
 	struct rte_eth_txq_info txq_info;
-	struct usiw_port *dev;
-	struct urdmad_qp *qp;
-	ssize_t ret;
-
-	if (WARN_ONCE(count < sizeof(*event),
-			"Read only %zd/%zu bytes\n", count, sizeof(*event))) {
-		return;
-	}
-
-	RTE_LOG(DEBUG, USER1, "Got connection event for device %" PRIu16 " queue pair %" PRIu32 "/%" PRIu16 "\n",
-			event->urdmad_dev_id, event->kmod_qp_id,
-			event->urdmad_qp_id);
-
-	dev = &driver->ports[event->urdmad_dev_id];
-	qp = &dev->qp[event->urdmad_qp_id];
+	int ret;
 
 	rte_spinlock_lock(&qp->conn_event_lock);
 	assert(event->src_port != 0);
@@ -376,8 +364,7 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 		if (ret != 0) {
 			RTE_LOG(CRIT, USER1, "Could not add ntuple UDP filter: %s\n",
 					rte_strerror(-ret));
-			rte_spinlock_unlock(&qp->conn_event_lock);
-			return;
+			goto unlock;
 		}
 	} else if (dev->flags & port_2tuple) {
 		ret = add_2tuple_filter(dev->portid, qp->local_udp_port,
@@ -385,8 +372,7 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 		if (ret != 0) {
 			RTE_LOG(CRIT, USER1, "Could not add 2tuple UDP filter: %s\n",
 					rte_strerror(-ret));
-			rte_spinlock_unlock(&qp->conn_event_lock);
-			return;
+			goto unlock;
 		}
 	} else if (dev->flags & port_fdir) {
 		struct rte_eth_fdir_filter fdirf;
@@ -407,8 +393,7 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 		if (ret != 0) {
 			RTE_LOG(CRIT, USER1, "Could not add fdir UDP filter: %s\n",
 					rte_strerror(-ret));
-			rte_spinlock_unlock(&qp->conn_event_lock);
-			return;
+			goto unlock;
 		}
 	}
 
@@ -417,21 +402,48 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 	if (ret < 0 && ret != -ENOTSUP) {
 		RTE_LOG(DEBUG, USER1, "Enable RX queue %u failed: %s\n",
 				event->rxq, rte_strerror(-ret));
-		rte_spinlock_unlock(&qp->conn_event_lock);
-		return;
+		goto unlock;
 	}
 
 	ret = rte_eth_dev_tx_queue_start(event->urdmad_dev_id, event->txq);
 	if (ret < 0 && ret != -ENOTSUP) {
 		RTE_LOG(DEBUG, USER1, "Enable RX queue %u failed: %s\n",
 				event->txq, rte_strerror(-ret));
-		rte_spinlock_unlock(&qp->conn_event_lock);
-		return;
+		goto unlock;
 	}
 
 	atomic_store(&qp->conn_state, usiw_qp_connected);
-	rte_spinlock_unlock(&qp->conn_event_lock);
+	ret = 0;
 
+unlock:
+	rte_spinlock_unlock(&qp->conn_event_lock);
+	return ret;
+} /* setup_qp */
+
+
+static void
+handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
+{
+	struct urdma_qp_rtr_event rtr_event;
+	struct usiw_port *dev;
+	struct urdmad_qp *qp;
+	ssize_t ret;
+
+	if (WARN_ONCE(count < sizeof(*event),
+			"Read only %zd/%zu bytes\n", count, sizeof(*event))) {
+		return;
+	}
+
+	RTE_LOG(DEBUG, USER1, "Got connection event for device %" PRIu16 " queue pair %" PRIu32 "/%" PRIu16 "\n",
+			event->urdmad_dev_id, event->kmod_qp_id,
+			event->urdmad_qp_id);
+
+	dev = &driver->ports[event->urdmad_dev_id];
+	qp = &dev->qp[event->urdmad_qp_id];
+	ret = do_setup_qp(event, dev, qp);
+	if (ret) {
+		return;
+	}
 	rtr_event.event_type = SIW_EVENT_QP_RTR;
 	rtr_event.kmod_qp_id = event->kmod_qp_id;
 	ret = write(driver->chardev.fd, &rtr_event, sizeof(rtr_event));
