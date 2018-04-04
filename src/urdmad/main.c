@@ -410,22 +410,6 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 			rte_spinlock_unlock(&qp->conn_event_lock);
 			return;
 		}
-#if 0
-	} else {
-		char name[RTE_RING_NAMESIZE];
-		snprintf(name, RTE_RING_NAMESIZE, "qp%u_rxring",
-				qp->qp_id);
-		qp->remote_ep.rx_queue = rte_ring_create(name,
-				qp->dev->rx_desc_count, rte_socket_id(),
-				RING_F_SP_ENQ|RING_F_SC_DEQ);
-		if (!qp->rx_queue) {
-			RTE_LOG(DEBUG, USER1, "Set up rx ring failed: %s\n",
-						rte_strerror(ret));
-			atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
-			rte_spinlock_unlock(&qp->shm_qp->conn_event_lock);
-			return;
-		}
-#endif
 	}
 
 	/* Start the queues now that we have bound to an interface */
@@ -722,28 +706,7 @@ kni_process_burst(struct usiw_port *port,
 		struct rte_mbuf **rxmbuf, int count)
 {
 
-	/* TODO: Forward these to the appropriate process */
-#if 0
-	struct usiw_qp *qp;
-	int i, j;
-	if (port->ctx && !(port->flags & port_fdir)) {
-		for (i = j = 0; i < count; i++) {
-			while (i + j < count
-					&& (qp = find_matching_qp(port->ctx,
-							rxmbuf[i + j]))) {
-				/* This implies that qp->ep_default != NULL */
-				rte_ring_enqueue(qp->ep_default->rx_queue,
-						rxmbuf[i + j]);
-				j++;
-			}
-			if (i + j < count) {
-				rxmbuf[i] = rxmbuf[i + j];
-			}
-		}
-
-		count -= j;
-	}
-#endif
+	/* TODO: Re-add code to forward packets to slave processes correctly */
 #ifdef DEBUG_PACKET_HEADERS
 	int i;
 	RTE_LOG(DEBUG, USER1, "port %d: receive %d packets\n",
