@@ -4,7 +4,7 @@
 #
 # Authors: Patrick MacArthur <patrick@patrickmacarthur.net>
 #
-# Copyright (c) 2016-2017, University of New Hampshire
+# Copyright (c) 2016-2018, University of New Hampshire
 #
 # This software is available to you under a choice of one of two
 # licenses.  You may choose to be licensed under the terms of the GNU
@@ -100,6 +100,19 @@ AC_PROG_MKDIR_P
 
 AC_ARG_VAR([KERNELDIR], [kernel source directory])
 AC_SUBST([KERNELDIR])
+AC_ARG_ENABLE([kmodinprefix], [AS_HELP_STRING([--enable-kmodinprefix],
+		[Install kernel modules under prefix])],
+	      [case ${enableval} in
+	       yes|no) WANT_KMOD_IN_PREFIX=${enableval} ;;
+	       *) AC_MSG_ERROR([Invalid value ${enableval} for --enable-kmodinprefix]) ;;
+	       esac],
+	      [WANT_KMOD_IN_PREFIX=no])
+if test x${WANT_KMOD_IN_PREFIX} = xyes; then
+      kmod_prefix=${prefix}
+else
+      kmod_prefix=
+fi
+AC_SUBST([kmod_prefix])
 AC_MSG_CHECKING([for Linux kernel source tree])
 if test ${KERNELDIR}x = x; then
 	KERNELDIR="/lib/modules/`uname -r`/build"
@@ -207,6 +220,7 @@ Using installation prefix: ${prefix}
 Using libdir: ${libdir}
 Using includedir: ${includedir}
 Using bindir: ${bindir}
+Using kmod_prefix: ${kmod_prefix}
 Using C compiler: ${CC} ${EXTRA_CFLAGS} ${CFLAGS} ${CPPFLAGS}
 Enable debug: ${WANT_DEBUG}
 
