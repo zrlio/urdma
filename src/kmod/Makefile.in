@@ -4,7 +4,7 @@
 #
 # Authors: Patrick MacArthur <patrick@patrickmacarthur.net>
 #
-# Copyright (c) 2016, University of New Hampshire
+# Copyright (c) 2016-2018, University of New Hampshire
 #
 # This software is available to you under a choice of one of two
 # licenses.  You may choose to be licensed under the terms of the GNU
@@ -44,6 +44,8 @@ ifeq ($(WANT_DEBUG),yes)
 export CONFIG_URDMA_DEBUG = y
 endif
 
+kmod_prefix=@kmod_prefix@
+
 .PHONY: all
 all:
 	for i in $(SOURCES); do if [ ! -e $${i} ]; then ln -s @srcdir@/$${i} $${i}; fi; done
@@ -63,7 +65,7 @@ install: install-exec install-data
 
 .PHONY: install-exec
 install-exec:
-	make -C @KERNELDIR@ M=`pwd` INSTALL_MOD_PATH=$(DESTDIR) modules_install
+	make -C @KERNELDIR@ M=`pwd` INSTALL_MOD_PATH=$(DESTDIR)/$(kmod_prefix) modules_install
 
 install-data:
 

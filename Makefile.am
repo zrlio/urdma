@@ -38,6 +38,8 @@
 
 ACLOCAL_AMFLAGS = -I config
 
+DISTCHECK_CONFIGURE_FLAGS = --enable-kmodinprefix
+
 AM_CFLAGS = $(EXTRA_CFLAGS) \
 	    -fno-strict-aliasing \
 	    -fvisibility=hidden
