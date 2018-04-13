@@ -129,7 +129,7 @@ static void
 notify_established(struct siw_ucontext *ctx, struct siw_qp *qp)
 {
 	struct urdma_chardev_data *file
-		= dev_get_drvdata(ctx->sdev->ofa_dev.dma_device);
+		= dev_get_drvdata(ib_dma_device(ctx->sdev->ofa_dev));
 
 	if (!file) {
 		siw_qp_rtr_fail(qp->cep);

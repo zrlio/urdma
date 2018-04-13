@@ -213,7 +213,6 @@ return_qp(struct usiw_port *dev, struct urdmad_qp *qp)
 		if (ret != 0) {
 			RTE_LOG(CRIT, USER1, "Could not delete 2tuple UDP filter for qp %" PRIu32 ": %s\n",
 					qp->qp_id, rte_strerror(-ret));
-			rte_spinlock_unlock(&qp->conn_event_lock);
 			return;
 		}
 	} else if (dev->flags & port_fdir) {
@@ -285,29 +284,17 @@ add_2tuple_filter(unsigned int portid, unsigned int dest_udp_port,
 } /* add_2tuple_filter */
 
 
-static void
-handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
+/* Perfoms connection setup as part of the connection established event. This
+ * function takes the conn_event_lock and releases it before exiting. */
+static int
+do_setup_qp(struct urdma_qp_connected_event *event, struct usiw_port *dev,
+		struct urdmad_qp *qp)
 {
-	struct urdma_qp_rtr_event rtr_event;
 	struct rte_eth_rxq_info rxq_info;
 	struct rte_eth_txq_info txq_info;
-	struct usiw_port *dev;
-	struct urdmad_qp *qp;
-	ssize_t ret;
+	int ret;
 
-	if (WARN_ONCE(count < sizeof(*event),
-			"Read only %zd/%zu bytes\n", count, sizeof(*event))) {
-		return;
-	}
-
-	RTE_LOG(DEBUG, USER1, "Got connection event for device %" PRIu16 " queue pair %" PRIu32 "/%" PRIu16 "\n",
-			event->urdmad_dev_id, event->kmod_qp_id,
-			event->urdmad_qp_id);
-
-	dev = &driver->ports[event->urdmad_dev_id];
-	qp = &dev->qp[event->urdmad_qp_id];
-
-	rte_spinlock_lock(&qp->conn_event_lock);
+	pthread_mutex_lock(&qp->conn_event_lock);
 	assert(event->src_port != 0);
 	assert(event->src_ipv4 == dev->ipv4_addr);
 	assert(event->rxq == qp->rx_queue);
@@ -377,8 +364,7 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 		if (ret != 0) {
 			RTE_LOG(CRIT, USER1, "Could not add ntuple UDP filter: %s\n",
 					rte_strerror(-ret));
-			rte_spinlock_unlock(&qp->conn_event_lock);
-			return;
+			goto unlock;
 		}
 	} else if (dev->flags & port_2tuple) {
 		ret = add_2tuple_filter(dev->portid, qp->local_udp_port,
@@ -386,8 +372,7 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 		if (ret != 0) {
 			RTE_LOG(CRIT, USER1, "Could not add 2tuple UDP filter: %s\n",
 					rte_strerror(-ret));
-			rte_spinlock_unlock(&qp->conn_event_lock);
-			return;
+			goto unlock;
 		}
 	} else if (dev->flags & port_fdir) {
 		struct rte_eth_fdir_filter fdirf;
@@ -408,25 +393,8 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 		if (ret != 0) {
 			RTE_LOG(CRIT, USER1, "Could not add fdir UDP filter: %s\n",
 					rte_strerror(-ret));
-			rte_spinlock_unlock(&qp->conn_event_lock);
-			return;
+			goto unlock;
 		}
-#if 0
-	} else {
-		char name[RTE_RING_NAMESIZE];
-		snprintf(name, RTE_RING_NAMESIZE, "qp%u_rxring",
-				qp->qp_id);
-		qp->remote_ep.rx_queue = rte_ring_create(name,
-				qp->dev->rx_desc_count, rte_socket_id(),
-				RING_F_SP_ENQ|RING_F_SC_DEQ);
-		if (!qp->rx_queue) {
-			RTE_LOG(DEBUG, USER1, "Set up rx ring failed: %s\n",
-						rte_strerror(ret));
-			atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
-			rte_spinlock_unlock(&qp->shm_qp->conn_event_lock);
-			return;
-		}
-#endif
 	}
 
 	/* Start the queues now that we have bound to an interface */
@@ -434,21 +402,48 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 	if (ret < 0 && ret != -ENOTSUP) {
 		RTE_LOG(DEBUG, USER1, "Enable RX queue %u failed: %s\n",
 				event->rxq, rte_strerror(-ret));
-		rte_spinlock_unlock(&qp->conn_event_lock);
-		return;
+		goto unlock;
 	}
 
 	ret = rte_eth_dev_tx_queue_start(event->urdmad_dev_id, event->txq);
 	if (ret < 0 && ret != -ENOTSUP) {
 		RTE_LOG(DEBUG, USER1, "Enable RX queue %u failed: %s\n",
 				event->txq, rte_strerror(-ret));
-		rte_spinlock_unlock(&qp->conn_event_lock);
-		return;
+		goto unlock;
 	}
 
 	atomic_store(&qp->conn_state, usiw_qp_connected);
-	rte_spinlock_unlock(&qp->conn_event_lock);
+	ret = 0;
 
+unlock:
+	pthread_mutex_unlock(&qp->conn_event_lock);
+	return ret;
+} /* setup_qp */
+
+
+static void
+handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
+{
+	struct urdma_qp_rtr_event rtr_event;
+	struct usiw_port *dev;
+	struct urdmad_qp *qp;
+	ssize_t ret;
+
+	if (WARN_ONCE(count < sizeof(*event),
+			"Read only %zd/%zu bytes\n", count, sizeof(*event))) {
+		return;
+	}
+
+	RTE_LOG(DEBUG, USER1, "Got connection event for device %" PRIu16 " queue pair %" PRIu32 "/%" PRIu16 "\n",
+			event->urdmad_dev_id, event->kmod_qp_id,
+			event->urdmad_qp_id);
+
+	dev = &driver->ports[event->urdmad_dev_id];
+	qp = &dev->qp[event->urdmad_qp_id];
+	ret = do_setup_qp(event, dev, qp);
+	if (ret) {
+		return;
+	}
 	rtr_event.event_type = SIW_EVENT_QP_RTR;
 	rtr_event.kmod_qp_id = event->kmod_qp_id;
 	ret = write(driver->chardev.fd, &rtr_event, sizeof(rtr_event));
@@ -723,28 +718,7 @@ kni_process_burst(struct usiw_port *port,
 		struct rte_mbuf **rxmbuf, int count)
 {
 
-	/* TODO: Forward these to the appropriate process */
-#if 0
-	struct usiw_qp *qp;
-	int i, j;
-	if (port->ctx && !(port->flags & port_fdir)) {
-		for (i = j = 0; i < count; i++) {
-			while (i + j < count
-					&& (qp = find_matching_qp(port->ctx,
-							rxmbuf[i + j]))) {
-				/* This implies that qp->ep_default != NULL */
-				rte_ring_enqueue(qp->ep_default->rx_queue,
-						rxmbuf[i + j]);
-				j++;
-			}
-			if (i + j < count) {
-				rxmbuf[i] = rxmbuf[i + j];
-			}
-		}
-
-		count -= j;
-	}
-#endif
+	/* TODO: Re-add code to forward packets to slave processes correctly */
 #ifdef DEBUG_PACKET_HEADERS
 	int i;
 	RTE_LOG(DEBUG, USER1, "port %d: receive %d packets\n",
@@ -856,6 +830,7 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 		= DEV_TX_OFFLOAD_UDP_CKSUM|DEV_TX_OFFLOAD_IPV4_CKSUM;
 
 	char name[RTE_MEMPOOL_NAMESIZE];
+	pthread_mutexattr_t mutexattr;
 	struct rte_eth_txconf txconf;
 	struct rte_eth_rxconf rxconf;
 	struct rte_eth_conf port_conf;
@@ -994,14 +969,36 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 		rte_exit(EXIT_FAILURE, "Cannot allocate QP array: %s\n",
 				rte_strerror(rte_errno));
 	}
+	retval = pthread_mutexattr_init(&mutexattr);
+	if (retval) {
+		rte_exit(EXIT_FAILURE,
+			"Cannot allocate mutex attribute object: %s\n",
+			rte_strerror(rte_errno));
+	}
+	retval = pthread_mutexattr_setpshared(&mutexattr, PTHREAD_PROCESS_SHARED);
+	if (retval) {
+		rte_exit(EXIT_FAILURE,
+			"Cannot enable process shared mutex attribute: %s\n",
+			rte_strerror(rte_errno));
+	}
 	for (q = 1; q <= iface->max_qp; ++q) {
 		iface->qp[q].qp_id = q;
 		iface->qp[q].tx_queue = q;
 		iface->qp[q].rx_queue = q;
 		atomic_init(&iface->qp[q].conn_state, 0);
-		rte_spinlock_init(&iface->qp[q].conn_event_lock);
+		retval = pthread_mutex_init(&iface->qp[q].conn_event_lock, &mutexattr);
+		if (retval) {
+			rte_exit(EXIT_FAILURE, "Cannot create mutex: %s\n",
+				rte_strerror(rte_errno));
+		}
 		LIST_INSERT_HEAD(&iface->avail_qp, &iface->qp[q],
 				urdmad__entry);
+	}
+	retval = pthread_mutexattr_destroy(&mutexattr);
+	if (retval) {
+		rte_exit(EXIT_FAILURE,
+			"Cannot destroy mutex attribute object: %s\n",
+			rte_strerror(rte_errno));
 	}
 
 	/* We must allocate an mbuf large enough to hold the maximum possible

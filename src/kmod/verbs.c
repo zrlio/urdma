@@ -96,12 +96,6 @@ static inline struct siw_cq *siw_cq_ofa2siw(struct ib_cq *ofa_cq)
 	return container_of(ofa_cq, struct siw_cq, ofa_cq);
 }
 
-int
-siw_mmap(struct ib_ucontext *ctx, struct vm_area_struct *vma)
-{
-	return -ENOSYS;
-}
-
 static ssize_t siw_event_file_write(struct file *filp, const char __user *buf,
 		size_t count, loff_t *pos)
 {
@@ -442,11 +436,16 @@ int siw_dealloc_pd(struct ib_pd *ofa_pd)
 	return 0;
 }
 
+#ifdef HAVE_STRUCT_RDMA_AH_ATTR
+struct ib_ah *siw_create_ah(struct ib_pd *pd, struct rdma_ah_attr *attr,
+				   struct ib_udata *data)
+#else
 struct ib_ah *siw_create_ah(struct ib_pd *pd, struct ib_ah_attr *attr
 #ifdef HAVE_CREATE_AH_UDATA
 			    , struct ib_udata *data
 #endif
 			   )
+#endif
 {
 	return ERR_PTR(-ENOSYS);
 }

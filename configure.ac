@@ -51,7 +51,7 @@ AC_CONFIG_SRCDIR([src/liburdma/verbs.c])
 AC_CONFIG_HEADERS([config.h])
 
 AC_PROG_CC
-CFLAGS="-std=gnu11 ${CFLAGS}"
+CFLAGS="-pthread -std=gnu11 ${CFLAGS}"
 AC_COMPILE_IFELSE([AC_LANG_SOURCE([[
 #include <assert.h>
 static_assert(1, "compiler supports static_assert");]])],

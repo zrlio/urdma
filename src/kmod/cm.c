@@ -43,6 +43,12 @@
 #include <linux/types.h>
 #include <linux/net.h>
 #include <linux/inetdevice.h>
+#include <linux/version.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0)
+#include <linux/sched/signal.h>
+#else
+#include <linux/sched.h>
+#endif
 #include <linux/workqueue.h>
 #include <net/sock.h>
 #include <linux/tcp.h>
@@ -403,9 +409,9 @@ out:
 void siw_cep_put(struct siw_cep *cep)
 {
 	pr_debug(DBG_OBJ DBG_CM "(CEP 0x%p): New refcount: %d\n",
-		cep, atomic_read(&cep->ref.refcount) - 1);
+		cep, kref_read(&cep->ref) - 1);
 
-	if (WARN_ON_ONCE(atomic_read(&cep->ref.refcount) < 1)) {
+	if (WARN_ON_ONCE(kref_read(&cep->ref) < 1)) {
 		return;
 	}
 	kref_put(&cep->ref, __siw_cep_dealloc);
@@ -415,7 +421,7 @@ void siw_cep_get(struct siw_cep *cep)
 {
 	kref_get(&cep->ref);
 	pr_debug(DBG_OBJ DBG_CM "(CEP 0x%p): New refcount: %d\n",
-		cep, atomic_read(&cep->ref.refcount));
+		cep, kref_read(&cep->ref));
 }
 
 

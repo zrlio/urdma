@@ -1425,6 +1425,7 @@ qp_shutdown(struct usiw_qp *qp)
 	struct ibv_modify_qp cmd;
 	int ret;
 
+	pthread_mutex_lock(&qp->shm_qp->conn_event_lock);
 	send_trp_fin(qp);
 
 	atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
@@ -1432,6 +1433,7 @@ qp_shutdown(struct usiw_qp *qp)
 	qp_attr.qp_state = IBV_QPS_ERR;
 	ibv_cmd_modify_qp(&qp->ib_qp, &qp_attr, IBV_QP_STATE,
 			&cmd, sizeof(cmd));
+	pthread_mutex_unlock(&qp->shm_qp->conn_event_lock);
 
 	sq_flush(qp);
 	rq_flush(qp);
@@ -1612,7 +1614,7 @@ sweep_unacked_packets(struct usiw_qp *qp, uint64_t now)
 	}
 
 	p = ep->tx_head;
-	while (count < ep->tx_pending_size && (sendmsg = *p) != NULL) {
+	while (count++ < ep->tx_pending_size && (sendmsg = *p) != NULL) {
 		int ret, cstatus;
 		pending = (struct pending_datagram_info *)(sendmsg + 1);
 		if (now > pending->next_retransmit
@@ -2160,7 +2162,7 @@ start_qp(struct usiw_qp *qp)
 	unsigned int x, cur_state;
 	ssize_t ret;
 
-	rte_spinlock_lock(&qp->shm_qp->conn_event_lock);
+	pthread_mutex_lock(&qp->shm_qp->conn_event_lock);
 	qp->readresp_store = calloc(qp->shm_qp->ird_max,
 			sizeof(*qp->readresp_store));
 	if (!qp->readresp_store) {
@@ -2224,7 +2226,7 @@ free_readresp_store:
 err:
 	atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
 unlock:
-	rte_spinlock_unlock(&qp->shm_qp->conn_event_lock);
+	pthread_mutex_unlock(&qp->shm_qp->conn_event_lock);
 	return;
 } /* start_qp */
 

@@ -99,4 +99,21 @@ typedef unsigned long dma_attrs_t;
 #define HAVE_CREATE_AH_UDATA 1
 #endif
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 11, 0)
+#define HAVE_DEVICE_ARCHDATA_DMA_OPS 1
+#define HAVE_IB_DMA_MAPPING_OPS 1
+#define kref_read(ref) (atomic_read(&((ref)->refcount)))
+#define ib_dma_device(rdma_dev) ((rdma_dev).dma_device)
+#else
+#define ib_dma_device(rdma_dev) ((rdma_dev).dev.parent)
+#endif
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)
+#define HAVE_STRUCT_RDMA_AH_ATTR 1
+#endif
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 13, 0)
+#define HAVE_DMA_MAP_OPS_SET_DMA_MASK 1
+#endif
+
 #endif
