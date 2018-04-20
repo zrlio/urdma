@@ -766,7 +766,6 @@ do_xchg_packets(struct usiw_port *port)
 static int
 event_loop(void *arg)
 {
-	struct usiw_driver *driver = arg;
 	struct usiw_port *port;
 	int portid, ret;
 
@@ -1313,7 +1312,7 @@ do_init_driver(void)
 
 		usiw_port_init(&driver->ports[i], &port_config[i]);
 	}
-	rte_eal_remote_launch(event_loop, driver, driver->progress_lcore);
+	rte_eal_remote_launch(event_loop, NULL, driver->progress_lcore);
 	/* FIXME: cannot free driver beyond this point since it is being
 	 * accessed by the event_loop */
 	retval = usiw_driver_setup_netlink(driver);
