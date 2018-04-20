@@ -243,19 +243,6 @@ usiw_driver_init(int portid)
 } /* usiw_driver_init */
 
 
-static char *
-get_argv0(void)
-{
-	enum { prctl_name_size = 16 };
-	char name[prctl_name_size];
-
-	if (prctl(PR_GET_NAME, (uintptr_t)name, 0, 0, 0) < 0) {
-		return strdup("dummy");
-	}
-	return strdup(name);
-} /* get_argv0 */
-
-
 static int
 open_socket(int family, int socktype, int proto)
 {
@@ -293,7 +280,7 @@ static int
 setup_socket(const char *sock_name)
 {
 	struct sockaddr_un addr;
-	int fd, flags, ret;
+	int fd, ret;
 
 	if (strlen(sock_name) >= sizeof(addr.sun_path) - 1) {
 		fprintf(stderr, "Invalid socket path %s: too long\n",
@@ -508,7 +495,6 @@ our_eal_master_thread(void *sem)
 	char **eal_argv;
 	char **argv_copy;
 	char *sock_name;
-	char *p;
 	int eal_argc, ret;
 
 	if (!do_config(&sock_name, &eal_argc, &eal_argv)) {
