@@ -3,7 +3,7 @@
  *
  * Authors: Animesh Trivedi <atr@zurich.ibm.com>
  *          Bernard Metzler <bmt@zurich.ibm.com>
- *          Patrick MacArthur <pam@zurich.ibm.com>
+ *          Patrick MacArthur <patrick@patrickmacarthur.net>
  *
  * Copyright (c) 2008-2016, IBM Corporation
  * Copyright (c) 2017, University of New Hampshire

@@ -2,7 +2,7 @@
  * Software iWARP device driver for Linux
  *
  * Authors: Bernard Metzler <bmt@zurich.ibm.com>
- *          Patrick MacArthur <pam@zurich.ibm.com>
+ *          Patrick MacArthur <patrick@patrickmacarthur.net>
  *          Fredy Neeser <nfd@zurich.ibm.com>
  *
  * Copyright (c) 2008-2016, IBM Corporation
