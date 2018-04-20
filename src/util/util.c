@@ -184,7 +184,7 @@ static void dump_flags(FILE *stream, const struct flag_descr *flags, uint32_t v)
 	fprintf(stream, " ]");
 } /* dump_flags */
 
-void
+static void
 thresh_dump_info(FILE *stream, struct rte_eth_thresh *thresh, int indent)
 {
 	fprintf(stream, "{\n%*c\"pthresh\": %" PRIu8 ",\n",
@@ -196,7 +196,7 @@ thresh_dump_info(FILE *stream, struct rte_eth_thresh *thresh, int indent)
 	fprintf(stream, "%*c}", 2 * indent - 2, ' ');
 } /* thresh_dump_info */
 
-void
+static void
 txconf_dump_info(FILE *stream, struct rte_eth_txconf *conf, int indent)
 {
 	fprintf(stream, "{\n%*c\"tx_thresh\": ", 2 * indent, ' ');
@@ -212,7 +212,7 @@ txconf_dump_info(FILE *stream, struct rte_eth_txconf *conf, int indent)
 	fprintf(stream, "%*c}", 2 * indent - 2, ' ');
 } /* rxconf_dump_info */
 
-void
+static void
 rxconf_dump_info(FILE *stream, struct rte_eth_rxconf *conf, int indent)
 {
 	fprintf(stream, "{\n%*c\"rx_thresh\": ", 2 * indent, ' ');
@@ -226,7 +226,7 @@ rxconf_dump_info(FILE *stream, struct rte_eth_rxconf *conf, int indent)
 	fprintf(stream, "%*c}", 2 * indent - 2, ' ');
 } /* rxconf_dump_info */
 
-void
+static void
 desc_lim_dump_info(FILE *stream, struct rte_eth_desc_lim *lim, int indent)
 {
 	fprintf(stream, "{\n%*c\"nb_max\": %" PRIu16 ",\n",
