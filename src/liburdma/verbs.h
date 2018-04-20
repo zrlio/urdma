@@ -121,6 +121,9 @@ void
 urdma_query_qp_stats(const struct ibv_qp *restrict qp,
 		struct urdma_qp_stats *restrict stats);
 
+void
+urdma_free_qp_stats_ex(struct urdma_qp_stats_ex *stats);
+
 struct urdma_qp_stats_ex *
 urdma_query_qp_stats_ex(const struct ibv_qp *qp);
 
