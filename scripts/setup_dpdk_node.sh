@@ -3,10 +3,10 @@
 #
 # Userspace Software iWARP library for DPDK
 #
-# Authors: Patrick MacArthur <pam@zurich.ibm.com>
+# Authors: Patrick MacArthur <patrick@patrickmacarthur.net>
 #
 # Copyright (c) 2016, IBM Corporation
-# Copyright (c) 2016, University of New Hampshire
+# Copyright (c) 2016-2018, University of New Hampshire
 #
 # This software is available to you under a choice of one of two
 # licenses.  You may choose to be licensed under the terms of the GNU
@@ -38,98 +38,17 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# Sets up DPDK on a node, along with everything needed to run as non-root.
+# Sets up DPDK on a node, along with everything needed to run as non-root
+# on Ubuntu 17.10.
 
-kernel_version=3.17.8
-dpdk_version=2.2.0
-dpdk_target=x86_64-native-linuxapp-gcc
-dpdk_prefix=${HOME}/.local/dpdk/${dpdk_version}
 dpdk_group_users=(patrick)
 
-sudo yum install bc libpcap-devel
-
-cd /usr/src
-tar xf ${HOME}/downloads/linux-${kernel_version}.tar.xz
-cd linux-${kernel_version}
-cp /boot/config-$(uname -r) .config
-make olddefconfig
-make -j8
-make modules_install
-make install
-
-KDIR=/usr/src/linux-${kernel_version}
-
-tmpdir=$(mktemp -d)
-trap "cd /; rm -rf ${tmpdir}" EXIT
-cd ${tmpdir}
-
-tar xf ${HOME}/downloads/dpdk-${dpdk_version}.tar.gz
-cd dpdk-${dpdk_version}
-make config T=${dpdk_target}
-sed -i -e 's/^CONFIG_RTE_LIBRTE_PMD_PCAP=/&y/' \
-    -e 's/^CONFIG_RTE_EAL_IGB_UIO=/&n/' \
-    build/.config
-make -j8 EXTRA_CFLAGS=-g RTE_KERNEL=${KDIR}
-make install prefix=${HOME}/.local/dpdk/${dpdk_version} \
-    kerneldir=\$\(prefix\)/kmod
-sudo mkdir -p /lib/modules/$(uname -r)/extra/dpdk
-sudo cp ${HOME}/.local/dpdk/${dpdk_version}/kmod/rte_kni.ko \
-    /lib/modules/$(uname -r)/extra/dpdk
-sudo depmod -A
-
-mkdir -p ${HOME}/privatemodules/dpdk
-cat >${HOME}/privatemodules/dpdk/${dpdk_version} <<EOF
-#%Module1.0
-##
-## DPDK ${dpdk_version} for ${dpdk_target} target
-##
-
-proc ModulesHelp { } {
-   puts stderr "This module loads DPDK ${dpdk_version} into the user's path"
-}
-module-whatis  "Data Plane Development Kit ${dpdk_version} built with gcc for Linux"
-
-conflict dpdk
-
-setenv	RTE_SDK		${dpdk_prefix}/share/dpdk
-setenv	RTE_TARGET	${dpdk_target}
-setenv  RTE_KERNEL      ${KDIR}
-
-prepend-path PATH ${dpdk_prefix}/bin
-prepend-path PATH ${dpdk_prefix}/sbin
-EOF
-
-mkdir -p /etc/rdma
-sudo tee /etc/rdma/rdma.conf <<EOF
-# Load IPoIB
-IPOIB_LOAD=no
-# Load SRP (SCSI Remote Protocol initiator support) module
-SRP_LOAD=no
-# Load SRPT (SCSI Remote Protocol target support) module
-SRPT_LOAD=no
-# Load iSER (iSCSI over RDMA initiator support) module
-ISER_LOAD=no
-# Load iSERT (iSCSI over RDMA target support) module
-ISERT_LOAD=no
-# Load RDS (Reliable Datagram Service) network protocol
-RDS_LOAD=no
-# Load NFSoRDMA client transport module
-XPRTRDMA_LOAD=no
-# Load NFSoRDMA server transport module
-SVCRDMA_LOAD=no
-# Should we modify the system mtrr registers?  We may need to do this if you
-# get messages from the ib_ipath driver saying that it couldn't enable
-# write combining for the PIO buffs on the card.
-#
-# Note: recent kernels should do this for us, but in case they don't, we'll
-# leave this option
-FIXUP_MTRR_REGS=no
-
-EOF
+sudo yum install bc libpcap-devel dpdk-dev \
+	linux-image-generic linux-headers-generic \
+	libibverbs-dev librdmacm-dev
 
 if [[ -d /etc/modules-load.d ]]; then
     sudo tee /etc/modules-load.d/90-dpdk.conf <<EOF
-ib_core
 vfio-pci
 vfio_iommu_type1
 rte_kni
