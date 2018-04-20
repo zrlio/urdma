@@ -2257,6 +2257,7 @@ kni_loop(void *arg)
 							== usiw_qp_error) {
 						break;
 					}
+					/* fall-through */
 				case usiw_qp_running:
 					progress_qp(qp);
 					break;
@@ -2264,6 +2265,7 @@ kni_loop(void *arg)
 					qp_shutdown(qp);
 					/* qp_shutdown() transitions to
 					 * usiw_qp_error */
+					/* fall-through */
 				case usiw_qp_error:
 					LIST_REMOVE(qp, ctx_entry);
 					if (atomic_fetch_sub(&qp->refcnt,
