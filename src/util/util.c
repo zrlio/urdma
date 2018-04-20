@@ -4,7 +4,7 @@
  * Authors: Patrick MacArthur <pam@zurich.ibm.com>
  *
  * Copyright (c) 2016, IBM Corporation
- * Copyright (c) 2016, University of New Hampshire
+ * Copyright (c) 2016-2018, University of New Hampshire
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -241,6 +241,9 @@ desc_lim_dump_info(FILE *stream, struct rte_eth_desc_lim *lim, int indent)
 void
 port_dump_info(FILE *stream, struct rte_eth_dev_info *info)
 {
+	char ch;
+	int x;
+
 	fprintf(stream, "\"" PCI_PRI_FMT "\": {\n  \"driver_name\": %s,\n",
 			info->pci_dev->addr.domain,
 			info->pci_dev->addr.bus,
@@ -294,5 +297,14 @@ port_dump_info(FILE *stream, struct rte_eth_dev_info *info)
 	} else {
 		dump_flags(stream, all_speed_capa, info->speed_capa);
 	}
-	fprintf(stream, "\n}");
+	fprintf(stream, ",\n  \"filter_types\": ");
+	ch = '[';
+	for (x = RTE_ETH_FILTER_NONE; x <= RTE_ETH_FILTER_MAX; ++x) {
+		if (!rte_eth_dev_filter_supported(info->if_index, x)) {
+			fprintf(stream, "%c\n    \"%s\"",
+				ch, dpdk_filter_type_str(x));
+			ch = ',';
+		}
+	}
+	fprintf(stream, "]\n}");
 } /* port_dump_info */
