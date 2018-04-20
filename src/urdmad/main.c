@@ -5,7 +5,7 @@
  *
  * Author: Patrick MacArthur <patrick@patrickmacarthur.net>
  *
- * Copyright (c) 2016-2017, University of New Hampshire
+ * Copyright (c) 2016-2018, University of New Hampshire
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -1336,7 +1336,7 @@ do_init_driver(void)
 				&port_config[i]);
 		if (retval < 0) {
 			rte_exit(EXIT_FAILURE, "Could not set port %u IPv4 address: %s\n",
-					portid, strerror(-retval));
+					i, strerror(-retval));
 		}
 	}
 	free(port_config);
