@@ -6,7 +6,7 @@
  * Authors: Patrick MacArthur <pam@zurich.ibm.com>
  *
  * Copyright (c) 2016, IBM Corporation
- * Copyright (c) 2016-2017, University of New Hampshire
+ * Copyright (c) 2016-2018, University of New Hampshire
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -652,9 +652,7 @@ qp_free_recv_wqe(struct usiw_qp *qp, struct usiw_recv_wqe *wqe)
 int
 qp_get_next_send_wqe(struct usiw_qp *qp, struct usiw_send_wqe **wqe)
 {
-	size_t send_wqe_size = sizeof(struct usiw_send_wqe)
-				+ qp->sq.max_sge * sizeof(struct iovec);
-	int x, ret;
+	int ret;
 
 	rte_spinlock_lock(&qp->sq.lock);
 	ret = rte_ring_dequeue(qp->sq.free_ring, (void **)wqe);
@@ -667,9 +665,7 @@ qp_get_next_send_wqe(struct usiw_qp *qp, struct usiw_send_wqe **wqe)
 int
 qp_get_next_recv_wqe(struct usiw_qp *qp, struct usiw_recv_wqe **wqe)
 {
-	size_t recv_wqe_size = sizeof(struct usiw_recv_wqe)
-				+ qp->rq0.max_sge * sizeof(struct iovec);
-	int x, ret;
+	int ret;
 
 	rte_spinlock_lock(&qp->rq0.lock);
 	ret = rte_ring_dequeue(qp->rq0.free_ring, (void **)wqe);
@@ -921,7 +917,6 @@ do_rdmap_write(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 {
 	struct rdmap_tagged_packet *new_rdmap;
 	struct rte_mbuf *sendmsg;
-	unsigned int packet_length;
 	size_t payload_length;
 	uint16_t mtu = qp->shm_qp->mtu;
 	void *payload;
@@ -933,7 +928,6 @@ do_rdmap_write(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 
 		payload_length = RTE_MIN(mtu, wqe->total_length
 				- wqe->bytes_sent);
-		packet_length = RDMAP_TAGGED_ALLOC_SIZE(payload_length);
 		new_rdmap = (struct rdmap_tagged_packet *)rte_pktmbuf_prepend(
 					sendmsg, sizeof(*new_rdmap));
 		new_rdmap->head.ddp_flags = (wqe->total_length
@@ -1146,7 +1140,6 @@ process_send(struct usiw_qp *qp, struct packet_context *orig)
 	struct usiw_recv_wqe *wqe;
 	struct rdmap_untagged_packet *rdmap
 		= (struct rdmap_untagged_packet *)orig->rdmap;
-	struct ee_state *ee = orig->src_ep;
 	uint32_t msn, expected_msn;
 	size_t offset;
 	size_t payload_length;
@@ -1229,7 +1222,7 @@ static int
 respond_rdma_read(struct usiw_qp *qp)
 {
 	struct rdmap_tagged_packet *new_rdmap;
-	struct read_response_state *readresp, **prev;
+	struct read_response_state *readresp;
 	struct rte_mbuf *sendmsg;
 	size_t dgram_length;
 	size_t payload_length;
@@ -1390,8 +1383,6 @@ process_rdma_read_response(struct usiw_qp *qp, struct packet_context *orig)
 {
 	struct rdmap_tagged_packet *rdmap;
 	struct usiw_send_wqe *read_wqe;
-	struct usiw_mr **mr;
-	uint32_t rdma_length;
 	int ret;
 
 	/* This ensures that at least one RDMA READ Request is active for this
@@ -1423,7 +1414,6 @@ qp_shutdown(struct usiw_qp *qp)
 {
 	struct ibv_qp_attr qp_attr;
 	struct ibv_modify_qp cmd;
-	int ret;
 
 	pthread_mutex_lock(&qp->shm_qp->conn_event_lock);
 	send_trp_fin(qp);
@@ -1977,7 +1967,7 @@ static int
 process_receive_queue(struct usiw_qp *qp, void *prefetch_addr, uint64_t *now)
 {
 	struct rte_mbuf *rxmbuf[qp->shm_qp->rx_burst_size];
-	uint16_t rx_count, pkt, i;
+	uint16_t rx_count, pkt;
 
 	/* Get burst of RX packets */
 	if (qp->dev->flags & port_fdir) {
@@ -2159,8 +2149,7 @@ usiw_do_destroy_qp(struct usiw_qp *qp)
 static void
 start_qp(struct usiw_qp *qp)
 {
-	unsigned int x, cur_state;
-	ssize_t ret;
+	unsigned int cur_state;
 
 	pthread_mutex_lock(&qp->shm_qp->conn_event_lock);
 	qp->readresp_store = calloc(qp->shm_qp->ird_max,
@@ -2231,37 +2220,6 @@ unlock:
 } /* start_qp */
 
 
-static struct usiw_qp *
-find_matching_qp(struct usiw_context *ctx, struct rte_mbuf *pkt)
-{
-	struct usiw_qp *qp, **prev;
-	struct ether_hdr *ether;
-	struct ipv4_hdr *ipv4;
-	struct udp_hdr *udp;
-
-	ether = rte_pktmbuf_mtod(pkt, struct ether_hdr *);
-	if (ether->ether_type != ETHER_TYPE_IPv4) {
-		return NULL;
-	}
-	ipv4 = rte_pktmbuf_mtod_offset(pkt, struct ipv4_hdr *, sizeof(*ether));
-	if (ipv4->next_proto_id != IP_HDR_PROTO_UDP) {
-		return NULL;
-	}
-	udp = rte_pktmbuf_mtod_offset(pkt, struct udp_hdr *,
-			sizeof(*ether) + sizeof(*ipv4));
-
-	LIST_FOR_EACH(qp, &ctx->qp_active, ctx_entry, prev) {
-		if (qp->shm_qp->remote_ipv4_addr == ipv4->dst_addr
-				&& qp->shm_qp->remote_udp_port
-				== udp->dst_port) {
-			return qp;
-		}
-	}
-
-	return NULL;
-} /* find_matching_qp */
-
-
 int
 kni_loop(void *arg)
 {
@@ -2271,7 +2229,6 @@ kni_loop(void *arg)
 	struct usiw_qp *qp, **qp_prev;
 	void *ctxs_to_add[NEW_CTX_MAX];
 	unsigned int i, count;
-	int portid, ret;
 
 	driver = arg;
 	sem_wait(&driver->go);

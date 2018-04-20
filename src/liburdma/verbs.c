@@ -6,7 +6,7 @@
  * Authors: Patrick MacArthur <pam@zurich.ibm.com>
  *
  * Copyright (c) 2016, IBM Corporation
- * Copyright (c) 2016-2017, University of New Hampshire
+ * Copyright (c) 2016-2018, University of New Hampshire
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -339,6 +339,9 @@ usiw_query_device(struct ibv_context *context,
 
 	ret = ibv_cmd_query_device(context, device_attr,
 			&raw_fw_ver, &cmd, sizeof(cmd));
+	if (ret) {
+		return ret;
+	}
 
 	ourctx = usiw_get_context(context);
 	strncpy(device_attr->fw_ver, PACKAGE_VERSION,
@@ -386,7 +389,6 @@ static int
 usiw_query_port(struct ibv_context *context, uint8_t port_num,
 		struct ibv_port_attr *port_attr)
 {
-	struct usiw_context *ctx = usiw_get_context(context);
 	struct ibv_query_port cmd;
 
 	if (!context || !port_attr || port_num != 1) {
@@ -921,7 +923,6 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 
 free_txq:
 	free(qp->txq);
-free_kernel_qp:
 	ibv_cmd_destroy_qp(&qp->ib_qp);
 return_user_qp:
 	port_return_qp(qp);

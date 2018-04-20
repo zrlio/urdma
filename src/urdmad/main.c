@@ -105,14 +105,6 @@ static void init_core_mask(void)
 } /* init_core_mask */
 
 
-/** Allocates an array that can be used with reserve_cores().  The caller must
- * call free() when done with this array. */
-static uint32_t *alloc_lcore_mask(void)
-{
-	return malloc(RTE_MAX_LCORE / sizeof(uint32_t));
-} /* alloc_lcore_mask */
-
-
 /** Reserve count lcores for the given process.  Expects out_mask to be a
  * zero-initialized bitmask that can hold RTE_MAX_LCORE bits; i.e., an array
  * with at least (RTE_MAX_LCORE / 32) uint32_t elements.  This can be done with
@@ -463,7 +455,6 @@ static void
 chardev_data_ready(struct urdma_fd *fd)
 {
 	struct urdma_qp_connected_event event;
-	struct pollfd pollfd;
 	ssize_t ret;
 
 	ret = read(fd->fd, &event, sizeof(event));
@@ -1130,7 +1121,7 @@ static void
 setup_socket(const char *path)
 {
 	struct sockaddr_un addr;
-	int flags, ret;
+	int flags;
 
 	if (strlen(path) >= sizeof(addr.sun_path) - 1) {
 		rte_exit(EXIT_FAILURE, "Invalid socket path %s: too long\n",
@@ -1181,7 +1172,6 @@ static void
 setup_timer(int interval_ms)
 {
 	struct itimerspec tv;
-	int ret;
 
 	driver->timer.fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
 	if (driver->timer.fd < 0) {
