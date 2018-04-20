@@ -11,7 +11,7 @@
 /*
  * Userspace Software iWARP library for DPDK
  *
- * Authors: Patrick MacArthur <pam@zurich.ibm.com>
+ * Authors: Patrick MacArthur <patrick@patrickmacarthur.net>
  *
  * Copyright (c) 2016, IBM Corporation
  *
