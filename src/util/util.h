@@ -44,6 +44,20 @@
 #include <stdio.h>
 
 #include <rte_ethdev.h>
+#include <rte_pci.h>
+
+#ifdef HAVE_UINT16_T_PORT_ID
+typedef uint16_t dpdk_port_id_type;
+#else
+typedef uint8_t dpdk_port_id_type;
+#endif
+
+#ifdef RTE_ETH_NAME_MAX_LEN
+static const size_t pci_addr_namebuf_size = RTE_ETH_NAME_MAX_LEN;
+#else
+/* maximum size of buffer to hold "0000:00:00.0" */
+static const size_t pci_addr_namebuf_size = 13;
+#endif
 
 #ifdef NDEBUG
 #define NDEBUG_UNUSED __attribute__((unused))
@@ -69,6 +83,54 @@ int
 parse_ipv4_address(const char *str, uint32_t *address, int *prefix_len);
 
 void
-port_dump_info(FILE *stream, struct rte_eth_dev_info *info);
+port_dump_info(FILE *stream, uint16_t port_id);
+
+#ifndef HAVE_RTE_ETH_DEV_GET_NAME_BY_PORT
+static inline int
+rte_eth_dev_get_name_by_port(uint16_t port_id, char *name)
+{
+	struct rte_eth_dev_info info;
+	int ret;
+	if ((ret = rte_eth_dev_info_get(port_id, &info)))
+		return ret;
+	return rte_pci_device_name(&info->pci_dev->addr, name,
+				   pci_addr_namebuf_size);
+}
+#endif
+
+#ifdef HAVE_RTE_ETH_DEV_GET_PORT_BY_NAME
+static inline int
+lookup_ethdev_by_pci_addr(struct rte_pci_addr *addr)
+{
+	char namebuf[pci_addr_namebuf_size];
+	dpdk_port_id_type port_id;
+	int ret;
+
+	rte_pci_device_name(addr, namebuf, pci_addr_namebuf_size);
+	ret = rte_eth_dev_get_port_by_name(namebuf, &port_id);
+	if (!ret)
+		return port_id;
+	else
+		return ret;
+}
+#else
+static inline int
+lookup_ethdev_by_pci_addr(struct rte_pci_addr *addr)
+{
+	struct rte_eth_dev_info info;
+	int x, count;
+
+	count = rte_eth_dev_count();
+	for (x = 0; x < count; ++x) {
+		if (!rte_eth_dev_is_valid_port(x))
+			continue;
+		rte_eth_dev_info_get(x, &info);
+		if (!rte_eal_compare_pci_addr(addr, &info.pci_dev->addr)) {
+			return x;
+		}
+	}
+	return -ENODEV;
+}
+#endif
 
 #endif

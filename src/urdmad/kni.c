@@ -43,6 +43,9 @@
 
 #include <assert.h>
 #include <rte_config.h>
+#ifdef HAVE_RTE_BUS_PCI_H
+#include <rte_bus_pci.h>
+#endif
 #include <rte_kni.h>
 #include <netlink/msg.h>
 #include <netlink/netlink.h>
@@ -56,6 +59,7 @@
 #include "config_file.h"
 #include "interface.h"
 #include "kni.h"
+#include "util.h"
 
 /** nl_errno is expected to be the negated errno value. */
 static int
@@ -141,7 +145,7 @@ get_addr(struct usiw_port *port, const char *ipv4_address_str)
 } /* get_addr */
 
 static int
-port_set_mac_addr(uint8_t port_id, struct rtnl_link *link)
+port_set_mac_addr(uint16_t port_id, struct rtnl_link *link)
 {
 	struct ether_addr bin_addr;
 	struct nl_addr *addr;
@@ -206,7 +210,7 @@ unref_addr:
 } /* usiw_set_ipv4_addr */
 
 static int
-usiw_port_change_mtu(uint8_t port_id, unsigned int new_mtu)
+usiw_port_change_mtu(dpdk_port_id_type port_id, unsigned int new_mtu)
 {
 	RTE_LOG(NOTICE, USER1, "got KNI request to change port %" PRIu8 " MTU to %u\n",
 			port_id, new_mtu);
@@ -214,7 +218,7 @@ usiw_port_change_mtu(uint8_t port_id, unsigned int new_mtu)
 } /* usiw_port_change_mtu */
 
 static const char *
-link_speed_str(uint8_t portid, struct rte_eth_link *link_info)
+link_speed_str(uint16_t portid, struct rte_eth_link *link_info)
 {
 	const char *speed_str;
 
@@ -263,7 +267,7 @@ link_speed_str(uint8_t portid, struct rte_eth_link *link_info)
 } /* link_speed_str */
 
 static int
-usiw_port_change_state(uint8_t port_id, uint8_t if_up)
+usiw_port_change_state(dpdk_port_id_type port_id, uint8_t if_up)
 {
 	struct rte_eth_link link_info;
 	const char *speed_str;

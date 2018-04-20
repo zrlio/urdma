@@ -47,6 +47,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <rte_pci.h>
+
 #include "util.h"
 
 int
@@ -239,17 +241,16 @@ desc_lim_dump_info(FILE *stream, struct rte_eth_desc_lim *lim, int indent)
 } /* desc_lim_dump_info */
 
 void
-port_dump_info(FILE *stream, struct rte_eth_dev_info *info)
+port_dump_info(FILE *stream, uint16_t port_id)
 {
+	struct rte_eth_dev_info info_store, *info = &info_store;
+	char namebuf[pci_addr_namebuf_size];
 	char ch;
 	int x;
-
-	fprintf(stream, "\"" PCI_PRI_FMT "\": {\n  \"driver_name\": %s,\n",
-			info->pci_dev->addr.domain,
-			info->pci_dev->addr.bus,
-			info->pci_dev->addr.devid,
-			info->pci_dev->addr.function,
-			info->driver_name);
+	rte_eth_dev_info_get(port_id, info);
+	rte_eth_dev_get_name_by_port(port_id, namebuf);
+	fprintf(stream, "\"%s\": {\n  \"driver_name\": %s,\n",
+			namebuf, info->driver_name);
 	fprintf(stream, "  \"if_index\": %u,\n",
 			info->if_index);
 	fprintf(stream, "  \"min_rx_bufsize\": %" PRIu32 ",\n",

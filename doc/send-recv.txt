@@ -18,9 +18,9 @@ Note that messages are generally received in one contiguous buffer, unless the
 port has been configured in advance to segment received packets (note that I
 have not tested this behavior).
 
-To retrieve a message, use the dpdk_eth_recv_burst() function:
+To retrieve a message, use the rte_eth_recv_burst() function:
 
-    int dpdk_eth_rx_burst(uint8_t port, uint16_t queue,
+    int rte_eth_rx_burst(uint16_t port, uint16_t queue,
                           struct dpdk_mbuf **mbuf, const uint16_t count);
 
 This function returns the number of packets retrieved from the queue.  It is

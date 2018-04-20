@@ -1195,24 +1195,6 @@ setup_timer(int interval_ms)
 } /* setup_timer */
 
 
-
-static int
-lookup_ethdev_by_pci_addr(struct rte_pci_addr *addr)
-{
-	struct rte_eth_dev_info info;
-	int x, count;
-
-	count = rte_eth_dev_count();
-	for (x = 0; x < count; ++x) {
-		rte_eth_dev_info_get(x, &info);
-		if (!rte_eal_compare_pci_addr(addr, &info.pci_dev->addr)) {
-			return x;
-		}
-	}
-	return -ENODEV;
-} /* lookup_ethdev_by_pci_addr */
-
-
 static void
 do_init_driver(void)
 {
