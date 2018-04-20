@@ -6,7 +6,7 @@
  * Authors: Patrick MacArthur <pam@zurich.ibm.com>
  *
  * Copyright (c) 2016, IBM Corporation
- * Copyright (c) 2016, University of New Hampshire
+ * Copyright (c) 2016-2018, University of New Hampshire
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -611,7 +611,7 @@ do_init_driver(void)
 	if (sem_init(&sem, 0, 0)) {
 		if (getenv("IBV_SHOW_WARNINGS")) {
 			fprintf(stderr, "Could not initialize semaphore: %s\n",
-					strerror(ret));
+					strerror(errno));
 		}
 		return;
 	}
@@ -633,7 +633,7 @@ do_init_driver(void)
 		if (getenv("IBV_SHOW_WARNINGS")) {
 			fprintf(stderr,
 				"Error waiting on initialization semaphore: %s\n",
-				strerror(ret));
+				strerror(errno));
 		}
 		return;
 	}
