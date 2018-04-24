@@ -1,0 +1,3 @@
+#!/bin/sh
+
+./configure CFLAGS="-g -O2 -Wall -Wextra -Wno-sign-compare -Wno-unused-parameter -Wmissing-prototypes -Wmissing-declarations -Wwrite-strings -Wformat=2 -Wshadow -Wstrict-prototypes -Wold-style-definition -Wredundant-decls" "$@"
