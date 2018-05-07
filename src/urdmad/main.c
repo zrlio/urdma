@@ -1067,20 +1067,20 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 	}
 
 	/* Set up control TX queue */
-	retval = rte_eth_tx_queue_setup(iface->portid, 0, iface->tx_desc_count,
-			socket_id, NULL);
-	if (retval < 0)
-		rte_exit(EXIT_FAILURE,
-			"Cannot setup port %" PRIu16 " tx queue 0: %s\n",
-			iface->portid, rte_strerror(-retval));
-
-	/* Data TX queue requires checksum offload, and startup is deferred */
 	memcpy(&txconf, &iface->dev_info.default_txconf, sizeof(txconf));
 	txconf.txq_flags &= ~(ETH_TXQ_FLAGS_NOMULTSEGS|ETH_TXQ_FLAGS_NOREFCOUNT
 				|ETH_TXQ_FLAGS_NOMULTMEMP);
 	if (iface->flags & port_checksum_offload) {
 		txconf.txq_flags &= ~ETH_TXQ_FLAGS_NOXSUMUDP;
 	}
+	retval = rte_eth_tx_queue_setup(iface->portid, 0, iface->tx_desc_count,
+			socket_id, &txconf);
+	if (retval < 0)
+		rte_exit(EXIT_FAILURE,
+			"Cannot setup port %" PRIu16 " tx queue 0: %s\n",
+			iface->portid, rte_strerror(-retval));
+
+	/* Defer startup of data TX queues */
 	txconf.tx_deferred_start = 1;
 	for (q = 1; q <= iface->max_qp; q++) {
 		retval = rte_eth_tx_queue_setup(iface->portid, q,
