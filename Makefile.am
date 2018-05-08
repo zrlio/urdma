@@ -145,13 +145,16 @@ src_kvstore_client_kvstore_client_CPPFLAGS = -I$(srcdir)/include -I$(srcdir)/src
 src_kvstore_client_kvstore_client_LDFLAGS = $(DPDK_LDFLAGS)
 src_kvstore_client_kvstore_client_LDADD = src/liburdma/liburdma.la $(DPDK_LIBS) -lm
 
-check_PROGRAMS = tests/binheap
+check_PROGRAMS = tests/binheap tests/list_test
 tests_binheap_SOURCES = tests/binheap.c \
 	src/util/binheap.c \
 	src/util/binheap.h
 tests_binheap_CPPFLAGS = -I$(srcdir)/src/util
 
-TESTS = tests/binheap
+tests_list_test_SOURCES = tests/list_test.c
+tests_list_test_LDADD = ccan/libccan.la
+
+TESTS = tests/binheap tests/list_test
 
 dist_doc_DATA = doc/urdma-schema.json
 
