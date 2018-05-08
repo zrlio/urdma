@@ -38,21 +38,22 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include "list.h"
 
-LIST_HEAD(listhead, entry) head;
+#include <ccan/list/list.h>
+
+struct list_head head = LIST_HEAD_INIT(head);
 
 struct entry {
 	int value;
-	LIST_ENTRY(entry) entries;
+	struct list_node entries;
 };
 
 void
-print_list(FILE *stream, struct listhead *head)
+print_list(FILE *stream, struct list_head *head)
 {
-	struct entry *e, **prev;
+	struct entry *e, *next;
 	fprintf(stream, "< ");
-	LIST_FOR_EACH(e, head, entries, prev) {
+	list_for_each_safe(head, e, next, entries) {
 		fprintf(stream, "%d ", e->value);
 	}
 	fprintf(stream, ">\n");
@@ -61,10 +62,9 @@ print_list(FILE *stream, struct listhead *head)
 int
 main(void)
 {
-	struct entry *e, *e2, **prev;
+	struct entry *e, *e2, *next;
 	int x;
 
-	LIST_INIT(&head);
 	printf("Empty list\n");
 	print_list(stdout, &head);
 
@@ -72,31 +72,31 @@ main(void)
 	for (x = 0; x < 10; ++x) {
 		e = malloc(sizeof(*e));
 		e->value = x;
-		LIST_INSERT_HEAD(&head, e, entries);
+		list_add_tail(&head, &e->entries);
 	}
 	print_list(stdout, &head);
 
 	printf("Removing 7\n");
-	LIST_FOR_EACH(e, &head, entries, prev) {
+	list_for_each_safe(&head, e, next, entries) {
 		if (e->value == 7) {
-			LIST_REMOVE(e, entries);
+			list_del(&e->entries);
 		}
 	}
 	print_list(stdout, &head);
 
 	printf("Adding 14\n");
-	LIST_FOR_EACH(e, &head, entries, prev) {
+	list_for_each_safe(&head, e, next, entries) {
 		if (e->value == 6) {
 			e2 = malloc(sizeof(*e));
 			e2->value = 14;
-			LIST_INSERT_AFTER(e, e2, entries);
+			list_add_after(&head, &e->entries, &e2->entries);
 		}
 	}
 	print_list(stdout, &head);
 
 	printf("Removing all elements\n");
-	LIST_FOR_EACH(e, &head, entries, prev) {
-		LIST_REMOVE(e, entries);
+	list_for_each_safe(&head, e, next, entries) {
+		list_del(&e->entries);
 	}
 	print_list(stdout, &head);
 }

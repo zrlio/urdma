@@ -49,11 +49,10 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/prctl.h>
-#include <sys/queue.h>
 #include <sys/un.h>
 #include <unistd.h>
 
-#include <infiniband/driver.h>
+#include <ccan/list/list.h>
 
 #include <rte_config.h>
 #include <rte_ethdev.h>
@@ -508,7 +507,7 @@ our_eal_master_thread(void *sem)
 							NEW_CTX_MAX + 1));
 	if (!driver)
 		goto err;
-	LIST_INIT(&driver->ctxs);
+	list_head_init(&driver->ctxs);
 
 	driver->urdmad_fd = setup_socket(sock_name);
 	if (driver->urdmad_fd < 0)

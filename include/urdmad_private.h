@@ -46,6 +46,7 @@
 #include <stdatomic.h>
 #include <stdint.h>
 #include <pthread.h>
+#include <ccan/list/list.h>
 
 #include <rte_ether.h>
 
@@ -107,7 +108,7 @@ struct urdmad_qp {
 	uint16_t mtu;
 		/**< Device MTU. */
 
-	LIST_ENTRY(urdmad_qp) urdmad__entry;
+	struct list_node urdmad__entry;
 		/**< Private field used only by urdmad to thread onto list. */
 };
 

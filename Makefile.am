@@ -53,6 +53,17 @@ include_HEADERS = include/urdma_kabi.h \
 		include/kvstore_limits.h \
 		include/kvstore_storage.h
 
+noinst_LTLIBRARIES = ccan/libccan.la
+ccan_libccan_la_SOURCES = \
+	ccan/container_of/container_of.h \
+	ccan/check_type/check_type.h \
+	ccan/build_assert/build_assert.h \
+	ccan/list/list.c \
+	ccan/list/list.h \
+	ccan/str/str.c \
+	ccan/str/str_debug.h \
+	ccan/str/str.h
+
 lib_LTLIBRARIES = src/liburdma/liburdma.la
 src_liburdma_liburdma_la_SOURCES = \
 	src/liburdma/driver.c \

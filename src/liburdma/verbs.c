@@ -47,6 +47,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <ccan/list/list.h>
 #include <infiniband/driver.h>
 
 #include <rte_config.h>
@@ -918,7 +919,7 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 			sizeof(qp->ib_qp.qp_num), qp);
 	rte_spinlock_unlock(&ctx->qp_lock);
 
-	LIST_INSERT_HEAD(&qp->ctx->qp_active, qp, ctx_entry);
+	list_add_tail(&qp->ctx->qp_active, &qp->ctx_entry);
 	return &qp->ib_qp;
 
 free_txq:
@@ -1509,7 +1510,7 @@ usiw_init_context(struct verbs_device *device, struct ibv_context *context,
 	ctx->dev = dev;
 
 	atomic_init(&ctx->qp_init_count, 0);
-	LIST_INIT(&ctx->qp_active);
+	list_head_init(&ctx->qp_active);
 
 	ctx->qp = NULL;
 	rte_spinlock_init(&ctx->qp_lock);

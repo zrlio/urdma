@@ -46,6 +46,8 @@
 #include <stdbool.h>
 #include <semaphore.h>
 
+#include <ccan/list/list.h>
+
 #include <infiniband/driver.h>
 
 #include <uthash.h>
@@ -61,7 +63,6 @@
 
 #include "urdmad_private.h"
 #include "binheap.h"
-#include "list.h"
 #include "verbs.h"
 
 #define MAX_RECV_WR 1023
@@ -122,7 +123,7 @@ struct usiw_wc {
 struct usiw_recv_wqe {
 	void *wr_context;
 	struct ee_state *remote_ep;
-	TAILQ_ENTRY(usiw_recv_wqe) active;
+	struct list_node active;
 	uint32_t msn;
 	bool complete;
 	size_t total_request_size;
@@ -168,7 +169,7 @@ struct usiw_send_wqe {
 	uint64_t remote_addr;
 	uint32_t rkey;
 	uint32_t flags;
-	TAILQ_ENTRY(usiw_send_wqe) active;
+	struct list_node active;
 	uint32_t index;
 	enum usiw_send_wqe_state state;
 	uint32_t msn;
@@ -198,7 +199,7 @@ struct usiw_mr_table {
 struct usiw_send_wqe_queue {
 	struct rte_ring *ring;
 	struct rte_ring *free_ring;
-	TAILQ_HEAD(usiw_send_wqe_active_head, usiw_send_wqe) active_head;
+	struct list_head active_head;
 	char *storage;
 	int max_wr;
 	int max_sge;
@@ -209,7 +210,7 @@ struct usiw_send_wqe_queue {
 struct usiw_recv_wqe_queue {
 	struct rte_ring *ring;
 	struct rte_ring *free_ring;
-	TAILQ_HEAD(usiw_recv_wqe_active_head, usiw_recv_wqe) active_head;
+	struct list_head active_head;
 	uint32_t next_msn;
 	char *storage;
 	int max_wr;
@@ -262,14 +263,12 @@ struct read_response_state {
 	uint64_t sink_offset; /* host byte order */
 	bool active;
 	struct ee_state *sink_ep;
-	TAILQ_ENTRY(read_response_state) qp_entry;
+	struct list_node qp_entry;
 };
 
 enum {
 	usiw_qp_sig_all = 0x1,
 };
-
-DECLARE_TAILQ_HEAD(read_response_state);
 
 /** This structure contains fields used by my initial reliable datagram-style
  * verbs interface.  This will be used for transition to the reliable connected
@@ -279,7 +278,7 @@ struct usiw_qp {
 	struct urdmad_qp *shm_qp;
 	uint16_t qp_flags;
 
-	LIST_ENTRY(usiw_qp) ctx_entry;
+	struct list_node ctx_entry;
 	UT_hash_handle hh;
 	struct usiw_context *ctx;
 	struct usiw_device *dev;
@@ -336,7 +335,7 @@ enum usiw_device_flags {
  * in this handle to 0.  The progress thread then removes the entry from the
  * list and frees it. */
 struct usiw_context_handle {
-	LIST_ENTRY(usiw_context_handle) driver_entry;
+	struct list_node driver_entry;
 	atomic_uintptr_t ctxp;
 };
 
@@ -345,7 +344,7 @@ struct usiw_context {
 	struct usiw_device *dev;
 	int event_fd;
 	struct usiw_context_handle *h;
-	LIST_HEAD(usiw_qp_head, usiw_qp) qp_active;
+	struct list_head qp_active;
 	atomic_uint qp_init_count;
 		/**< The number of queue pairs in the INIT state. */
 	struct usiw_qp *qp;
@@ -381,7 +380,7 @@ struct usiw_driver {
 	struct nl_sock *sock;
 	struct nl_cache *link_cache;
 	struct nl_cache *addr_cache;
-	LIST_HEAD(usiw_context_handle_list_head, usiw_context_handle) ctxs;
+	struct list_head ctxs;
 	struct rte_ring *new_ctxs;
 	int urdmad_fd;
 	uint32_t lcore_mask[RTE_MAX_LCORE / 32];

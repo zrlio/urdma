@@ -42,6 +42,7 @@
 #endif
 
 #include <assert.h>
+#include <ccan/list/list.h>
 #include <rte_config.h>
 #ifdef HAVE_RTE_BUS_PCI_H
 #include <rte_bus_pci.h>

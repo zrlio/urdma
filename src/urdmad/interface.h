@@ -41,6 +41,8 @@
 #ifndef URDMAD_INTERFACE_H
 #define URDMAD_INTERFACE_H
 
+#include <ccan/list/list.h>
+
 #include <rte_ethdev.h>
 #include <rte_ether.h>
 #include <rte_kni.h>
@@ -60,8 +62,6 @@ enum usiw_port_flags {
 	port_5tuple = 8,
 };
 
-LIST_HEAD(urdmad_qp_head, urdmad_qp);
-
 struct usiw_port {
 	int portid;
 	uint64_t timer_freq;
@@ -75,7 +75,7 @@ struct usiw_port {
 	uint16_t rx_burst_size;
 	uint16_t tx_burst_size;
 	uint16_t max_qp;
-	struct urdmad_qp_head avail_qp;
+	struct list_head avail_qp;
 	struct urdmad_qp *qp;
 
 	uint64_t flags;
@@ -97,8 +97,8 @@ struct urdma_fd {
 
 struct urdma_process {
 	struct urdma_fd fd;
-	LIST_ENTRY(urdma_process) entry;
-	struct urdmad_qp_head owned_qps;
+	struct list_node entry;
+	struct list_head owned_qps;
 	uint32_t core_mask[RTE_MAX_LCORE / 32];
 };
 
@@ -109,7 +109,7 @@ struct usiw_driver {
 	struct urdma_fd chardev;
 	struct urdma_fd listen;
 	struct urdma_fd timer;
-	LIST_HEAD(urdma_process_head, urdma_process) processes;
+	struct list_head processes;
 	int epoll_fd;
 	int port_count;
 	uint16_t progress_lcore;
