@@ -51,6 +51,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <ccan/list/list.h>
+
 #include <rte_config.h>
 #include <rte_arp.h>
 #include <rte_cycles.h>
@@ -65,7 +67,6 @@
 #include <rte_udp.h>
 
 #include "interface.h"
-#include "list.h"
 #include "proto.h"
 #include "urdma_kabi.h"
 #include "util.h"
@@ -175,7 +176,7 @@ usiw_send_wqe_queue_init(uint32_t qpn, struct usiw_send_wqe_queue *q,
 		rte_ring_enqueue(q->free_ring, q->storage + i * wqe_size);
 	}
 
-	TAILQ_INIT(&q->active_head);
+	list_head_init(&q->active_head);
 	rte_spinlock_init(&q->lock);
 	q->max_wr = max_send_wr;
 	q->max_sge = max_send_sge;
@@ -194,14 +195,14 @@ static void
 usiw_send_wqe_queue_add_active(struct usiw_send_wqe_queue *q,
 		struct usiw_send_wqe *wqe)
 {
-	TAILQ_INSERT_TAIL(&q->active_head, wqe, active);
+	list_add_tail(&q->active_head, &wqe->active);
 } /* usiw_send_wqe_queue_add_active */
 
 static void
 usiw_send_wqe_queue_del_active(struct usiw_send_wqe_queue *q,
 		struct usiw_send_wqe *wqe)
 {
-	TAILQ_REMOVE(&q->active_head, wqe, active);
+	list_del(&wqe->active);
 } /* usiw_send_wqe_queue_del_active */
 
 static int
@@ -209,10 +210,10 @@ usiw_send_wqe_queue_lookup(struct usiw_send_wqe_queue *q,
 		uint16_t wr_opcode, uint32_t wr_key_data,
 		struct usiw_send_wqe **wqe)
 {
-	struct usiw_send_wqe *lptr, **prev;
+	struct usiw_send_wqe *lptr, *next;
 	RTE_LOG(DEBUG, USER1, "LOOKUP active send WQE opcode=%" PRIu8 " key_data=%" PRIu32 "\n",
 			wr_opcode, wr_key_data);
-	TAILQ_FOR_EACH(lptr, &q->active_head, active, prev) {
+	list_for_each_safe(&q->active_head, lptr, next, active) {
 		if (lptr->opcode != wr_opcode) {
 			continue;
 		}
@@ -278,7 +279,7 @@ usiw_recv_wqe_queue_init(uint32_t qpn, struct usiw_recv_wqe_queue *q,
 		rte_ring_enqueue(q->free_ring, q->storage + i * wqe_size);
 	}
 
-	TAILQ_INIT(&q->active_head);
+	list_head_init(&q->active_head);
 	rte_spinlock_init(&q->lock);
 	q->max_wr = max_recv_wr;
 	q->max_sge = max_recv_sge;
@@ -300,7 +301,7 @@ usiw_recv_wqe_queue_add_active(struct usiw_recv_wqe_queue *q,
 {
 	RTE_LOG(DEBUG, USER1, "ADD active recv WQE msn=%" PRIu32 "\n",
 			wqe->msn);
-	TAILQ_INSERT_TAIL(&q->active_head, wqe, active);
+	list_add_tail(&q->active_head, &wqe->active);
 } /* usiw_recv_wqe_queue_add_active */
 
 static void
@@ -309,17 +310,17 @@ usiw_recv_wqe_queue_del_active(struct usiw_recv_wqe_queue *q,
 {
 	RTE_LOG(DEBUG, USER1, "DEL active recv WQE msn=%" PRIu32 "\n",
 			wqe->msn);
-	TAILQ_REMOVE(&q->active_head, wqe, active);
+	list_del(&wqe->active);
 } /* usiw_recv_wqe_queue_del_active */
 
 static int
 usiw_recv_wqe_queue_lookup(struct usiw_recv_wqe_queue *q,
 		uint32_t msn, struct usiw_recv_wqe **wqe)
 {
-	struct usiw_recv_wqe *lptr, **prev;
+	struct usiw_recv_wqe *lptr, *next;
 	RTE_LOG(DEBUG, USER1, "LOOKUP active recv WQE msn=%" PRIu32 "\n",
 			msn);
-	TAILQ_FOR_EACH(lptr, &q->active_head, active, prev) {
+	list_for_each_safe(&q->active_head, lptr, next, active) {
 		if (lptr->msn == msn) {
 			*wqe = lptr;
 			return 0;
@@ -803,14 +804,14 @@ post_send_cqe(struct usiw_qp *qp, struct usiw_send_wqe *wqe,
 static void
 rq_flush(struct usiw_qp *qp)
 {
-	struct usiw_recv_wqe *wqe, **prev;
+	struct usiw_recv_wqe *wqe, *next;
 
 	rte_spinlock_lock(&qp->rq0.lock);
 	while (rte_ring_dequeue(qp->rq0.ring, (void **)&wqe) == 0) {
 		wqe->msn = qp->rq0.next_msn++;
 		usiw_recv_wqe_queue_add_active(&qp->rq0, wqe);
 	}
-	TAILQ_FOR_EACH(wqe, &qp->rq0.active_head, active, prev) {
+	list_for_each_safe(&qp->rq0.active_head, wqe, next, active) {
 		post_recv_cqe(qp, wqe, IBV_WC_WR_FLUSH_ERR);
 	}
 	rte_spinlock_unlock(&qp->rq0.lock);
@@ -820,13 +821,13 @@ rq_flush(struct usiw_qp *qp)
 static void
 sq_flush(struct usiw_qp *qp)
 {
-	struct usiw_send_wqe *wqe, **prev;
+	struct usiw_send_wqe *wqe, *next;
 
 	rte_spinlock_lock(&qp->sq.lock);
 	while (rte_ring_dequeue(qp->sq.ring, (void **)&wqe) == 0) {
 		usiw_send_wqe_queue_add_active(&qp->sq, wqe);
 	}
-	TAILQ_FOR_EACH(wqe, &qp->sq.active_head, active, prev) {
+	list_for_each_safe(&qp->sq.active_head, wqe, next, active) {
 		post_send_cqe(qp, wqe, IBV_WC_WR_FLUSH_ERR);
 	}
 	rte_spinlock_unlock(&qp->sq.lock);
@@ -1145,18 +1146,18 @@ process_send(struct usiw_qp *qp, struct packet_context *orig)
 	size_t payload_length;
 	int ret;
 
-	if (!qp->rq0.active_head.tqh_first)
+	if (!list_top(&qp->rq0.active_head, struct usiw_recv_wqe, active))
 		dequeue_recv_wqes(qp);
 
 	msn = rte_be_to_cpu_32(rdmap->msn);
 	ret = usiw_recv_wqe_queue_lookup(&qp->rq0, msn, &wqe);
 	assert(ret != -EINVAL);
 	if (ret < 0) {
-		if (qp->rq0.active_head.tqh_first) {
+		if (list_top(&qp->rq0.active_head, struct usiw_recv_wqe, active)) {
 			/* This is a duplicate of a previously received
 			 * message --- should never happen since TRP will not
 			 * give us a duplicate packet. */
-			expected_msn = qp->rq0.active_head.tqh_first->msn;
+			expected_msn = list_top(&qp->rq0.active_head, struct usiw_recv_wqe, active)->msn;
 			RTE_LOG(INFO, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Received msn=%" PRIu32 " but expected msn=%" PRIu32 "\n",
 					qp->shm_qp->dev_id, qp->shm_qp->qp_id,
 					msn, expected_msn);
@@ -1207,12 +1208,12 @@ process_send(struct usiw_qp *qp, struct packet_context *orig)
 	 * frames. Walk the queue starting at the head to make sure we post
 	 * completions that we had previously deferred. */
 	if (serial_less_32(orig->psn, wqe->remote_ep->recv_ack_psn)) {
-		wqe = qp->rq0.active_head.tqh_first;
+		wqe = list_top(&qp->rq0.active_head, struct usiw_recv_wqe, active);
 		while (wqe && wqe->complete) {
 			rte_spinlock_lock(&qp->rq0.lock);
 			post_recv_cqe(qp, wqe, IBV_WC_SUCCESS);
 			rte_spinlock_unlock(&qp->rq0.lock);
-			wqe = qp->rq0.active_head.tqh_first;
+			wqe = list_top(&qp->rq0.active_head, struct usiw_recv_wqe, active);
 		}
 	}
 }	/* process_send */
@@ -1349,7 +1350,7 @@ try_complete_wqe(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 {
 	/* We cannot post the completion until all previous WQEs have
 	 * completed. */
-	if (wqe == qp->sq.active_head.tqh_first) {
+	if (wqe == list_top(&qp->sq.active_head, struct usiw_send_wqe, active)) {
 		rte_spinlock_lock(&qp->sq.lock);
 		if (wqe->flags & usiw_send_signaled) {
 			post_send_cqe(qp, wqe, IBV_WC_SUCCESS);
@@ -1368,8 +1369,8 @@ try_complete_wqe(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 static struct usiw_send_wqe *
 find_first_rdma_read(struct usiw_qp *qp)
 {
-	struct usiw_send_wqe *lptr, **prev;
-	TAILQ_FOR_EACH(lptr, &qp->sq.active_head, active, prev) {
+	struct usiw_send_wqe *lptr, *next;
+	list_for_each_safe(&qp->sq.active_head, lptr, next, active) {
 		if (lptr->opcode == usiw_wr_read) {
 			return lptr;
 		}
@@ -2011,13 +2012,13 @@ process_receive_queue(struct usiw_qp *qp, void *prefetch_addr, uint64_t *now)
 static void
 progress_qp(struct usiw_qp *qp)
 {
-	struct usiw_send_wqe *send_wqe, **prev;
+	struct usiw_send_wqe *send_wqe, *next;
 	uint64_t now;
 	uint32_t psn;
 	int scount, ret;
 
 	/* Receive loop fills in now for us */
-	process_receive_queue(qp, qp->sq.active_head.tqh_first, &now);
+	process_receive_queue(qp, list_top(&qp->sq.active_head, struct usiw_send_wqe, active), &now);
 
 	/* Call any timers only once per millisecond */
 	sweep_unacked_packets(qp, now);
@@ -2047,9 +2048,9 @@ progress_qp(struct usiw_qp *qp)
 	}
 
 	scount = 0;
-	TAILQ_FOR_EACH(send_wqe, &qp->sq.active_head, active, prev) {
-		if (send_wqe->active.tqe_next) {
-			rte_prefetch0(send_wqe->active.tqe_next);
+	list_for_each_safe(&qp->sq.active_head, send_wqe, next, active) {
+		if (list_next(&qp->sq.active_head, send_wqe, active)) {
+			rte_prefetch0(list_next(&qp->sq.active_head, send_wqe, active));
 		}
 		assert(send_wqe->state != SEND_WQE_INIT);
 		progress_send_wqe(qp, send_wqe);
@@ -2223,10 +2224,10 @@ unlock:
 int
 kni_loop(void *arg)
 {
-	struct usiw_context_handle *h, **h_prev;
+	struct usiw_context_handle *h, *h_next;
 	struct usiw_context *ctx;
 	struct usiw_driver *driver;
-	struct usiw_qp *qp, **qp_prev;
+	struct usiw_qp *qp, *qp_next;
 	void *ctxs_to_add[NEW_CTX_MAX];
 	unsigned int i, count;
 
@@ -2237,17 +2238,17 @@ kni_loop(void *arg)
 					     NEW_CTX_MAX);
 		for (i = 0; i < count; ++i) {
 			h = (struct usiw_context_handle *)ctxs_to_add[i];
-			LIST_INSERT_HEAD(&driver->ctxs, h, driver_entry);
+			list_add_tail(&driver->ctxs, &h->driver_entry);
 		}
 
-		LIST_FOR_EACH(h, &driver->ctxs, driver_entry, h_prev) {
+		list_for_each_safe(&driver->ctxs, h, h_next, driver_entry) {
 			ctx = (void *)atomic_load(&h->ctxp);
 			if (unlikely(!ctx)) {
-				LIST_REMOVE(h, driver_entry);
+				list_del(&h->driver_entry);
 				free(h);
 				continue;
 			}
-			LIST_FOR_EACH(qp, &ctx->qp_active, ctx_entry, qp_prev) {
+			list_for_each_safe(&ctx->qp_active, qp, qp_next, ctx_entry) {
 				switch (atomic_load(&qp->shm_qp->conn_state)) {
 				case usiw_qp_connected:
 					/* start_qp() transitions to
@@ -2267,7 +2268,7 @@ kni_loop(void *arg)
 					 * usiw_qp_error */
 					/* fall-through */
 				case usiw_qp_error:
-					LIST_REMOVE(qp, ctx_entry);
+					list_del(&qp->ctx_entry);
 					if (atomic_fetch_sub(&qp->refcnt,
 								1) == 1) {
 						usiw_do_destroy_qp(qp);

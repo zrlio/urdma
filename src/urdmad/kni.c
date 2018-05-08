@@ -42,6 +42,7 @@
 #endif
 
 #include <assert.h>
+#include <ccan/list/list.h>
 #include <rte_config.h>
 #include <rte_kni.h>
 #include <netlink/msg.h>

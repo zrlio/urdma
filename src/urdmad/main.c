@@ -57,6 +57,8 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <ccan/list/list.h>
+
 #include <rte_config.h>
 #include <rte_ethdev.h>
 #include <rte_errno.h>
@@ -68,7 +70,6 @@
 
 #include "config_file.h"
 #include "interface.h"
-#include "list.h"
 #include "kni.h"
 #include "util.h"
 #include "urdmad_private.h"
@@ -163,8 +164,8 @@ return_qp(struct usiw_port *dev, struct urdmad_qp *qp)
 	struct rte_mbuf *mbuf[mbuf_count];
 	int ret, count;
 
-	LIST_REMOVE(qp, urdmad__entry);
-	LIST_INSERT_HEAD(&dev->avail_qp, qp, urdmad__entry);
+	list_del(&qp->urdmad__entry);
+	list_add_tail(&dev->avail_qp, &qp->urdmad__entry);
 
 	if (dev->flags & port_5tuple) {
 		struct rte_eth_ntuple_filter ntuple;
@@ -543,14 +544,14 @@ process_data_ready(struct urdma_fd *process_fd)
 		= container_of(process_fd, struct urdma_process, fd);
 	struct usiw_port *port;
 	union urdmad_sock_any_msg msg;
-	struct urdmad_qp *qp, **prev;
+	struct urdmad_qp *qp, *next;
 	uint16_t dev_id, qp_id;
 	ssize_t ret;
 
 	ret = recv(process->fd.fd, &msg, sizeof(msg), 0);
 	if (ret < sizeof(struct urdmad_sock_msg)) {
 		RTE_LOG(DEBUG, USER1, "EOF or error on fd %d\n", process->fd.fd);
-		LIST_FOR_EACH(qp, &process->owned_qps, urdmad__entry, prev) {
+		list_for_each_safe(&process->owned_qps, qp, next, urdmad__entry) {
 			RTE_LOG(DEBUG, USER1, "Return QP %" PRIu16 " to pool\n",
 					qp->qp_id);
 			return_qp(&driver->ports[qp->dev_id], qp);
@@ -566,11 +567,11 @@ process_data_ready(struct urdma_fd *process_fd)
 			goto err;
 		}
 		port = &driver->ports[dev_id];
-		qp = port->avail_qp.lh_first;
-		LIST_REMOVE(qp, urdmad__entry);
+		qp = list_top(&port->avail_qp, struct urdmad_qp, urdmad__entry);
+		list_del(&qp->urdmad__entry);
 		RTE_LOG(DEBUG, USER1, "CREATE QP dev_id=%" PRIu16 " on fd %d => qp_id=%" PRIu16 "\n",
 				dev_id, process->fd.fd, qp->qp_id);
-		LIST_INSERT_HEAD(&process->owned_qps, qp, urdmad__entry);
+		list_add_tail(&process->owned_qps, &qp->urdmad__entry);
 		ret = send_create_qp_resp(process, qp);
 		if (ret < 0) {
 			goto err;
@@ -605,7 +606,7 @@ process_data_ready(struct urdma_fd *process_fd)
 	return;
 
 err:
-	LIST_REMOVE(process, entry);
+	list_del(&process->entry);
 	close(process->fd.fd);
 	free(process);
 } /* process_data_ready */
@@ -643,11 +644,11 @@ listen_data_ready(struct urdma_fd *listen_fd)
 		rte_exit(EXIT_FAILURE, "Could not add socket to epoll set: %s\n",
 				strerror(errno));
 	}
-	LIST_INIT(&proc->owned_qps);
+	list_head_init(&proc->owned_qps);
 	/* This assumes that core_mask is an array member, not a pointer to an
 	 * array */
 	memset(proc->core_mask, 0, sizeof(proc->core_mask));
-	LIST_INSERT_HEAD(&driver->processes, proc, entry);
+	list_add_tail(&driver->processes, &proc->entry);
 } /* listen_data_ready */
 
 
@@ -951,7 +952,7 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 		iface->rx_desc_count, iface->rx_burst_size,
 		iface->tx_burst_size);
 
-	LIST_INIT(&iface->avail_qp);
+	list_head_init(&iface->avail_qp);
 
 	iface->qp = rte_calloc("urdma_qp", iface->max_qp + 1,
 			sizeof(*iface->qp), 0);
@@ -981,8 +982,7 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 			rte_exit(EXIT_FAILURE, "Cannot create mutex: %s\n",
 				rte_strerror(rte_errno));
 		}
-		LIST_INSERT_HEAD(&iface->avail_qp, &iface->qp[q],
-				urdmad__entry);
+		list_add_tail(&iface->avail_qp, &iface->qp[q].urdmad__entry);
 	}
 	retval = pthread_mutexattr_destroy(&mutexattr);
 	if (retval) {
@@ -1153,7 +1153,7 @@ setup_socket(const char *path)
 				path, strerror(errno));
 	}
 
-	LIST_INIT(&driver->processes);
+	list_head_init(&driver->processes);
 	if (listen(driver->listen.fd, 16) < 0) {
 		rte_exit(EXIT_FAILURE, "Could not listen on socket %s: %s\n",
 				path, strerror(errno));
