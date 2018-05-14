@@ -5,6 +5,7 @@
 # Authors: Patrick MacArthur <patrick@patrickmacarthur.net>
 #
 # Copyright (c) 2016, IBM Corporation
+# Copyright (c) 2018, University of New Hampshire
 #
 # This software is available to you under a choice of one of two
 # licenses.  You may choose to be licensed under the terms of the GNU
@@ -47,10 +48,8 @@ source "${profile}"
 
 # Make input variables read-only
 readonly TOP_SRCDIR DEPLOY_DIR SERVER_NODE CLIENT_NODE
-readonly SERVER_DPDK_IP SERVER_DPDK_IP_PREFIX
-readonly CLIENT_DPDK_IP CLIENT_DPDK_IP_PREFIX
-readonly DPDK_LOG_LEVEL SERVER_LCORE_LAYOUT CLIENT_LCORE_LAYOUT
-readonly SERVER_PORT CLIENT_PORT
+readonly SERVER_DPDK_IP
+readonly CLIENT_DPDK_IP
 readonly SERVER_EXTRA_ARGS CLIENT_EXTRA_ARGS
 
 # Log ID
@@ -65,25 +64,27 @@ mkfifo ${our_tmpdir}/client_fifo
 cd ${TOP_SRCDIR}
 ssh ${SERVER_NODE} mkdir -p ${DEPLOY_DIR}
 ssh ${CLIENT_NODE} mkdir -p ${DEPLOY_DIR}
-git archive --format tar HEAD \
-	| ssh ${SERVER_NODE} tar -C ${DEPLOY_DIR} -x
-git archive --format tar HEAD \
-	| ssh ${CLIENT_NODE} tar -C ${DEPLOY_DIR} -x
+rm -f urdma-*.tar.gz
+make distcheck || exit 1
+tarname=urdma-*.tar.gz
+tarbn=$(basename ${tarname} .tar.gz)
+ssh ${SERVER_NODE} tar -C ${DEPLOY_DIR} -xz <${tarname}
+ssh ${CLIENT_NODE} tar -C ${DEPLOY_DIR} -xz <${tarname}
 tmux neww -n dpdk-server \
 	"ret=127
 	trap 'exec 3>${our_tmpdir}/server_fifo; echo \${ret} >&3' EXIT
-	ssh -t ${SERVER_NODE} ${DEPLOY_DIR}/scripts/run_real.sh \
-	${DEPLOY_DIR} ${SERVER_APP} ${LOGID} \
+	ssh -t ${SERVER_NODE} ${DEPLOY_DIR}/${tarbn}/scripts/run_real.sh \
+	${DEPLOY_DIR}/${tarbn} ${SERVER_APP} ${LOGID} \
 	${SERVER_EXTRA_ARGS}
 	ret=\$?"
 sleep 5
 tmux neww -n dpdk-client \
 	"ret=127
 	trap 'exec 3>${our_tmpdir}/client_fifo; echo \${ret} >&3' EXIT
-	ssh -t ${CLIENT_NODE} ${DEPLOY_DIR}/scripts/run_real.sh \
-	${DEPLOY_DIR} ${CLIENT_APP} ${LOGID} \
+	ssh -t ${CLIENT_NODE} ${DEPLOY_DIR}/${tarbn}/scripts/run_real.sh \
+	${DEPLOY_DIR}/${tarbn} ${CLIENT_APP} ${LOGID} \
 	${CLIENT_EXTRA_ARGS} \
-	${SERVER_DPDK_IP}
+	-a ${SERVER_DPDK_IP}
 	ret=\$?"
 
 exec 3<${our_tmpdir}/server_fifo

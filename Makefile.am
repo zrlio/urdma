@@ -4,7 +4,7 @@
 #
 # Authors: Patrick MacArthur <patrick@patrickmacarthur.net>
 #
-# Copyright (c) 2016, University of New Hampshire
+# Copyright (c) 2016-2018, University of New Hampshire
 #
 # This software is available to you under a choice of one of two
 # licenses.  You may choose to be licensed under the terms of the GNU
@@ -173,6 +173,9 @@ tests_list_test_LDADD = ccan/libccan.la
 TESTS = tests/binheap tests/list_test
 
 dist_doc_DATA = doc/urdma-schema.json
+
+dist_noinst_SCRIPTS = scripts/deploy_test.bash scripts/run_real.sh \
+	scripts/run_real_with_perf.sh
 
 # Disable the uninstall check since the kernel build system doesn't
 # provide a module uninstall target.

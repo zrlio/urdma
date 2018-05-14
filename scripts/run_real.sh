@@ -5,7 +5,7 @@
 # Authors: Patrick MacArthur <patrick@patrickmacarthur.net>
 #
 # Copyright (c) 2016, IBM Corporation
-# Copyright (c) 2016, University of New Hampshire
+# Copyright (c) 2016-2018, University of New Hampshire
 #
 # This software is available to you under a choice of one of two
 # licenses.  You may choose to be licensed under the terms of the GNU
@@ -52,13 +52,24 @@ mkdir -p $(dirname ${LOGFILE})
 exec > >(tee ${LOGFILE}) 2>&1
 
 cd ${TOP_SRCDIR}
-make O=build clean
-make O=build
-sudo make O=build RTE_SDK=${RTE_SDK} RTE_TARGET=${RTE_TARGET} modules_install
-sudo setcap cap_net_admin+ep $(realpath build/src/${TESTAPP}/${RTE_TARGET}/app/${TESTAPP})
+. /usr/share/dpdk/dpdk-sdk-env.sh
+make distclean || true
+./configure --sysconfdir=/etc
+make
+sudo make install
+sudo ldconfig
+sudo depmod -A
+sudo chown root:dpdk /usr/local/bin/urdmad
+sudo chmod 0750 /usr/local/bin/urdmad
+sudo setcap cap_sys_admin,cap_net_admin+ep /usr/local/bin/urdmad
+systemctl --user daemon-reload
 
+systemctl --user stop urdmad || true
 sudo modprobe -r urdma || true
+sudo modprobe rte_kni
 sudo modprobe urdma
 
-export IBV_DRIVERS=$(realpath build/src/liburdma/${RTE_TARGET}/lib/liburdma)
-build/src/${TESTAPP}/${RTE_TARGET}/app/${TESTAPP} "$@"
+systemctl --user start urdmad
+sleep 5
+${TESTAPP} "$@"
+systemctl --user stop urdmad
