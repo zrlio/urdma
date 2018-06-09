@@ -71,6 +71,8 @@ src_liburdma_liburdma_la_SOURCES = \
 	src/liburdma/interface.h \
 	src/liburdma/verbs.c \
 	src/liburdma/verbs.h \
+	src/liburdma/infiniband/kern-abi.h \
+	src/liburdma/infiniband/driver.h \
 	src/util/binheap.c \
 	src/util/binheap.h \
 	src/util/config_file.c \
@@ -79,7 +81,7 @@ src_liburdma_liburdma_la_SOURCES = \
 	src/util/util.c \
 	src/util/util.h
 src_liburdma_liburdma_la_CFLAGS = $(DPDK_CFLAGS)
-src_liburdma_liburdma_la_CPPFLAGS = -Durdma_confdir='"$(sysconfdir)/rdma"' -I$(srcdir)/include -I$(srcdir)/src/util $(LIBNL3_CFLAGS) $(JSON_C_CFLAGS) $(DPDK_CPPFLAGS)
+src_liburdma_liburdma_la_CPPFLAGS = -Durdma_confdir='"$(sysconfdir)/rdma"' -I$(srcdir)/src/liburdma -I$(srcdir)/include -I$(srcdir)/src/util $(LIBNL3_CFLAGS) $(JSON_C_CFLAGS) $(DPDK_CPPFLAGS)
 src_liburdma_liburdma_la_LDFLAGS = -avoid-version \
 	-release @IBV_DEVICE_LIBRARY_EXTENSION@ $(DPDK_LDFLAGS)
 src_liburdma_liburdma_la_LIBADD = $(LIBNL3_LIBS) $(JSON_C_LIBS) $(DPDK_LIBS)

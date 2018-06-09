@@ -48,7 +48,7 @@
 
 #include <ccan/list/list.h>
 
-#include <infiniband/driver.h>
+#include "infiniband/driver.h"
 
 #include <uthash.h>
 
@@ -460,11 +460,10 @@ cq_check_sanity(struct usiw_cq *cq);
 /* These two functions are actually defined in verbs.h but are *not* intended
  * to be public API, so they are declared here in this internal-only header
  * instead. */
-int
-usiw_init_context(struct verbs_device *device, struct ibv_context *context,
-		int cmd_fd);
+struct verbs_context *
+urdma_alloc_context(struct ibv_device *device, int cmd_fd);
 
 void
-usiw_uninit_context(struct verbs_device *device, struct ibv_context *ctx);
+urdma_free_context(struct ibv_context *ctx);
 
 #endif
