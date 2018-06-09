@@ -142,14 +142,7 @@ AC_ARG_ENABLE([werror], [AS_HELP_STRING([--enable-werror],
 	       esac])
 AC_SUBST([EXTRA_CFLAGS])
 
-AC_SEARCH_LIBS([verbs_register_driver_17], [ibverbs], [], [AC_MSG_ERROR([dnl
-urdma requires libibverbs >= 1.2.0])])
-
-IBV_DEVICE_LIBRARY_EXTENSION=rdmav2
-AC_SUBST([IBV_DEVICE_LIBRARY_EXTENSION])
-
-AC_DEFINE([IBVERBS_PABI_VERSION], [17],
-	  [Define to rdma-core private ABI version])
+URDMA_LIB_IBVERBS_PROV([17], [18])
 
 AC_SEARCH_LIBS([rdma_create_id], [rdmacm], [], [AC_MSG_ERROR([dnl
 urdma requires librdmacm])])

@@ -1375,7 +1375,12 @@ urdma_alloc_context(struct ibv_device *ibdev, int cmd_fd)
 	struct usiw_device *dev;
 	int ret;
 
+#if HAVE_VERBS_INIT_AND_ALLOC_CONTEXT == 5
+	ctx = verbs_init_and_alloc_context(ibdev, cmd_fd, ctx, vcontext,
+					   RDMA_DRIVER_UNKNOWN);
+#else
 	ctx = verbs_init_and_alloc_context(ibdev, cmd_fd, ctx, vcontext);
+#endif
 
 	/* ibv_open_device requires a valid ibv_device, which can only be
 	 * obtained by calling ibv_get_device_list, which initializes every
