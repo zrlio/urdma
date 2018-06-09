@@ -156,14 +156,14 @@ LIBS=${_dpdk_old_LIBS}
 # Like AC_CHECK_FUNC, but add DPDK_LIBS, DPDK_CFLAGS, DPDK_CPPFLAGS, and
 # DPDK_LDFLAGS to their respective variables first and restore them
 # afterward.
-AC_DEFUN([DPDK_CHECK_FUNC], [
+AC_DEFUN([DPDK_CHECK_FUNCS], [
 _WITH_DPDK_FLAGS([
 m4_case([$#],
-	[1], [AC_CHECK_FUNC([$1])],
-	[2], [AC_CHECK_FUNC([$1], [$2])],
-	[3], [AC_CHECK_FUNC([$1], [$2], [$3])],
-	[m4_fatal([DPDK_CHECK_FUNC requires 1-3 arguments])])
-])]) # DPDK_CHECK_FUNC
+	[1], [AC_CHECK_FUNCS([$1])],
+	[2], [AC_CHECK_FUNCS([$1], [$2])],
+	[3], [AC_CHECK_FUNCS([$1], [$2], [$3])],
+	[m4_fatal([DPDK_CHECK_FUNCS requires 1-3 arguments])])
+])]) # DPDK_CHECK_FUNCS
 
 # _DPDK_FUNC_RING_BURST
 # ---------------------
@@ -240,3 +240,38 @@ elif test "x$dpdk_cv_func_which_rte_ring_enqueue_burst" = "x3"; then
 		  [Define to 1 if rte_ring_enqueue_burst takes 3 arguments])
 fi
 ]) # DPDK_FUNC_RTE_RING_ENQUEUE_BURST
+
+# DPDK_CHECK_HEADERS(HEADER-FILE, [ACTION-IF-FOUND], [ACTION-IF-NOT-FOUND], [INCLUDES])
+# -------------------------------------------------------------------------------------
+# Like AC_CHECK_HEADERS, but add DPDK_LIBS, DPDK_CFLAGS, DPDK_CPPFLAGS, and
+# DPDK_LDFLAGS to their respective variables first and restore them
+# afterward.
+AC_DEFUN([DPDK_CHECK_HEADERS], [
+_WITH_DPDK_FLAGS([
+m4_case([$#],
+	[1], [AC_CHECK_HEADERS([$1])],
+	[2], [AC_CHECK_HEADERS([$1], [$2])],
+	[3], [AC_CHECK_HEADERS([$1], [$2], [$3])],
+	[4], [AC_CHECK_HEADERS([$1], [$2], [$3], [$4])],
+	[m4_fatal([DPDK_CHECK_HEADERS requires 1-4 arguments])])
+])]) # DPDK_CHECK_HEADERS
+
+# DPDK_CHECK_SIZEOF_PORT_ID()
+# -------------------------------------------------------------------------------------
+# Set HAVE_UINT16_T_PORT_ID if port_id arguments are uint16_t instead of uint8_t.
+AC_DEFUN([DPDK_CHECK_SIZEOF_PORT_ID], [
+_WITH_DPDK_FLAGS([
+CFLAGS="${CFLAGS} -Werror"
+AC_CACHE_CHECK([if port_id is uint16_t],
+	       [urdma_cv_decltype_port_id_uint16_t],
+	       [AC_LINK_IFELSE([AC_LANG_PROGRAM(
+			[[#include <rte_ethdev.h>
+			  #include <stdint.h>]],
+			[[int main(void) { uint16_t x; rte_eth_dev_attach(NULL, &x); return 0; }]])],
+			[urdma_cv_decltype_port_id_uint16_t=yes],
+			[urdma_cv_decltype_port_id_uint16_t=no])])
+if test "x$urdma_cv_decltype_port_id_uint16_t" = xyes; then
+	AC_DEFINE([HAVE_UINT16_T_PORT_ID], [1],
+		  [Define to 1 if DPDK port_id arguments are uint16_t])
+fi
+])]) # DPDK_CHECK_SIZEOF_PORT_ID

@@ -198,8 +198,10 @@ AC_CHECK_DECLS([SOCK_CLOEXEC], [], [], [AC_INCLUDES_DEFAULT()]
 
 URDMA_LIB_DPDK([16.11])
 
-DPDK_CHECK_FUNC([rte_kni_init], [],
+DPDK_CHECK_HEADERS([rte_bus_pci.h])
+DPDK_CHECK_FUNCS([rte_kni_init], [],
 	      [AC_MSG_ERROR([urdma requires that DPDK be built with KNI support])])
+DPDK_CHECK_FUNCS([rte_eth_dev_get_port_by_name rte_eth_dev_get_name_by_port])
 DPDK_FUNC_RTE_RING_DEQUEUE_BURST
 if test "x$dpdk_cv_func_which_rte_ring_dequeue_burst" = "xno"; then
 	AC_MSG_ERROR([urdma requires rte_ring_dequeue_burst; check your DPDK installation])
@@ -208,6 +210,7 @@ DPDK_FUNC_RTE_RING_ENQUEUE_BURST
 if test "x$dpdk_cv_func_which_rte_ring_enqueue_burst" = "xno"; then
 	AC_MSG_ERROR([urdma requires rte_ring_enqueue_burst; check your DPDK installation])
 fi
+DPDK_CHECK_SIZEOF_PORT_ID
 
 AC_CONFIG_FILES([Makefile src/kmod/Makefile])
 AC_OUTPUT
