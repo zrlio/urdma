@@ -40,7 +40,9 @@
 #include <infiniband/kern-abi.h>
 #include <infiniband/cmd_ioctl.h>
 #include <ccan/list.h>
+#ifdef HAVE_CONFIG_H
 #include <config.h>
+#endif
 #include <stdbool.h>
 #include <rdma/rdma_user_ioctl_cmds.h>
 #include <infiniband/cmd_ioctl.h>

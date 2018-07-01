@@ -3,7 +3,9 @@
 #define CCAN_CONTAINER_OF_H
 #include <stddef.h>
 
+#ifdef HAVE_CONFIG_H
 #include "config.h"
+#endif
 #include <ccan/check_type/check_type.h>
 
 /**

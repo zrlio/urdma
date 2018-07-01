@@ -39,7 +39,9 @@
 #include <infiniband/verbs.h>
 #include <infiniband/kern-abi.h>
 #include <ccan/list/list.h>
+#ifdef HAVE_CONFIG_H
 #include <config.h>
+#endif
 #include <stdbool.h>
 
 struct verbs_device;
