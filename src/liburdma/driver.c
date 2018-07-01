@@ -195,11 +195,6 @@ usiw_driver_init(int portid)
 		errno = ENOMEM;
 		return NULL;
 	}
-	dev->vdev.sz = sizeof(struct verbs_device);
-	dev->vdev.size_of_context = sizeof(struct usiw_context)
-						- sizeof(struct verbs_context);
-	dev->vdev.init_context = usiw_init_context;
-	dev->vdev.uninit_context = usiw_uninit_context;
 
 	dev->portid = portid;
 	rte_eth_macaddr_get(dev->portid, &dev->ether_addr);
@@ -627,41 +622,19 @@ do_init_driver(void)
 
 
 static struct verbs_device *
-usiw_verbs_driver_init(const char *uverbs_sys_path, int abi_version)
+urdma_device_alloc(struct verbs_sysfs_dev *sysfs_dev)
 {
 	static pthread_once_t driver_init_once = PTHREAD_ONCE_INIT;
-	static const char siw_node_desc[] = URDMA_NODE_DESC;
 	struct ibv_device *ibdev;
-	char siw_devpath[IBV_SYSFS_PATH_MAX];
-	char node_desc[24];
 	char value[16];
 	int portid;
 
-	if (ibv_read_sysfs_file(uverbs_sys_path, "ibdev",
+	if (ibv_read_sysfs_file(sysfs_dev->sysfs_path, "ibdev",
 				value, sizeof value) < 0)
 		return NULL;
 
 	if (sscanf(value, URDMA_DEV_PREFIX "%d", &portid) < 1)
 		return NULL;
-
-	memset(siw_devpath, 0, IBV_SYSFS_PATH_MAX);
-
-	snprintf(siw_devpath, IBV_SYSFS_PATH_MAX, "%s/class/infiniband/%s",
-		 ibv_get_sysfs_path(), value);
-
-	if (ibv_read_sysfs_file(siw_devpath, "node_desc",
-				node_desc, sizeof node_desc) < 0)
-		return NULL;
-
-	/* Verify node description to ensure that we are talking to the right
-	 * kernel driver */
-	if (strncmp(siw_node_desc, node_desc, strlen(siw_node_desc)))
-		return NULL;
-
-	if (abi_version < URDMA_ABI_VERSION_MIN
-			|| abi_version > URDMA_ABI_VERSION_MAX) {
-		return NULL;
-	}
 
 	pthread_once(&driver_init_once, &do_init_driver);
 	if (!driver) {
@@ -673,19 +646,28 @@ usiw_verbs_driver_init(const char *uverbs_sys_path, int abi_version)
 	return ibdev ? verbs_get_device(ibdev) : NULL;
 } /* usiw_verbs_driver_init */
 
-
-static __attribute__((constructor)) void
-usiw_register_driver(void)
+static void urdma_device_uninit(struct verbs_device *verbs_device)
 {
-	/* We cannot access /proc/self/pagemap as non-root if we are not
-	 * dumpable
-	 *
-	 * We do require CAP_NET_ADMIN but there should be minimal risk from
-	 * making ourselves dumpable, compared to requiring root priviliges to
-	 * run */
-	if (prctl(PR_SET_DUMPABLE, 1, 0, 0, 0) < 0) {
-		perror("WARNING: set dumpable flag failed; DPDK may not initialize properly");
-	}
+	struct usiw_device *dev = container_of(verbs_device,
+		struct usiw_device, vdev);
+	free(dev);
+}
 
-	verbs_register_driver("urdma", &usiw_verbs_driver_init);
-} /* usiw_register_driver */
+
+static const struct verbs_match_ent hca_table[] = {
+	/* FIXME: urdma needs a more reliable way to detect the urdma device */
+	VERBS_NAME_MATCH("urdma", NULL),
+};
+
+
+struct verbs_device_ops urdma_device_ops = {
+	.name = "urdma",
+	.match_min_abi_version = URDMA_ABI_VERSION_MIN,
+	.match_max_abi_version = URDMA_ABI_VERSION_MAX,
+	.match_table = hca_table,
+	.alloc_device = urdma_device_alloc,
+	.uninit_device = urdma_device_uninit,
+	.alloc_context = urdma_alloc_context,
+	.free_context = urdma_free_context,
+};
+PROVIDER_DRIVER(urdma_device_ops);

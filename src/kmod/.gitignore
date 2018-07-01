@@ -1,7 +1,9 @@
+.cache.mk
 *.cmd
 *.ko
 *.mod.h
 *.mod.c
+*.o.ur-safe
 proto_trp.h
 urdma_kabi.h
 Module.symvers

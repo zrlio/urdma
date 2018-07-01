@@ -48,7 +48,7 @@
 #include <string.h>
 
 #include <ccan/list/list.h>
-#include <infiniband/driver.h>
+#include "infiniband/driver.h"
 
 #include <rte_config.h>
 #include <rte_ethdev.h>
@@ -409,7 +409,7 @@ usiw_alloc_pd(struct ibv_context *context)
 {
 	static const int default_capacity = 1023;
 	struct ibv_alloc_pd cmd;
-	struct ibv_alloc_pd_resp resp;
+	struct ib_uverbs_alloc_pd_resp resp;
 	struct usiw_mr_table *tbl;
 	int ret;
 
@@ -507,7 +507,7 @@ usiw_create_cq(struct ibv_context *context, int size,
 {
 	struct ibv_create_cq cmd;
 	struct {
-		struct ibv_create_cq_resp ibv;
+		struct ib_uverbs_create_cq_resp ibv;
 		struct urdma_uresp_create_cq priv;
 	} resp;
 	struct usiw_cq *cq;
@@ -786,7 +786,7 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 		struct urdma_udata_create_qp priv;
 	} cmd;
 	struct {
-		struct ibv_create_qp_resp ibv;
+		struct ib_uverbs_create_qp_resp ibv;
 		struct urdma_uresp_create_qp priv;
 	} resp;
 	struct usiw_context *ctx;
@@ -1268,105 +1268,12 @@ errout:
 	return ret;
 } /* usiw_post_recv */
 
-static struct ibv_ah *
-usiw_create_ah(__attribute__((unused)) struct ibv_pd *pd,
-		__attribute__((unused)) struct ibv_ah_attr *attr)
-{
-	errno = ENOSYS;
-	return NULL;
-} /* usiw_create_ah */
-
-
-static int
-usiw_destroy_ah(__attribute__((unused)) struct ibv_ah *ah)
-{
-	return ENOSYS;
-} /* usiw_destroy_ah */
-
-
-static int
-usiw_attach_mcast(__attribute__((unused)) struct ibv_qp *ib_qp,
-		__attribute__((unused)) const union ibv_gid *gid,
-		__attribute__((unused)) uint16_t lid)
-{
-	return ENOSYS;
-} /* usiw_attach_mcast */
-
-
-static int
-usiw_detach_mcast(__attribute__((unused)) struct ibv_qp *ib_qp,
-		__attribute__((unused)) const union ibv_gid *gid,
-		__attribute__((unused)) uint16_t lid)
-{
-	return ENOSYS;
-} /* usiw_detach_mcast */
-
-
-static struct ibv_qp *
-usiw_open_qp(__attribute__((unused)) struct ibv_context *context,
-		__attribute__((unused)) struct ibv_qp_open_attr *attr)
-{
-	errno = ENOSYS;
-	return NULL;
-} /* usiw_open_qp */
-
-
-static struct ibv_qp *
-usiw_create_qp_ex(struct ibv_context *context,
-		struct ibv_qp_init_attr_ex *qp_init_attr_ex)
-{
-	if (!(qp_init_attr_ex->comp_mask & IBV_QP_INIT_ATTR_PD)
-			|| qp_init_attr_ex->pd->context != context
-			|| ((qp_init_attr_ex->comp_mask & IBV_QP_INIT_ATTR_XRCD)
-				&& qp_init_attr_ex->xrcd != NULL)) {
-		errno = EINVAL;
-		return NULL;
-	}
-
-	return usiw_create_qp(qp_init_attr_ex->pd,
-			(struct ibv_qp_init_attr *)qp_init_attr_ex);
-} /* usiw_create_qp_ex */
-
-
-static struct ibv_xrcd *
-usiw_open_xrcd(__attribute__((unused)) struct ibv_context *context,
-		__attribute__((unused))
-		struct ibv_xrcd_init_attr *xrcd_init_attr)
-{
-	errno = ENOSYS;
-	return NULL;
-} /* usiw_open_xrcd */
-
-
-static int
-usiw_close_xrcd(__attribute__((unused)) struct ibv_xrcd *xrcd)
-{
-	return -ENOSYS;
-} /* usiw_close_xrcd */
-
-
-static struct ibv_flow *
-usiw_create_flow(__attribute__((unused)) struct ibv_qp *ib_qp,
-		__attribute__((unused)) struct ibv_flow_attr *flow_attr)
-{
-	errno = ENOSYS;
-	return NULL;
-} /* usiw_create_flow */
-
-static int
-usiw_destroy_flow(__attribute__((unused)) struct ibv_flow *flow)
-{
-	return ENOSYS;
-} /* usiw_destroy_flow */
-
-
-static struct ibv_context_ops usiw_ops = {
+static struct verbs_context_ops usiw_ops = {
 	.query_device = usiw_query_device,
 	.query_port = usiw_query_port,
 	.alloc_pd = usiw_alloc_pd,
 	.dealloc_pd = usiw_dealloc_pd,
 	.reg_mr = usiw_reg_mr,
-	.rereg_mr = NULL,
 	.dereg_mr = usiw_dereg_mr,
 	.alloc_mw = usiw_alloc_mw,
 	.bind_mw = usiw_bind_mw,
@@ -1374,7 +1281,6 @@ static struct ibv_context_ops usiw_ops = {
 	.create_cq = usiw_create_cq,
 	.poll_cq = usiw_poll_cq,
 	.req_notify_cq = usiw_req_notify_cq,
-	.cq_event = NULL,
 	.resize_cq = usiw_resize_cq,
 	.destroy_cq = usiw_destroy_cq,
 	.create_srq = usiw_create_srq,
@@ -1388,11 +1294,6 @@ static struct ibv_context_ops usiw_ops = {
 	.destroy_qp = usiw_destroy_qp,
 	.post_send = usiw_post_send,
 	.post_recv = usiw_post_recv,
-	.create_ah = usiw_create_ah,
-	.destroy_ah = usiw_destroy_ah,
-	.attach_mcast = usiw_attach_mcast,
-	.detach_mcast = usiw_detach_mcast,
-	.async_event = NULL,
 };
 
 static unsigned int
@@ -1461,19 +1362,25 @@ urdma_free_qp_stats_ex(struct urdma_qp_stats_ex *stats)
 	free(stats);
 } /* urdma_free_qp_stats_ex */
 
-int
-usiw_init_context(struct verbs_device *device, struct ibv_context *context,
-		int cmd_fd)
+struct verbs_context *
+urdma_alloc_context(struct ibv_device *ibdev, int cmd_fd)
 {
 	static pthread_once_t progress_thread_once = PTHREAD_ONCE_INIT;
 	struct ibv_get_context cmd;
 	struct {
-		struct ibv_get_context_resp ibv;
+		struct ib_uverbs_get_context_resp ibv;
 		struct urdma_uresp_alloc_ctx priv;
 	} resp;
 	struct usiw_context *ctx;
 	struct usiw_device *dev;
 	int ret;
+
+#if HAVE_VERBS_INIT_AND_ALLOC_CONTEXT == 5
+	ctx = verbs_init_and_alloc_context(ibdev, cmd_fd, ctx, vcontext,
+					   RDMA_DRIVER_UNKNOWN);
+#else
+	ctx = verbs_init_and_alloc_context(ibdev, cmd_fd, ctx, vcontext);
+#endif
 
 	/* ibv_open_device requires a valid ibv_device, which can only be
 	 * obtained by calling ibv_get_device_list, which initializes every
@@ -1482,8 +1389,7 @@ usiw_init_context(struct verbs_device *device, struct ibv_context *context,
 	 * thread. */
 	pthread_once(&progress_thread_once, start_progress_thread);
 
-	context->cmd_fd = cmd_fd;
-	if ((ret = ibv_cmd_get_context(context, &cmd, sizeof(cmd),
+	if ((ret = ibv_cmd_get_context(&ctx->vcontext, &cmd, sizeof(cmd),
 					&resp.ibv, sizeof(resp)) != 0)) {
 		RTE_LOG(DEBUG, USER1, "ibv_cmd_get_context failed: %s\n",
 				strerror(ret));
@@ -1492,21 +1398,14 @@ usiw_init_context(struct verbs_device *device, struct ibv_context *context,
 		goto out;
 	}
 
-	ctx = usiw_get_context(context);
 	ctx->event_fd = resp.priv.event_fd;
 	memcpy(&ctx->vcontext.context.ops, &usiw_ops,
 			sizeof(ctx->vcontext.context.ops));
 	ctx->vcontext.context.num_comp_vectors = usiw_num_completion_vectors();
-	verbs_set_ctx_op(&ctx->vcontext, ibv_destroy_flow, &usiw_destroy_flow);
-	verbs_set_ctx_op(&ctx->vcontext, ibv_create_flow, &usiw_create_flow);
-	verbs_set_ctx_op(&ctx->vcontext, open_qp, &usiw_open_qp);
-	verbs_set_ctx_op(&ctx->vcontext, create_qp_ex, &usiw_create_qp_ex);
-	verbs_set_ctx_op(&ctx->vcontext, get_srq_num, &usiw_get_srq_num);
-	verbs_set_ctx_op(&ctx->vcontext, create_srq_ex, &usiw_create_srq_ex);
-	verbs_set_ctx_op(&ctx->vcontext, open_xrcd, &usiw_open_xrcd);
-	verbs_set_ctx_op(&ctx->vcontext, close_xrcd, &usiw_close_xrcd);
+	verbs_set_ops(&ctx->vcontext, &usiw_ops);
 
-	dev = container_of(device, struct usiw_device, vdev);
+	dev = container_of(verbs_get_device(ibdev),
+			   struct usiw_device, vdev);
 	ctx->dev = dev;
 
 	atomic_init(&ctx->qp_init_count, 0);
@@ -1535,18 +1434,18 @@ usiw_init_context(struct verbs_device *device, struct ibv_context *context,
 			goto free_ctx;
 		}
 	}
-	return 0;
+	return &ctx->vcontext;
 
 free_ctx:
 	free(ctx->h);
 out:
-	return ret;
-} /* usiw_init_context */
+	return NULL;
+} /* urdma_alloc_context */
 
 
 void
-usiw_uninit_context(struct verbs_device *device, struct ibv_context *ib_ctx)
+urdma_free_context(struct ibv_context *ib_ctx)
 {
 	struct usiw_context *ctx = usiw_get_context(ib_ctx);
 	atomic_store(&ctx->h->ctxp, 0);
-} /* usiw_uninit_context */
+} /* urdma_free_context */

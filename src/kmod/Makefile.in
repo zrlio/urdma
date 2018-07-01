@@ -90,11 +90,13 @@ installcheck:
 .PHONY: mostlyclean
 mostlyclean:
 	make -C @KERNELDIR@ M=`pwd` clean
+	$(RM) *.o.ur-safe
 
 .PHONY: clean
 clean: mostlyclean
 	for i in $(SOURCES); do if [ -h $${i} ]; then $(RM) $${i}; fi; done
 	$(RM) urdma_kabi.h
+	$(RM) .cache.mk
 
 .PHONY: distclean
 distclean: clean

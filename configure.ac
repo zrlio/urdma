@@ -142,24 +142,7 @@ AC_ARG_ENABLE([werror], [AS_HELP_STRING([--enable-werror],
 	       esac])
 AC_SUBST([EXTRA_CFLAGS])
 
-AC_SEARCH_LIBS([verbs_register_driver], [ibverbs], [], [AC_MSG_ERROR([dnl
-urdma requires libibverbs >= 1.2.0])])
-
-AC_MSG_CHECKING([for ibverbs driver library extension])
-dummy=if$$
-cat <<IBV_VERSION > $dummy.c
-#include <infiniband/driver.h>
-IBV_DEVICE_LIBRARY_EXTENSION
-IBV_VERSION
-IBV_DEVICE_LIBRARY_EXTENSION=`$CC $CPPFLAGS -E $dummy.c 2> /dev/null | tail -1`
-rm -f $dummy.c
-if test $IBV_DEVICE_LIBRARY_EXTENSION = IBV_DEVICE_LIBRARY_EXTENSION; then
-	AC_MSG_RESULT([not defined])
-	AC_MSG_ERROR([libibverbs does not define IBV_DEVICE_LIBRARY_EXTENSION])
-else
-	AC_MSG_RESULT([$IBV_DEVICE_LIBRARY_EXTENSION])
-fi
-AC_SUBST([IBV_DEVICE_LIBRARY_EXTENSION])
+URDMA_LIB_IBVERBS_PROV([17], [18])
 
 AC_SEARCH_LIBS([rdma_create_id], [rdmacm], [], [AC_MSG_ERROR([dnl
 urdma requires librdmacm])])
