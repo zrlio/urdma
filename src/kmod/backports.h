@@ -116,4 +116,8 @@ typedef unsigned long dma_attrs_t;
 #define HAVE_DMA_MAP_OPS_SET_DMA_MASK 1
 #endif
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 16, 0)
+#define GETNAME_RETURN_SIZE 1
+#endif
+
 #endif
