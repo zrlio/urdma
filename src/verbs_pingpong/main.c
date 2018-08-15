@@ -6,7 +6,7 @@
  * Authors: Patrick MacArthur <pam@zurich.ibm.com>
  *
  * Copyright (c) 2016, IBM Corporation
- * Copyright (c) 2016, University of New Hampshire
+ * Copyright (c) 2016-2018, University of New Hampshire
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -51,6 +51,7 @@
 #include <getopt.h>
 #include <libgen.h>
 #include <inttypes.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -58,18 +59,7 @@
 #include <unistd.h>
 
 #include <rte_config.h>
-#include <rte_arp.h>
 #include <rte_cycles.h>
-#include <rte_eal.h>
-#include <rte_errno.h>
-#include <rte_eth_ctrl.h>
-#include <rte_ethdev.h>
-#include <rte_interrupts.h>
-#include <rte_ip.h>
-#include <rte_lcore.h>
-#include <rte_malloc.h>
-#include <rte_mbuf.h>
-#include <rte_spinlock.h>
 
 #include <infiniband/verbs.h>
 #include <rdma/rdma_cma.h>
@@ -86,14 +76,14 @@ static struct app_options {
 	unsigned long long packet_count;
 	unsigned long packet_size;
 	unsigned long burst_size;
-	unsigned int lcore_count;
+	unsigned int thread_count;
 	bool large_first_burst;
 	FILE *output_file;
 } options = {
 	.packet_count = 1000000,
 	.packet_size = ETHER_MIN_LEN,
 	.burst_size = 8,
-	.lcore_count = 1,
+	.thread_count = 2,
 	.output_file = NULL,
 	.large_first_burst = 1,
 };
@@ -105,7 +95,7 @@ struct stats {
 		 * outgoing packet and then calculating the difference from the
 		 * current cycle counter when the response is received.  The
 		 * final value is the MEAN across all threads (note that the
-		 * master lcore will receive the sum and itself divide by the
+		 * master thread will receive the sum and itself divide by the
 		 * number of workers). */
 	uint64_t start_time;
 		/**< Per-thread start cycle counter.  The final value is the
@@ -126,7 +116,7 @@ struct stats {
 		/**< Messages actually sent. The final value is the SUM across
 		 * all threads. */
 	uintmax_t *recv_count_histo;
-		/**< The number of times that rte_eth_recv_burst returned each
+		/**< The number of times that ibv_poll_cq returned each
 		 * number of messages. The final value for each bucket is the
 		 * SUM across all threads. */
 	unsigned long first_burst_size;
@@ -153,7 +143,9 @@ struct pending_transfer {
 		 * transfer. */
 };
 
-struct lcore_param {
+struct thread_param {
+	int id;
+		/**< Identifier of this thread, starting with 1. */
 	struct rdma_cm_id *cm_id;
 		/**< Reference to the cm_id used to create this connection. */
 	struct ibv_qp *qp;
@@ -165,8 +157,8 @@ struct lcore_param {
 		/**< True iff we are a client. */
 	struct ibv_cq *cq;
 		/**< Completion queue associated with above port. */
-	rte_spinlock_t *lock;
-		/**< Protects final_stats.  Locked only after each lcore has
+	pthread_mutex_t *lock;
+		/**< Protects final_stats.  Locked only after each thread has
 		 * completed its main loop. */
 	struct pending_transfer *pending;
 		/**< Array of pending transfers, with size
@@ -177,19 +169,26 @@ static pthread_mutex_t done_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t done_cond = PTHREAD_COND_INITIALIZER;
 static int remaining_count;
 
+static _Noreturn void pr_exit(int code, const char *format, ...)
+{
+	va_list args;
+	va_start(args, format);
+	vfprintf(stderr, format, args);
+	va_end(args);
+	exit(code);
+}
+
 /** UDP port is in host byte order. */
 static void
-qp_init(struct ibv_context *ibctx, int socket_id,
-		struct ibv_qp_init_attr *qp_init_attr)
+qp_init(struct ibv_context *ibctx, struct ibv_qp_init_attr *qp_init_attr)
 {
 	struct ibv_cq *cq;
 
 	assert(qp_init_attr != NULL);
 
-	cq = ibv_create_cq(ibctx, 2 * options.burst_size, NULL, NULL,
-			socket_id);
+	cq = ibv_create_cq(ibctx, 2 * options.burst_size, NULL, NULL, 0);
 	if (!cq) {
-		rte_exit(EXIT_FAILURE, "Create CQ with size %lu: %s\n",
+		pr_exit(EXIT_FAILURE, "Create CQ with size %lu: %s\n",
 				2 * options.burst_size, strerror(errno));
 	}
 
@@ -234,8 +233,8 @@ print_stats(FILE *fptr, const struct stats *stats)
 	ret = fprintf(fptr, "  \"burst_size\": %lu,\n", options.burst_size);
 	if (ret < 0)
 		return ret;
-	ret = fprintf(fptr, "  \"slave_lcore_count\": %u,\n",
-			options.lcore_count - 1);
+	ret = fprintf(fptr, "  \"slave_thread_count\": %u,\n",
+			options.thread_count - 1);
 	if (ret < 0)
 		return ret;
 	ret = fprintf(fptr, "  \"packet_count\": %llu,\n",
@@ -304,7 +303,7 @@ print_stats(FILE *fptr, const struct stats *stats)
 } /* print_stats */
 
 static int
-do_master_lcore_work(struct stats *stats)
+do_master_thread_work(struct stats *stats)
 {
 	unsigned int x;
 
@@ -313,23 +312,20 @@ do_master_lcore_work(struct stats *stats)
 		pthread_cond_wait(&done_cond, &done_mutex);
 	}
 	pthread_mutex_unlock(&done_mutex);
-	for (x = 0; x < options.lcore_count - 1; ++x) {
-		rte_eal_wait_lcore(x + 2);
-	}
 
 	/* Print the stats. */
-	stats->latency /= rte_lcore_count();
+	stats->latency /= options.thread_count;
 	if (print_stats(options.output_file
 					? options.output_file : stdout,
 					stats) != 0) {
-		rte_exit(EXIT_FAILURE, "Error dumping statistics: %s\n",
+		pr_exit(EXIT_FAILURE, "Error dumping statistics: %s\n",
 				strerror(errno));
 	}
 
 	/* Close the stats output file */
 	if (options.output_file) {
 		if (fclose(options.output_file) == EOF) {
-			rte_exit(EXIT_FAILURE, "Error detected closing JSON stream: %s\n",
+			pr_exit(EXIT_FAILURE, "Error detected closing JSON stream: %s\n",
 					strerror(errno));
 		}
 	}
@@ -358,7 +354,7 @@ wait_cq_bulk(struct stats *stats, struct ibv_cq *cq, struct ibv_wc *wc,
 } /* wait_recv_bulk */
 
 static int
-post_recv(struct lcore_param *arg, struct ibv_recv_wr *wr)
+post_recv(struct thread_param *arg, struct ibv_recv_wr *wr)
 {
 	struct pending_transfer *pending;
 	struct ibv_recv_wr *bad_wr;
@@ -375,7 +371,7 @@ post_recv(struct lcore_param *arg, struct ibv_recv_wr *wr)
 } /* post_recv */
 
 static int
-post_send(struct lcore_param *arg, struct ibv_send_wr *wr)
+post_send(struct thread_param *arg, struct ibv_send_wr *wr)
 {
 	struct pending_transfer *pending;
 	struct ibv_send_wr *bad_wr;
@@ -392,7 +388,7 @@ post_send(struct lcore_param *arg, struct ibv_send_wr *wr)
 } /* post_send */
 
 static int
-handle_burst(struct lcore_param *arg, struct ibv_wc *wc,
+handle_burst(struct thread_param *arg, struct ibv_wc *wc,
 		unsigned int wc_count,
 		unsigned int timestamp_offset,
 		struct stats *stats,
@@ -455,7 +451,7 @@ handle_burst(struct lcore_param *arg, struct ibv_wc *wc,
 } /* handle_burst */
 
 static int
-handle_last_server_burst(struct lcore_param *arg, struct ibv_wc *wc,
+handle_last_server_burst(struct thread_param *arg, struct ibv_wc *wc,
 		unsigned int wc_count,
 		int *remaining_send,
 		int *pending_active)
@@ -565,12 +561,12 @@ pending_transfer_array_new(void)
 		return NULL;
 	}
 
-	sendbuf = rte_calloc("sendbuf", options.burst_size, options.packet_size, 64);
+	sendbuf = aligned_alloc(64, options.burst_size * options.packet_size);
 	if (!sendbuf) {
 		return NULL;
 	}
 
-	recvbuf = rte_calloc("recvbuf", options.burst_size, options.packet_size, 64);
+	recvbuf = aligned_alloc(64, options.burst_size * options.packet_size);
 	if (!recvbuf) {
 		return NULL;
 	}
@@ -590,15 +586,15 @@ pending_transfer_array_new(void)
 static void
 pending_transfer_array_free(struct pending_transfer *pending)
 {
-	rte_free((void *)(uintptr_t)pending[0].send_sge.addr);
-	rte_free((void *)(uintptr_t)pending[0].recv_sge.addr);
+	free((void *)(uintptr_t)pending[0].send_sge.addr);
+	free((void *)(uintptr_t)pending[0].recv_sge.addr);
 	free(pending);
 } /* pending_transfer_array_free */
 
-static int
-do_lcore_work(void *rawarg)
+static void *
+do_thread_work(void *rawarg)
 {
-	struct lcore_param *arg;
+	struct thread_param *arg;
 	struct ibv_wc *wc;
 	struct ibv_qp *qp;
 	struct stats stats;
@@ -612,14 +608,13 @@ do_lcore_work(void *rawarg)
 	int remaining_send, remaining_recv, pending_active;
 	int ret;
 
-	assert(rte_lcore_id() != LCORE_ID_ANY);
-	arg = (struct lcore_param *)rawarg
-		+ (rte_lcore_index(rte_lcore_id()) - 2);
+	arg = (struct thread_param *)rawarg;
+	assert(arg->id >= 1);
 	qp = arg->qp;
 
 	wc = calloc(2 * options.burst_size, sizeof(*wc));
 	if (!wc) {
-		return EXIT_FAILURE;
+		pthread_exit(NULL);
 	}
 
 	pending = arg->pending;
@@ -638,21 +633,20 @@ do_lcore_work(void *rawarg)
 		for (x = 0; x < options.burst_size; ++x) {
 			ret = post_send(arg, &pending[x].send_wr);
 			if (ret != 0) {
-				return EXIT_FAILURE;
+				pthread_exit(NULL);
 			}
 			pending[x].count++;
 		}
 		remaining_send -= options.burst_size;
 
-		fprintf(stderr, "lcore %u sent first burst\n", rte_lcore_id());
+		fprintf(stderr, "thread %u sent first burst\n", arg->id);
 	} else {
 		timestamp_offset = sizeof(uint64_t);
-		fprintf(stderr, "lcore %u awaiting first burst\n",
-				rte_lcore_id());
+		fprintf(stderr, "thread %u awaiting first burst\n", arg->id);
 		wc_count = wait_cq_bulk(&stats, arg->cq, wc,
 				2 * options.burst_size, NULL);
-		fprintf(stderr, "lcore %u received first burst with %u messages\n",
-				rte_lcore_id(), wc_count);
+		fprintf(stderr, "thread %u received first burst with %u messages\n",
+				arg->id, wc_count);
 		start_time = rte_get_timer_cycles();
 		handle_burst(arg, wc, wc_count, timestamp_offset, &stats,
 				&roundtrip_count, &remaining_send,
@@ -709,7 +703,7 @@ do_lcore_work(void *rawarg)
 	stats.latency = (roundtrip_count == 0) ? 0.0
 		: (stats.latency / (2 * roundtrip_count));
 
-	rte_spinlock_lock(arg->lock);
+	pthread_mutex_lock(arg->lock);
 	arg->final_stats->latency += stats.latency;
 	if (start_time < arg->final_stats->start_time) {
 		arg->final_stats->start_time = start_time;
@@ -731,7 +725,7 @@ do_lcore_work(void *rawarg)
 	if (stats.first_burst_size > arg->final_stats->first_burst_size) {
 		arg->final_stats->first_burst_size = stats.first_burst_size;
 	}
-	rte_spinlock_unlock(arg->lock);
+	pthread_mutex_unlock(arg->lock);
 
 	free(stats.recv_count_histo);
 	pending_transfer_array_free(pending);
@@ -750,7 +744,7 @@ do_lcore_work(void *rawarg)
 		pthread_cond_signal(&done_cond);
 	}
 	pthread_mutex_unlock(&done_mutex);
-	return EXIT_SUCCESS;
+	pthread_exit(NULL);
 }
 
 static struct option longopts[] = {
@@ -762,6 +756,8 @@ static struct option longopts[] = {
 		.flag = NULL, .val = 'b' },
 	{ .name = "output", .has_arg = required_argument,
 		.flag = NULL, .val = 'o' },
+	{ .name = "thread-count", .has_arg = required_argument,
+		.flag = NULL, .val = 't' },
 	{ .name = "disable-large-first-burst", .has_arg = no_argument,
 		.flag = NULL, .val = 'F' },
 	{ .name = "help", .has_arg = no_argument, .flag = NULL, .val = 'h' },
@@ -771,7 +767,7 @@ static struct option longopts[] = {
 static void
 usage(int status)
 {
-	rte_exit(status, "Usage: verbs_pingpong [<eal_options>] -- [<options>] [<server_ip> [<server_port>]]\n");
+	pr_exit(status, "Usage: verbs_pingpong [<eal_options>] -- [<options>] [<server_ip> [<server_port>]]\n");
 } /* usage */
 
 /** Intended to be equivalent to the shell command
@@ -823,6 +819,7 @@ parse_options(int argc, char *argv[])
 					"b:" /* --burst-size */
 					"F:" /* --disable-large-first-burst */
 					"o:" /* --output */
+					"t:" /* --thread-count */
 					"h" /* --help */
 					, longopts, NULL)) != -1) {
 		switch (ch) {
@@ -830,7 +827,7 @@ parse_options(int argc, char *argv[])
 			errno = 0;
 			options.packet_count = strtoull(optarg, &endch, 0);
 			if (errno != 0 || *endch != '\0' || !options.packet_count) {
-				rte_exit(EXIT_FAILURE,
+				pr_exit(EXIT_FAILURE,
 						"Invalid packet count \"%s\"\n",
 						optarg);
 			}
@@ -841,7 +838,7 @@ parse_options(int argc, char *argv[])
 			if (errno != 0 || *endch != '\0'
 					|| options.packet_size < PACKET_MIN_LEN
 					|| options.packet_size > PACKET_MAX_LEN) {
-				rte_exit(EXIT_FAILURE,
+				pr_exit(EXIT_FAILURE,
 						"Invalid packet size \"%s\"\n",
 						optarg);
 			}
@@ -853,7 +850,7 @@ parse_options(int argc, char *argv[])
 					|| !options.burst_size
 					|| options.burst_size
 					> MAX_BURST_SIZE) {
-				rte_exit(EXIT_FAILURE,
+				pr_exit(EXIT_FAILURE,
 						"Invalid burst size \"%s\"\n",
 						optarg);
 			}
@@ -866,23 +863,33 @@ parse_options(int argc, char *argv[])
 			break;
 		case 'o':
 			if (options.output_file) {
-				rte_exit(EXIT_FAILURE,
+				pr_exit(EXIT_FAILURE,
 					"Only a single output file may be specified.\n");
 			}
 			if (make_parent_dir(optarg) < 0) {
-				rte_exit(EXIT_FAILURE,
+				pr_exit(EXIT_FAILURE,
 					"Could not create parent directory for %s: %s\n",
 					optarg, strerror(errno));
 			}
 			options.output_file = fopen(optarg, "w");
 			if (!options.output_file) {
-				rte_exit(EXIT_FAILURE,
+				pr_exit(EXIT_FAILURE,
 					"Could not open %s for writing: %s\n",
 					optarg, strerror(errno));
 			}
 			break;
+		case 't':
+			errno = 0;
+			options.thread_count = strtoul(optarg, &endch, 0);
+			if (errno != 0 || *endch != '\0'
+					|| options.thread_count < 2) {
+				pr_exit(EXIT_FAILURE,
+						"Invalid thread count \"%s\"\n",
+						optarg);
+			}
+			break;
 		default:
-			rte_exit(EXIT_FAILURE, "Unexpected option -%c\n", ch);
+			pr_exit(EXIT_FAILURE, "Unexpected option -%c\n", ch);
 			break;
 		}
 	}
@@ -891,7 +898,7 @@ parse_options(int argc, char *argv[])
 } /* parse_options */
 
 static struct rdma_cm_id *
-init_ep(struct ibv_pd *ibpd, char *node, uint16_t udp_port, int socket_id)
+init_ep(struct ibv_pd *ibpd, char *node, uint16_t udp_port)
 {
 	struct rdma_addrinfo hints, *info;
 	struct rdma_conn_param conn_param = {
@@ -909,27 +916,20 @@ init_ep(struct ibv_pd *ibpd, char *node, uint16_t udp_port, int socket_id)
 	hints.ai_port_space = RDMA_PS_TCP;
 	ret = asprintf(&service, "%u", udp_port);
 	if (ret < 0) {
-		rte_exit(EXIT_FAILURE, "OOM\n");
+		pr_exit(EXIT_FAILURE, "OOM\n");
 	}
 	if (!node) {
 		hints.ai_flags |= RAI_PASSIVE;
 	}
 	if (rdma_getaddrinfo(node, service, &hints, &info) < 0) {
-		rte_exit(EXIT_FAILURE, "rdma_getaddrinfo() failed: %s\n",
+		pr_exit(EXIT_FAILURE, "rdma_getaddrinfo() failed: %s\n",
 				strerror(errno));
 	}
 
-	qp_init(ibpd->context, socket_id, &qp_init_attr);
+	qp_init(ibpd->context, &qp_init_attr);
 	if (rdma_create_ep(&cm_id, info, ibpd, &qp_init_attr) < 0) {
-		rte_exit(EXIT_FAILURE, "rdma_create_ep() failed: %s\n",
+		pr_exit(EXIT_FAILURE, "rdma_create_ep() failed: %s\n",
 				strerror(errno));
-	}
-	if (!cm_id->send_cq || !cm_id->recv_cq) {
-		RTE_LOG(WARNING, USER2, "cm_id send_cq=%p recv_cq=%p\n",
-				(void *)cm_id->send_cq,
-				(void *)cm_id->recv_cq);
-		cm_id->send_cq = qp_init_attr.send_cq;
-		cm_id->recv_cq = qp_init_attr.recv_cq;
 	}
 
 	conn_param.private_data = NULL;
@@ -937,25 +937,34 @@ init_ep(struct ibv_pd *ibpd, char *node, uint16_t udp_port, int socket_id)
 	conn_param.initiator_depth = 1;
 	if (node) {
 		if (rdma_connect(cm_id, &conn_param) < 0) {
-			rte_exit(EXIT_FAILURE, "rdma_connect() failed: %s\n",
+			pr_exit(EXIT_FAILURE, "rdma_connect() failed: %s\n",
 					strerror(errno));
 		}
 	} else {
 		listen_id = cm_id;
 		if (rdma_listen(listen_id, 0) < 0) {
-			rte_exit(EXIT_FAILURE, "rdma_listen() failed: %s\n",
+			pr_exit(EXIT_FAILURE, "rdma_listen() failed: %s\n",
 					strerror(errno));
 		}
 
 		if (rdma_get_request(listen_id, &cm_id) < 0) {
-			rte_exit(EXIT_FAILURE, "rdma_get_request() failed: %s\n",
+			pr_exit(EXIT_FAILURE, "rdma_get_request() failed: %s\n",
 					strerror(errno));
 		}
 
 		if (rdma_accept(cm_id, &conn_param) < 0) {
-			rte_exit(EXIT_FAILURE, "rdma_accept() failed: %s\n",
+			pr_exit(EXIT_FAILURE, "rdma_accept() failed: %s\n",
 					strerror(errno));
 		}
+	}
+
+	if (!cm_id->send_cq || !cm_id->recv_cq) {
+		RTE_LOG(WARNING, USER2, "cm_id send_cq=%p recv_cq=%p\n",
+				(void *)cm_id->send_cq,
+				(void *)cm_id->recv_cq);
+		assert(qp_init_attr.send_cq && qp_init_attr.recv_cq);
+		cm_id->send_cq = qp_init_attr.send_cq;
+		cm_id->recv_cq = qp_init_attr.recv_cq;
 	}
 
 	free(service);
@@ -963,14 +972,14 @@ init_ep(struct ibv_pd *ibpd, char *node, uint16_t udp_port, int socket_id)
 } /* init_ep */
 
 /*
- * The main function, which does initialization and calls the per-lcore
+ * The main function, which does initialization and calls the per-thread
  * functions.
  */
 int
 main(int argc, char *argv[])
 {
-	rte_spinlock_t lock;
-	struct lcore_param *param;
+	static pthread_mutex_t lock;
+	struct thread_param *param;
 	struct rdma_cm_id *cm_id;
 	struct stats final_stats;
 	struct ibv_device_attr ib_devattr;
@@ -978,6 +987,8 @@ main(int argc, char *argv[])
 	struct ibv_context *ibctx;
 	struct ibv_pd *ibpd;
 	unsigned int x;
+	pthread_attr_t tattr;
+	pthread_t tid;
 	int ret;
 
 	ret = parse_options(argc, argv);
@@ -994,7 +1005,7 @@ main(int argc, char *argv[])
 
 	ib_devs = rdma_get_devices(NULL);
 	if (!ib_devs) {
-		rte_exit(EXIT_FAILURE, "Get verbs devices failed: %s\n",
+		pr_exit(EXIT_FAILURE, "Get verbs devices failed: %s\n",
 				strerror(errno));
 	}
 
@@ -1008,40 +1019,40 @@ main(int argc, char *argv[])
 	}
 	rdma_free_devices(ib_devs);
 	if (!ibctx) {
-		rte_exit(EXIT_FAILURE, "Could not find DPDK verbs device; is kernel module loaded?\n");
+		pr_exit(EXIT_FAILURE, "Could not find DPDK verbs device; is kernel module loaded?\n");
 	}
 
 	ibpd = ibv_alloc_pd(ibctx);
 	if (!ibpd) {
-		rte_exit(EXIT_FAILURE, "Create PD: %s\n", strerror(errno));
+		pr_exit(EXIT_FAILURE, "Create PD: %s\n", strerror(errno));
 	}
 
-	rte_spinlock_init(&lock);
+	pthread_mutex_init(&lock, NULL);
 	memset(&final_stats, 0, sizeof(final_stats));
 	final_stats.start_time = UINT64_MAX;
 	final_stats.recv_count_histo = calloc(2 * options.burst_size + 1,
 			sizeof(*final_stats.recv_count_histo));
 	if (!final_stats.recv_count_histo) {
-		rte_exit(EXIT_FAILURE, "Could not allocate stats histogram: %s\n",
+		pr_exit(EXIT_FAILURE, "Could not allocate stats histogram: %s\n",
 				strerror(errno));
 	}
 
 
-	options.lcore_count = rte_lcore_count() - 1;
-	if (options.lcore_count < 2) {
-		rte_exit(EXIT_FAILURE, "This benchmark requires at least 2 lcores\n");
+	if (options.thread_count < 2) {
+		pr_exit(EXIT_FAILURE, "This benchmark requires at least 2 threads\n");
 	}
-	param = calloc(options.lcore_count - 1, sizeof(*param));
+	param = calloc(options.thread_count - 1, sizeof(*param));
 	if (!param) {
-		rte_exit(EXIT_FAILURE, "Could not allocate lcore param: %s\n",
-				strerror(errno));
+		pr_exit(EXIT_FAILURE,
+			"Could not allocate thread parameters: %s\n",
+			strerror(errno));
 	}
 
-	for (x = 0; x < options.lcore_count - 1; ++x) {
+	for (x = 0; x < options.thread_count - 1; ++x) {
+		param[x].id = x + 1;
 		param[x].lock = &lock;
 		param[x].final_stats = &final_stats;
-		cm_id = init_ep(ibpd, argv[1], BASE_UDP_PORT + x,
-				rte_lcore_to_socket_id(x + 1));
+		cm_id = init_ep(ibpd, argv[1], BASE_UDP_PORT + x);
 		param[x].cm_id = cm_id;
 		param[x].qp = cm_id->qp;
 		param[x].cq = cm_id->send_cq;
@@ -1050,20 +1061,27 @@ main(int argc, char *argv[])
 
 		ret = post_recv(&param[x], &param[x].pending[0].recv_wr);
 		if (ret) {
-			rte_exit(EXIT_FAILURE, "Post recv work request list failed\n");
+			pr_exit(EXIT_FAILURE, "Post recv work request list failed\n");
 		}
 
 		param[x].is_client = (argc >= 2);
 	}
 
-	for (x = 0; x < options.lcore_count - 1; ++x) {
-		ret = rte_eal_remote_launch(do_lcore_work, param,
-				x + 2);
+	ret = pthread_attr_init(&tattr);
+	if (ret) {
+		pr_exit(EXIT_FAILURE, "Could not create thread attributes: %s\n",
+				strerror(errno));
+	}
+	pthread_attr_setdetachstate(&tattr, PTHREAD_CREATE_DETACHED);
+	remaining_count = options.thread_count - 1;
+	for (x = 0; x < options.thread_count - 1; ++x) {
+		ret = pthread_create(&tid, &tattr, do_thread_work, &param[x]);
 		if (ret != 0) {
-			rte_exit(EXIT_FAILURE, "Could not launch main work task: %s\n",
+			pr_exit(EXIT_FAILURE, "Could not launch main work task: %s\n",
 					strerror(errno));
 		}
 	}
+	pthread_attr_destroy(&tattr);
 
-	return do_master_lcore_work(&final_stats);
+	return do_master_thread_work(&final_stats);
 }
