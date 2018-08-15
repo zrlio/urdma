@@ -6,9 +6,9 @@ Requirements
 
  - Linux kernel >= 3.17.8
  - gcc >= 4.9 or a compiler which supports the C11 standard
- - libibverbs >= 1.2.0 (versions less than 1.1.8 do not support verbs extensions
-   and version 1.1.8 has a broken extensions ABI)
- - librdmacm >= 1.0.21
+ - rdma-core >= 17.1 (earlier versions, including the split libraries
+   prior to the initial consolidated rdma-core release, are no longer
+   supported)
  - DPDK >= 16.07 built as shared libraries (CONFIG_RTE_BUILD_SHARED_LIB=y),
    and the rte_kni kernel module built for the currently running kernel
  - libnl-3 and libnl-route-3
@@ -19,8 +19,8 @@ Requirements
 Setup instructions
 ------------------
 
-I am assuming a default installation of Ubuntu 16.10.  Other modern
-distributions should also work, but you will need to install DPDK
+I am assuming a default installation of Ubuntu 18.04.  Other modern
+distributions should also work, but you would need to install DPDK
 yourself in order to build the required rte_kni kernel modules which
 most other distributions do not ship in their repositories.
 
@@ -59,6 +59,11 @@ To run an application with this driver, the KNI and urdma modules must be loaded
     $ sudo modprobe rte_kni
     $ sudo modprobe urdma
 
+You need to use the dpdk-devbind script to bind the NICs that you wish
+to use with rdma to a DPDK-compatible UIO/VFIO kernel driver, instead of
+the default kernel netdev driver. Refer to the DPDK documentation for
+more information on this.
+
 You will need to create a file ${sysconfdir}/rdma/urdma.json that looks
 like this, with appropriate values substituted in:
 
@@ -84,6 +89,18 @@ uverbs devices to appear in /sys/class/infiniband_verbs.
 Or you can manually run urdmad as root; in this case you will need to
 run every verbs application as root to pick up the DPDK configuration
 which cannot be relocated.
+
+Troubleshooting Notes
+---------------------
+
+Some RDMA demos, particularly the tools that come with librdmacm, can
+give confusing error messages when there are no RDMA devices available,
+along the lines of:
+
+    rdma_create_event_channel: No such device
+
+If you see this error message, it indicates that urdma is not set up
+properly. Verify that you followed the steps above properly.
 
 Known Issues
 ------------
