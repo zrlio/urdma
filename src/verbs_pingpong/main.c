@@ -77,7 +77,6 @@ static struct app_options {
 	unsigned long packet_size;
 	unsigned long burst_size;
 	unsigned int thread_count;
-	bool large_first_burst;
 	FILE *output_file;
 } options = {
 	.packet_count = 1000000,
@@ -85,7 +84,6 @@ static struct app_options {
 	.burst_size = 8,
 	.thread_count = 2,
 	.output_file = NULL,
-	.large_first_burst = 1,
 };
 
 struct stats {
@@ -758,8 +756,6 @@ static struct option longopts[] = {
 		.flag = NULL, .val = 'o' },
 	{ .name = "thread-count", .has_arg = required_argument,
 		.flag = NULL, .val = 't' },
-	{ .name = "disable-large-first-burst", .has_arg = no_argument,
-		.flag = NULL, .val = 'F' },
 	{ .name = "help", .has_arg = no_argument, .flag = NULL, .val = 'h' },
 	{ 0 },
 };
@@ -767,7 +763,19 @@ static struct option longopts[] = {
 static void
 usage(int status)
 {
-	pr_exit(status, "Usage: verbs_pingpong [<eal_options>] -- [<options>] [<server_ip> [<server_port>]]\n");
+	printf("Usage: verbs_pingpong [<options>] [<server_ip> [<server_port>]]\n\n");
+	printf("  %23s %s\n", "--burst-size",
+		"Maximum number of outstanding packets");
+	printf("  %23s %s\n", "--packet-count",
+		"total number of packets to send");
+	printf("  %23s %s\n", "--packet-size",
+		"size of packets to send");
+	printf("  %23s %s\n", "--output",
+		"file to output statistics to (default stdout)");
+	printf("  %23s %s\n", "--thread-count",
+		"number of active threads (>=2)");
+	fflush(stdout);
+	exit(status);
 } /* usage */
 
 /** Intended to be equivalent to the shell command
@@ -817,7 +825,6 @@ parse_options(int argc, char *argv[])
 					"c:" /* --packet-count */
 					"s:" /* --packet-size */
 					"b:" /* --burst-size */
-					"F:" /* --disable-large-first-burst */
 					"o:" /* --output */
 					"t:" /* --thread-count */
 					"h" /* --help */
@@ -854,9 +861,6 @@ parse_options(int argc, char *argv[])
 						"Invalid burst size \"%s\"\n",
 						optarg);
 			}
-			break;
-		case 'F':
-			options.large_first_burst = false;
 			break;
 		case 'h':
 			usage(EXIT_SUCCESS);
