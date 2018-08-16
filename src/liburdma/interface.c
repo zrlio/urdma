@@ -1131,7 +1131,6 @@ dequeue_recv_wqes(struct usiw_qp *qp)
 			usiw_recv_wqe_queue_add_active(&qp->rq0, wqe[i]);
 		}
 	}
-	assert(rte_ring_empty(qp->rq0.ring));
 } /* dequeue_recv_wqes */
 
 
