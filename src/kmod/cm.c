@@ -99,17 +99,14 @@ static void siw_socket_disassoc(struct socket *s)
 		pr_warn("cannot restore sk callbacks: no sk\n");
 }
 
-
-static inline int kernel_peername(struct socket *s, struct sockaddr_in *addr)
+static int kernel_localname(struct socket *s, struct sockaddr_in *addr)
 {
-	int unused;
-	return s->ops->getname(s, (struct sockaddr *)addr, &unused, 1);
-}
-
-static inline int kernel_localname(struct socket *s, struct sockaddr_in *addr)
-{
+#ifdef GETNAME_RETURN_SIZE
+	return s->ops->getname(s, (struct sockaddr *)addr, 0);
+#else
 	int unused;
 	return s->ops->getname(s, (struct sockaddr *)addr, &unused, 0);
+#endif
 }
 
 static void siw_cep_socket_assoc(struct siw_cep *cep, struct socket *s)
@@ -1163,7 +1160,7 @@ int siw_connect(struct iw_cm_id *id, struct iw_cm_conn_param *params)
 		id, QP_ID(qp), pd_len);
 
 	rv = kernel_localname(s, &cep->llp.laddr);
-	if (rv)
+	if (rv < 0)
 		goto error;
 
 	memcpy(&cep->llp.raddr, raddr, sizeof *raddr);
