@@ -141,6 +141,7 @@ struct urdmad_sock_hello_resp {
 	struct urdmad_sock_msg hdr;
 	uint16_t max_lcore;
 	uint16_t device_count;
+	uint64_t rdma_atomic_mutex_addr;
 	uint32_t lcore_mask[RTE_MAX_LCORE / 32];
 	uint16_t max_qp[];
 };

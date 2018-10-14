@@ -530,7 +530,7 @@ tx_pending_entry(struct ee_state *ep, uint32_t psn)
 
 static uint32_t
 send_ddp_segment(struct usiw_qp *qp, struct rte_mbuf *sendmsg,
-		struct read_response_state *readresp,
+		struct read_atomic_response_state *readresp,
 		struct usiw_send_wqe *wqe, size_t payload_length)
 {
 	struct pending_datagram_info *pending;
@@ -1218,15 +1218,124 @@ process_send(struct usiw_qp *qp, struct packet_context *orig)
 }	/* process_send */
 
 
+static uint64_t
+do_atomic_op(struct usiw_qp *qp, struct read_atomic_response_state *readresp)
+{
+	uint64_t orig, *target;
+
+	pthread_mutex_lock(qp->dev->driver->rdma_atomic_mutex);
+	target = (uint64_t *)readresp->vaddr;
+	orig = *target;
+	switch (readresp->atomic.opcode) {
+	case rdmap_atomic_fetchadd:
+		*target = orig + readresp->atomic.add_swap;
+		break;
+	case rdmap_atomic_cmpswap:
+		if (*target == readresp->atomic.compare)
+			*target = readresp->atomic.add_swap;
+		break;
+	}
+	pthread_mutex_unlock(qp->dev->driver->rdma_atomic_mutex);
+} /* do_atomic_op */
+
+
 static int
-respond_rdma_read(struct usiw_qp *qp)
+respond_atomic(struct usiw_qp *qp, struct read_atomic_response_state *readresp)
+{
+	struct rdmap_atomicresp_packet *new_rdmap;
+	struct rte_mbuf *sendmsg;
+	size_t dgram_length;
+	uint64_t orig;
+
+	if (likely(!readresp->atomic.done)) {
+		orig = do_atomic_op(qp, readresp);
+		readresp->atomic.done = true;
+	}
+
+	if (serial_less_32(readresp->sink_ep->send_next_psn,
+				readresp->sink_ep->send_max_psn)) {
+		sendmsg = rte_pktmbuf_alloc(qp->dev->tx_ddp_mempool);
+
+		dgram_length = sizeof(*new_rdmap);
+
+		new_rdmap = (struct rdmap_atomicresp_packet *)rte_pktmbuf_append(
+				sendmsg, dgram_length);
+		new_rdmap->untagged.head.ddp_flags = DDP_V1_UNTAGGED_LAST_DF;
+		new_rdmap->untagged.head.rdmap_info = RDMAP_V1
+			| rdmap_opcode_atomic_response;
+		new_rdmap->untagged.head.sink_stag
+			= rte_cpu_to_be_32(readresp->sink_stag);
+		new_rdmap->untagged.qn
+			= rte_cpu_to_be_32(ddp_queue_atomic_response);
+		new_rdmap->untagged.msn
+			= rte_cpu_to_be_32(qp->readresp_head_msn++);
+		new_rdmap->req_id = readresp->atomic.req_id;
+		new_rdmap->orig_value = rte_cpu_to_be_64(orig);
+
+		(void)send_ddp_segment(qp, sendmsg, readresp,
+				NULL, 0);
+
+		/* Signal that this is done */
+		readresp->active = false;
+		return 1;
+	} else {
+		return 0;
+	}
+} /* respond_atomic */
+
+
+static int
+respond_rdma_read(struct usiw_qp *qp, struct read_atomic_response_state *readresp)
 {
 	struct rdmap_tagged_packet *new_rdmap;
-	struct read_response_state *readresp;
 	struct rte_mbuf *sendmsg;
 	size_t dgram_length;
 	size_t payload_length;
 	uint16_t mtu = qp->shm_qp->mtu;
+	int count = 0;
+
+	while (readresp->read.msg_size > 0
+			&& serial_less_32(readresp->sink_ep->send_next_psn,
+				readresp->sink_ep->send_max_psn)) {
+		sendmsg = rte_pktmbuf_alloc(qp->dev->tx_ddp_mempool);
+
+		payload_length = RTE_MIN(mtu, readresp->read.msg_size);
+		dgram_length = RDMAP_TAGGED_ALLOC_SIZE(payload_length);
+
+		new_rdmap = (struct rdmap_tagged_packet *)rte_pktmbuf_append(
+				sendmsg, dgram_length);
+		new_rdmap->head.ddp_flags = (readresp->read.msg_size <= mtu)
+			? DDP_V1_TAGGED_LAST_DF : DDP_V1_TAGGED_DF;
+		new_rdmap->head.rdmap_info = RDMAP_V1
+			| rdmap_opcode_rdma_read_response;
+		new_rdmap->head.sink_stag = readresp->sink_stag;
+		new_rdmap->offset
+			= rte_cpu_to_be_64(readresp->read.sink_offset);
+		memcpy(PAYLOAD_OF(new_rdmap), readresp->vaddr,
+				payload_length);
+
+		(void)send_ddp_segment(qp, sendmsg, readresp,
+				NULL, payload_length);
+		readresp->vaddr += payload_length;
+		readresp->read.msg_size -= payload_length;
+		readresp->read.sink_offset += payload_length;
+		count++;
+	}
+
+	if (readresp->read.msg_size == 0) {
+		/* Signal that this is done */
+		readresp->active = false;
+		qp->readresp_head_msn++;
+	}
+
+	return count;
+} /* respond_rdma_read */
+
+
+static int
+respond_next_read_atomic(struct usiw_qp *qp)
+{
+	struct read_atomic_response_state *readresp;
 	unsigned long msn, end;
 	int count;
 
@@ -1237,41 +1346,18 @@ respond_rdma_read(struct usiw_qp *qp)
 		if (!readresp->active) {
 			break;
 		}
-		while (readresp->msg_size > 0
-				&& serial_less_32(readresp->sink_ep->send_next_psn,
-					readresp->sink_ep->send_max_psn)) {
-			sendmsg = rte_pktmbuf_alloc(qp->dev->tx_ddp_mempool);
 
-			payload_length = RTE_MIN(mtu, readresp->msg_size);
-			dgram_length = RDMAP_TAGGED_ALLOC_SIZE(payload_length);
-
-			new_rdmap = (struct rdmap_tagged_packet *)rte_pktmbuf_append(
-					sendmsg, dgram_length);
-			new_rdmap->head.ddp_flags = (readresp->msg_size <= mtu)
-				? DDP_V1_TAGGED_LAST_DF : DDP_V1_TAGGED_DF;
-			new_rdmap->head.rdmap_info = RDMAP_V1
-				| rdmap_opcode_rdma_read_response;
-			new_rdmap->head.sink_stag = readresp->sink_stag;
-			new_rdmap->offset = rte_cpu_to_be_64(readresp->sink_offset);
-			memcpy(PAYLOAD_OF(new_rdmap), readresp->vaddr,
-					payload_length);
-
-			(void)send_ddp_segment(qp, sendmsg, readresp,
-					NULL, payload_length);
-			readresp->vaddr += payload_length;
-			readresp->msg_size -= payload_length;
-			readresp->sink_offset += payload_length;
-			count++;
-		}
-
-		if (readresp->msg_size == 0) {
-			/* Signal that this is done */
-			readresp->active = false;
-			qp->readresp_head_msn++;
+		switch (readresp->type) {
+		case atomic_response:
+			count += respond_atomic(qp, readresp);
+			break;
+		case read_response:
+			count += respond_rdma_read(qp, readresp);
+			break;
 		}
 	}
 	return count;
-} /* respond_rdma_read */
+} /* respond_next_read_atomic */
 
 
 static void
@@ -1279,7 +1365,7 @@ process_rdma_read_request(struct usiw_qp *qp, struct packet_context *orig)
 {
 	struct rdmap_readreq_packet *rdmap
 		= (struct rdmap_readreq_packet *)orig->rdmap;
-	struct read_response_state *readresp;
+	struct read_atomic_response_state *readresp;
 	uint32_t rkey;
 	uint32_t msn;
 	struct usiw_mr **candidate;
@@ -1334,12 +1420,91 @@ process_rdma_read_request(struct usiw_qp *qp, struct packet_context *orig)
 		return;
 	}
 	readresp->active = true;
+	readresp->type = read_response;
 	readresp->vaddr = (void *)vaddr;
-	readresp->msg_size = rdma_length;
 	readresp->sink_stag = rdmap->untagged.head.sink_stag;
-	readresp->sink_offset = rte_be_to_cpu_64(rdmap->sink_offset);
 	readresp->sink_ep = orig->src_ep;
+	readresp->read.msg_size = rdma_length;
+	readresp->read.sink_offset = rte_be_to_cpu_64(rdmap->sink_offset);
 }	/* process_rdma_read_request */
+
+
+static void
+process_atomic_request(struct usiw_qp *qp, struct packet_context *orig)
+{
+	struct rdmap_atomicreq_packet *rdmap
+		= (struct rdmap_atomicreq_packet *)orig->rdmap;
+	struct read_atomic_response_state *readresp;
+	uint32_t rkey;
+	uint32_t msn;
+	struct usiw_mr **candidate;
+	struct usiw_mr *mr;
+
+	msn = rte_be_to_cpu_32(rdmap->untagged.msn);
+	if (msn < orig->src_ep->expected_read_msn
+			|| msn >= qp->readresp_head_msn + qp->shm_qp->ird_max) {
+		RTE_LOG(INFO, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> ATOMIC failure: expected MSN in range [%" PRIu32 ", %" PRIu32 "] received %" PRIu32 "\n",
+				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
+				orig->src_ep->expected_read_msn,
+				qp->readresp_head_msn + qp->shm_qp->ird_max,
+				msn);
+		do_rdmap_terminate(qp, orig, ddp_error_untagged_invalid_msn);
+		return;
+	}
+	if (msn == orig->src_ep->expected_read_msn)
+		orig->src_ep->expected_read_msn++;
+
+	rkey = rte_be_to_cpu_32(rdmap->remote_stag);
+	candidate = usiw_mr_lookup(qp->pd, rkey);
+	if (!candidate) {
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> ATOMIC failure: invalid rkey %" PRIx32 "\n",
+				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
+				rkey);
+		do_rdmap_terminate(qp, orig, rdmap_error_stag_invalid);
+		return;
+	}
+
+	mr = *candidate;
+	uintptr_t vaddr = (uintptr_t)rte_be_to_cpu_64(rdmap->remote_offset);
+	size_t rdma_length = sizeof(uint64_t);
+	if (vaddr < (uintptr_t)mr->mr.addr || vaddr + rdma_length
+			> (uintptr_t)mr->mr.addr + mr->mr.length) {
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> ATOMIC failure: target [%" PRIxPTR ", %" PRIxPTR
+				"] outside of memory region [%" PRIxPTR ", %" PRIxPTR "]\n",
+				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
+				vaddr, vaddr + rdma_length,
+				(uintptr_t)mr->mr.addr,
+				(uintptr_t)mr->mr.addr + mr->mr.length);
+		do_rdmap_terminate(qp, orig,
+				rdmap_error_base_or_bounds_violation);
+		return;
+	} else if (vaddr & 7) {
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> ATOMIC failure: target %" PRIxPTR
+				"] is not aligned on 8-byte boundary\n",
+				qp->shm_qp->dev_id, qp->shm_qp->qp_id, vaddr);
+		do_rdmap_terminate(qp, orig,
+				rdmap_error_remote_stream_catastrophic);
+	}
+
+	readresp = &qp->readresp_store[msn % qp->shm_qp->ird_max];
+	if (readresp->active) {
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> ATOMIC failure: duplicate MSN %" PRIu32 "\n",
+				qp->shm_qp->dev_id, qp->shm_qp->qp_id, msn);
+		do_rdmap_terminate(qp, orig,
+				rdmap_error_remote_stream_catastrophic);
+		return;
+	}
+	readresp->active = true;
+	readresp->type = atomic_response;
+	readresp->vaddr = mr->mr.addr;
+	readresp->atomic.opcode = rte_be_to_cpu_32(rdmap->opcode);
+	readresp->atomic.req_id = rdmap->req_id;
+	readresp->atomic.add_swap = rte_be_to_cpu_32(rdmap->add_swap_data);
+	readresp->atomic.compare = rte_be_to_cpu_32(rdmap->compare_data);
+	readresp->atomic.done = false;
+	readresp->sink_stag = rdmap->untagged.head.sink_stag;
+	readresp->sink_ep = orig->src_ep;
+}	/* process_atomic_request */
 
 
 /** Complete the requested WQE if and only if all completion ordering rules
@@ -1639,7 +1804,7 @@ sweep_unacked_packets(struct usiw_qp *qp, uint64_t now)
 						+ sizeof(struct udp_hdr) + sizeof(struct trp_hdr));
 				RTE_LOG(NOTICE, USER1, "was read response; L=%d bytes left=%" PRIu32 "\n",
 						DDP_GET_L(rdmap->head.ddp_flags),
-						pending->readresp->msg_size);
+						pending->readresp->read.msg_size);
 			}
 			atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
 			if (p == ep->tx_head) {
@@ -1932,6 +2097,9 @@ process_data_packet(struct usiw_qp *qp, struct rte_mbuf *mbuf)
 			case rdmap_opcode_terminate:
 				process_terminate(qp, &ctx);
 				break;
+			case rdmap_opcode_atomic_request:
+				process_atomic_request(qp, &ctx);
+				break;
 			default:
 				do_rdmap_terminate(qp, &ctx,
 						rdmap_error_opcode_unexpected);
@@ -2080,7 +2248,7 @@ progress_qp(struct usiw_qp *qp)
 		}
 	}
 
-	scount += respond_rdma_read(qp);
+	scount += respond_next_read_atomic(qp);
 
 	if (qp->remote_ep.trp_flags & trp_ack_update) {
 		if (unlikely(qp->remote_ep.trp_flags & trp_recv_missing)) {

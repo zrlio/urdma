@@ -232,6 +232,7 @@ usiw_driver_init(int portid)
 
 	dev->urdmad_fd = driver->urdmad_fd;
 	dev->max_qp = driver->max_qp[dev->portid];
+	dev->driver = driver;
 
 	return &dev->vdev.device;
 } /* usiw_driver_init */
@@ -442,6 +443,8 @@ do_hello(void)
 		driver->lcore_mask[i] = rte_be_to_cpu_32(resp->lcore_mask[i]);
 	}
 	driver->device_count = rte_be_to_cpu_16(resp->device_count);
+	driver->rdma_atomic_mutex = (void *)(uintptr_t)rte_be_to_cpu_64(
+				resp->rdma_atomic_mutex_addr);
 	driver->max_qp = malloc(driver->device_count * sizeof(*driver->max_qp));
 	if (!driver->max_qp) {
 		return -1;

@@ -87,6 +87,10 @@ static uint32_t core_mask[RTE_MAX_LCORE / 32];
 static const unsigned int core_mask_shift = 5;
 static const uint32_t core_mask_mask = 31;
 
+static pthread_mutexattr_t pshared_mutexattr;
+/* Mutex for atomic operations */
+static pthread_mutex_t *rdma_atomic_mutex;
+
 static void init_core_mask(void)
 {
 	struct rte_config *config;
@@ -517,6 +521,8 @@ handle_hello(struct urdma_process *process, struct urdmad_sock_hello_req *req)
 	resp->hdr.opcode = rte_cpu_to_be_32(urdma_sock_hello_resp);
 	resp->max_lcore = rte_cpu_to_be_16(RTE_MAX_LCORE);
 	resp->device_count = rte_cpu_to_be_16(driver->port_count);
+	resp->rdma_atomic_mutex_addr =
+		rte_cpu_to_be_64((uintptr_t)rdma_atomic_mutex);
 	for (i = 0; i < RTE_DIM(resp->lcore_mask); i++) {
 		resp->lcore_mask[i] = rte_cpu_to_be_32(process->core_mask[i]);
 	}
@@ -821,7 +827,6 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 		= DEV_TX_OFFLOAD_UDP_CKSUM|DEV_TX_OFFLOAD_IPV4_CKSUM;
 
 	char name[RTE_MEMPOOL_NAMESIZE];
-	pthread_mutexattr_t mutexattr;
 	struct rte_eth_txconf txconf;
 	struct rte_eth_rxconf rxconf;
 	struct rte_eth_conf port_conf;
@@ -960,35 +965,18 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 		rte_exit(EXIT_FAILURE, "Cannot allocate QP array: %s\n",
 				rte_strerror(rte_errno));
 	}
-	retval = pthread_mutexattr_init(&mutexattr);
-	if (retval) {
-		rte_exit(EXIT_FAILURE,
-			"Cannot allocate mutex attribute object: %s\n",
-			rte_strerror(rte_errno));
-	}
-	retval = pthread_mutexattr_setpshared(&mutexattr, PTHREAD_PROCESS_SHARED);
-	if (retval) {
-		rte_exit(EXIT_FAILURE,
-			"Cannot enable process shared mutex attribute: %s\n",
-			rte_strerror(rte_errno));
-	}
 	for (q = 1; q <= iface->max_qp; ++q) {
 		iface->qp[q].qp_id = q;
 		iface->qp[q].tx_queue = q;
 		iface->qp[q].rx_queue = q;
 		atomic_init(&iface->qp[q].conn_state, 0);
-		retval = pthread_mutex_init(&iface->qp[q].conn_event_lock, &mutexattr);
+		retval = pthread_mutex_init(&iface->qp[q].conn_event_lock,
+					    &pshared_mutexattr);
 		if (retval) {
 			rte_exit(EXIT_FAILURE, "Cannot create mutex: %s\n",
 				rte_strerror(rte_errno));
 		}
 		list_add_tail(&iface->avail_qp, &iface->qp[q].urdmad__entry);
-	}
-	retval = pthread_mutexattr_destroy(&mutexattr);
-	if (retval) {
-		rte_exit(EXIT_FAILURE,
-			"Cannot destroy mutex attribute object: %s\n",
-			rte_strerror(rte_errno));
 	}
 
 	/* We must allocate an mbuf large enough to hold the maximum possible
@@ -1233,6 +1221,31 @@ do_init_driver(void)
 	}
 
 	urdma__config_file_close(&config);
+
+	rdma_atomic_mutex = rte_malloc(NULL, sizeof(*rdma_atomic_mutex),
+			RTE_CACHE_LINE_SIZE);
+	if (!rdma_atomic_mutex)
+		rte_exit(EXIT_FAILURE, "Could not allocate atomic mutex: %s\n",
+				strerror(errno));
+	retval = pthread_mutexattr_init(&pshared_mutexattr);
+	if (retval) {
+		rte_exit(EXIT_FAILURE,
+			"Cannot allocate mutex attribute object: %s\n",
+			rte_strerror(rte_errno));
+	}
+	retval = pthread_mutexattr_setpshared(&pshared_mutexattr,
+					      PTHREAD_PROCESS_SHARED);
+	if (retval) {
+		rte_exit(EXIT_FAILURE,
+			"Cannot enable process shared mutex attribute: %s\n",
+			rte_strerror(rte_errno));
+	}
+	retval = pthread_mutex_init(rdma_atomic_mutex, &pshared_mutexattr);
+	if (retval) {
+		rte_exit(EXIT_FAILURE,
+			"Cannot initialize global RDMA atomic mutex: %s\n",
+			rte_strerror(rte_errno));
+	}
 
 	driver = calloc(1, sizeof(*driver)
 			+ port_count * sizeof(struct usiw_port));
