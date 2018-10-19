@@ -1285,8 +1285,62 @@ process_send(struct usiw_qp *qp, struct packet_context *orig)
 }	/* process_send */
 
 
+/* This function implements the masked FetchAdd operation specified by iWARP.
+ * This is optimized for the common case where the mask is 0. The implementation
+ * follows the pseudocode specified in RFC 7306. */
+static void
+do_atomic_fetchadd(uint64_t orig, uint64_t *target,
+		struct read_atomic_response_state *readresp)
+{
+	uint64_t val1, val2, sum;
+	bool carry = false;
+	int bitno, bit;
+
+	if (!readresp->atomic.add_swap_mask) {
+		*target = orig + readresp->atomic.add_swap;
+		return;
+	}
+
+	*target = 0;
+	for (bitno = 0; bitno < 64; bitno++) {
+		bit = 1 << bitno;
+		val1 = (orig & bit) >> bitno;
+		val2 = (readresp->atomic.add_swap & bit) >> bitno;
+		sum = (carry ? 1 : 0) + val1 + val2;
+		carry = !!(sum & 2) && !(readresp->atomic.add_swap_mask & bit);
+		sum &= 1;
+		if (sum)
+			*target |= bit;
+	}
+} /* do_atomic_fetchadd */
+
+
+/* This function implements the masked CmpSwap operation specified by iWARP.
+ * This is optimized for the common case where the mask is 0. The implementation
+ * follows the pseudocode specified in RFC 7306. */
+static void
+do_atomic_cmpswap(uint64_t orig, uint64_t *target,
+		struct read_atomic_response_state *readresp)
+{
+	uint64_t add_swap_mask = readresp->atomic.add_swap_mask;
+	uint64_t compare_mask = readresp->atomic.compare_mask;
+
+	if (!(compare_mask | add_swap_mask)) {
+		if (*target == readresp->atomic.compare)
+			*target = readresp->atomic.add_swap;
+		return;
+	}
+
+	if (!((readresp->atomic.compare ^ orig) & compare_mask)) {
+		*target = (orig & ~add_swap_mask)
+			| (readresp->atomic.add_swap & add_swap_mask);
+	}
+
+} /* do_atomic_cmpswap */
+
+
 static uint64_t
-do_atomic_op(struct usiw_qp *qp, struct read_atomic_response_state *readresp)
+dispatch_atomic_op(struct usiw_qp *qp, struct read_atomic_response_state *readresp)
 {
 	uint64_t orig, *target;
 
@@ -1295,15 +1349,15 @@ do_atomic_op(struct usiw_qp *qp, struct read_atomic_response_state *readresp)
 	orig = *target;
 	switch (readresp->atomic.opcode) {
 	case rdmap_atomic_fetchadd:
-		*target = orig + readresp->atomic.add_swap;
+		do_atomic_fetchadd(orig, target, readresp);
 		break;
 	case rdmap_atomic_cmpswap:
-		if (*target == readresp->atomic.compare)
-			*target = readresp->atomic.add_swap;
+		do_atomic_cmpswap(orig, target, readresp);
 		break;
 	}
 	pthread_mutex_unlock(qp->dev->driver->rdma_atomic_mutex);
-} /* do_atomic_op */
+	return orig;
+} /* dispatch_atomic_op */
 
 
 static int
@@ -1315,7 +1369,7 @@ respond_atomic(struct usiw_qp *qp, struct read_atomic_response_state *readresp)
 	uint64_t orig;
 
 	if (likely(!readresp->atomic.done)) {
-		orig = do_atomic_op(qp, readresp);
+		orig = dispatch_atomic_op(qp, readresp);
 		readresp->atomic.done = true;
 	}
 
@@ -1567,7 +1621,10 @@ process_atomic_request(struct usiw_qp *qp, struct packet_context *orig)
 	readresp->atomic.opcode = rte_be_to_cpu_32(rdmap->opcode);
 	readresp->atomic.req_id = rdmap->req_id;
 	readresp->atomic.add_swap = rte_be_to_cpu_32(rdmap->add_swap_data);
+	readresp->atomic.add_swap_mask
+		= rte_be_to_cpu_32(rdmap->add_swap_mask);
 	readresp->atomic.compare = rte_be_to_cpu_32(rdmap->compare_data);
+	readresp->atomic.compare_mask = rte_be_to_cpu_32(rdmap->compare_mask);
 	readresp->atomic.done = false;
 	readresp->sink_stag = rdmap->untagged.head.sink_stag;
 	readresp->sink_ep = orig->src_ep;

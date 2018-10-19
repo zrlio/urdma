@@ -281,7 +281,9 @@ struct read_atomic_response_state {
 			unsigned int opcode;
 			uint32_t req_id;
 			uint64_t add_swap;
+			uint64_t add_swap_mask;
 			uint64_t compare;
+			uint64_t compare_mask;
 			bool done;
 		} atomic;
 	};
