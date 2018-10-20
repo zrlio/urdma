@@ -511,14 +511,27 @@ handle_hello(struct urdma_process *process, struct urdmad_sock_hello_req *req)
 	size_t resp_size;
 	int i;
 
-	if (!reserve_cores(rte_cpu_to_be_32(req->req_lcore_count),
-				process->core_mask))
+	if (req->proto_version != URDMA_SOCK_PROTO_VERSION) {
+		RTE_LOG(ERR, USER1,
+			"[fd=%d] Socket protocol version mismatch: expected %" PRIu8 "; client sent %" PRIu8 "\n",
+			process->fd.fd, URDMA_SOCK_PROTO_VERSION,
+			req->proto_version);
 		return -1;
+	}
+
+	if (!reserve_cores(rte_cpu_to_be_16(req->req_lcore_count),
+				process->core_mask)) {
+		RTE_LOG(ERR, USER1,
+			"[fd=%d] Not enough lcores for client; %" PRIu16 " requested\n",
+			process->fd.fd, rte_be_to_cpu_16(req->req_lcore_count));
+		return -1;
+	}
 
 	resp_size = sizeof(*resp) + driver->port_count * sizeof(*resp->max_qp);
 	resp = alloca(resp_size);
 	memset(resp, 0, resp_size);
 	resp->hdr.opcode = rte_cpu_to_be_32(urdma_sock_hello_resp);
+	resp->proto_version = URDMA_SOCK_PROTO_VERSION;
 	resp->max_lcore = rte_cpu_to_be_16(RTE_MAX_LCORE);
 	resp->device_count = rte_cpu_to_be_16(driver->port_count);
 	resp->rdma_atomic_mutex_addr =
