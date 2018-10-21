@@ -219,6 +219,7 @@ usiw_send_wqe_queue_lookup(struct usiw_send_wqe_queue *q,
 		}
 		switch (lptr->opcode) {
 		case usiw_wr_send:
+		case usiw_wr_atomic:
 			if (wr_key_data == lptr->msn) {
 				*wqe = lptr;
 				return 0;
@@ -755,15 +756,25 @@ post_recv_cqe(struct usiw_qp *qp, struct usiw_recv_wqe *wqe,
 
 
 static enum ibv_wc_opcode
-get_ibv_send_wc_opcode(enum usiw_send_opcode ours)
+get_ibv_send_wc_opcode(struct usiw_send_wqe *wqe)
 {
-	switch (ours) {
+	switch (wqe->opcode) {
 	case usiw_wr_send:
 		return IBV_WC_SEND;
 	case usiw_wr_write:
 		return IBV_WC_RDMA_WRITE;
 	case usiw_wr_read:
 		return IBV_WC_RDMA_READ;
+	case usiw_wr_atomic:
+		switch (wqe->atomic_opcode) {
+		case rdmap_atomic_fetchadd:
+			return IBV_WC_FETCH_ADD;
+			break;
+		case rdmap_atomic_cmpswap:
+			return IBV_WC_COMP_SWAP;
+			break;
+		}
+		break;
 	default:
 		assert(0);
 		return -1;
@@ -792,7 +803,7 @@ post_send_cqe(struct usiw_qp *qp, struct usiw_send_wqe *wqe,
 	}
 	cqe->wr_context = wqe->wr_context;
 	cqe->status = status;
-	cqe->opcode = get_ibv_send_wc_opcode(wqe->opcode);
+	cqe->opcode = get_ibv_send_wc_opcode(wqe);
 	cqe->qp_num = qp->ib_qp.qp_num;
 
 	qp_free_send_wqe(qp, wqe, true);
@@ -965,6 +976,60 @@ do_rdmap_write(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 
 
 static void
+do_rdmap_atomic(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
+{
+	struct rdmap_atomicreq_packet *new_rdmap;
+	struct rte_mbuf *sendmsg;
+	unsigned int packet_length;
+
+	if (wqe->state != SEND_WQE_TRANSFER) {
+		return;
+	}
+
+	if (qp->ord_active >= qp->shm_qp->ord_max) {
+		/* Cannot issue more than ord_max simultaneous RDMA READ
+		 * and Atomic Requests. */
+		return;
+	} else if (wqe->remote_ep->send_next_psn
+			== wqe->remote_ep->send_max_psn
+			|| serial_greater_32(wqe->remote_ep->send_next_psn,
+				wqe->remote_ep->send_max_psn)) {
+		/* We have reached the maximum number of credits we are allowed
+		 * to send. */
+		return;
+	}
+	qp->ord_active++;
+
+	sendmsg = rte_pktmbuf_alloc(qp->dev->tx_ddp_mempool);
+
+	packet_length = sizeof(*new_rdmap);
+	new_rdmap = (struct rdmap_atomicreq_packet *)rte_pktmbuf_append(
+				sendmsg, packet_length);
+	new_rdmap->untagged.head.ddp_flags = DDP_V1_UNTAGGED_LAST_DF;
+	new_rdmap->untagged.head.rdmap_info
+		= rdmap_opcode_atomic_request | RDMAP_V1;
+	new_rdmap->untagged.head.sink_stag = rte_cpu_to_be_32(wqe->local_stag);
+	new_rdmap->untagged.qn = rte_cpu_to_be_32(ddp_queue_read_request);
+	new_rdmap->untagged.msn = rte_cpu_to_be_32(wqe->msn);
+	new_rdmap->untagged.mo = rte_cpu_to_be_32(0);
+	new_rdmap->opcode = rte_cpu_to_be_32(wqe->atomic_opcode);
+	new_rdmap->req_id = rte_cpu_to_be_32(wqe->msn);
+	new_rdmap->remote_stag = rte_cpu_to_be_32(wqe->rkey);
+	new_rdmap->remote_offset =
+		rte_cpu_to_be_64((uintptr_t)wqe->remote_addr);
+	new_rdmap->add_swap_data = rte_cpu_to_be_64(wqe->atomic_add_swap);
+	new_rdmap->add_swap_mask = rte_cpu_to_be_64(0);
+	new_rdmap->compare_data = rte_cpu_to_be_64(wqe->atomic_compare);
+	new_rdmap->compare_mask = rte_cpu_to_be_64(0);
+
+	send_ddp_segment(qp, sendmsg, NULL, wqe, 0);
+	RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> ATOMIC transmit msn=%" PRIu32 "\n",
+			qp->shm_qp->dev_id, qp->shm_qp->qp_id, wqe->msn);
+
+	wqe->state = SEND_WQE_WAIT;
+} /* do_rdmap_atomic */
+
+static void
 do_rdmap_read_request(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 {
 	struct rdmap_readreq_packet *new_rdmap;
@@ -1008,6 +1073,8 @@ do_rdmap_read_request(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 	new_rdmap->source_offset = rte_cpu_to_be_64(wqe->remote_addr);
 
 	send_ddp_segment(qp, sendmsg, NULL, wqe, 0);
+	RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> RDMA READ transmit msn=%" PRIu32 "\n",
+			qp->shm_qp->dev_id, qp->shm_qp->qp_id, wqe->msn);
 
 	wqe->state = SEND_WQE_WAIT;
 } /* do_rdmap_read_request */
@@ -1522,7 +1589,8 @@ try_complete_wqe(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 			qp_free_send_wqe(qp, wqe, true);
 		}
 		rte_spinlock_unlock(&qp->sq.lock);
-		if (wqe->opcode == usiw_wr_read) {
+		if (wqe->opcode == usiw_wr_read
+				|| wqe->opcode == usiw_wr_atomic) {
 			assert(qp->ord_active > 0);
 			qp->ord_active--;
 		}
@@ -1531,11 +1599,12 @@ try_complete_wqe(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 
 
 static struct usiw_send_wqe *
-find_first_rdma_read(struct usiw_qp *qp)
+find_first_rdma_read_atomic(struct usiw_qp *qp)
 {
 	struct usiw_send_wqe *lptr, *next;
 	list_for_each_safe(&qp->sq.active_head, lptr, next, active) {
-		if (lptr->opcode == usiw_wr_read) {
+		if (lptr->opcode == usiw_wr_read
+				|| lptr->opcode == usiw_wr_atomic) {
 			return lptr;
 		}
 	}
@@ -1572,6 +1641,42 @@ process_rdma_read_response(struct usiw_qp *qp, struct packet_context *orig)
 		binheap_insert(qp->remote_ep.recv_rresp_last_psn, orig->psn);
 	}
 }	/* process_rdma_read_response */
+
+
+static void
+process_atomic_response(struct usiw_qp *qp, struct packet_context *orig)
+{
+	struct rdmap_atomicresp_packet *rdmap;
+	struct usiw_send_wqe *wqe;
+	uint16_t wqe_opcode;
+	int ret;
+
+	/* This ensures that at least one atomic request is active for this
+	 * STag. We don't need to know exactly which one; this just ensures
+	 * that we don't accept a random RDMA READ Response. */
+	rdmap = (struct rdmap_atomicresp_packet *)orig->rdmap;
+	ret = usiw_send_wqe_queue_lookup(&qp->sq, usiw_wr_atomic,
+			rte_be_to_cpu_32(rdmap->req_id), &wqe);
+	if (ret < 0 || !wqe || wqe->opcode != usiw_wr_atomic) {
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Unexpected atomic response!\n",
+			qp->shm_qp->dev_id, qp->shm_qp->qp_id);
+		do_rdmap_terminate(qp, orig, rdmap_error_opcode_unexpected);
+		return;
+	} else if (!DDP_GET_L(rdmap->untagged.head.ddp_flags)) {
+		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Atomic response not single segment!\n",
+			qp->shm_qp->dev_id, qp->shm_qp->qp_id);
+		do_rdmap_terminate(qp, orig,
+				rdmap_error_remote_stream_catastrophic);
+		return;
+	}
+
+	if (wqe->iov_count) {
+		rte_memcpy(wqe->iov[0].iov_base, &rdmap->orig_value,
+				sizeof(rdmap->orig_value));
+	}
+
+	binheap_insert(qp->remote_ep.recv_rresp_last_psn, orig->psn);
+}	/* process_atomic_response */
 
 
 static void
@@ -1693,7 +1798,7 @@ do_process_ack(struct usiw_qp *qp, struct usiw_send_wqe *wqe,
 	wqe->bytes_acked += pending->ddp_length;
 	assert(wqe->bytes_sent >= wqe->bytes_acked);
 
-	if (wqe->opcode != usiw_wr_read
+	if ((wqe->opcode == usiw_wr_send || wqe->opcode == usiw_wr_write)
 			&& wqe->bytes_acked == wqe->total_length) {
 		assert(wqe->state == SEND_WQE_WAIT);
 		wqe->state = SEND_WQE_COMPLETE;
@@ -2100,6 +2205,9 @@ process_data_packet(struct usiw_qp *qp, struct rte_mbuf *mbuf)
 			case rdmap_opcode_atomic_request:
 				process_atomic_request(qp, &ctx);
 				break;
+			case rdmap_opcode_atomic_response:
+				process_atomic_response(qp, &ctx);
+				break;
 			default:
 				do_rdmap_terminate(qp, &ctx,
 						rdmap_error_opcode_unexpected);
@@ -2126,6 +2234,9 @@ progress_send_wqe(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 		break;
 	case usiw_wr_read:
 		do_rdmap_read_request((struct usiw_qp *)qp, wqe);
+		break;
+	case usiw_wr_atomic:
+		do_rdmap_atomic(qp, wqe);
 		break;
 	}
 } /* progress_send_wqe */
@@ -2202,7 +2313,7 @@ progress_qp(struct usiw_qp *qp)
 			 * the segments in the correct order, and
 			 * try_complete_wqe() ensures that we do not complete an
 			 * RDMA READ request out of order. */
-			send_wqe = find_first_rdma_read(qp);
+			send_wqe = find_first_rdma_read_atomic(qp);
 			if (!(WARN_ONCE(!send_wqe,
 					"No RDMA READ request pending\n"))) {
 				send_wqe->state = SEND_WQE_COMPLETE;
@@ -2236,6 +2347,7 @@ progress_qp(struct usiw_qp *qp)
 							->next_send_msn++;
 					break;
 				case usiw_wr_read:
+				case usiw_wr_atomic:
 					send_wqe->msn = send_wqe->remote_ep
 							->next_read_msn++;
 					break;

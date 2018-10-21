@@ -168,6 +168,9 @@ struct usiw_send_wqe {
 	void *wr_context;
 	struct ee_state *remote_ep;
 	uint64_t remote_addr;
+	uint64_t atomic_add_swap;
+	uint64_t atomic_compare;
+	uint8_t atomic_opcode;
 	uint32_t rkey;
 	uint32_t flags;
 	struct list_node active;

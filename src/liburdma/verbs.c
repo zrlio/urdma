@@ -59,6 +59,7 @@
 #include <rte_ring.h>
 
 #include "interface.h"
+#include "proto.h"
 #include "urdma_kabi.h"
 #include "util.h"
 #include "verbs.h"
@@ -1183,6 +1184,37 @@ usiw_post_send(struct ibv_qp *ib_qp, struct ibv_send_wr *wr,
 				goto free_wqe;
 			}
 			wqe->local_stag = (*mr)->mr.rkey;
+			break;
+		case IBV_WR_ATOMIC_CMP_AND_SWP:
+			if (wr->num_sge > 1
+					|| (wr->num_sge == 1
+						&& wr->sg_list[0].length
+						< sizeof(uint64_t))
+					|| wr->send_flags & IBV_SEND_INLINE) {
+				ret = EINVAL;
+				goto free_wqe;
+			}
+			wqe->opcode = usiw_wr_atomic;
+			wqe->atomic_opcode = rdmap_atomic_cmpswap;
+			wqe->atomic_add_swap = wr->wr.atomic.swap;
+			wqe->atomic_compare = wr->wr.atomic.compare_add;
+			wqe->remote_addr = wr->wr.atomic.remote_addr;
+			wqe->rkey = wr->wr.atomic.rkey;
+			break;
+		case IBV_WR_ATOMIC_FETCH_AND_ADD:
+			if (wr->num_sge > 1
+					|| (wr->num_sge == 1
+						&& wr->sg_list[0].length
+						< sizeof(uint64_t))
+					|| wr->send_flags & IBV_SEND_INLINE) {
+				ret = EINVAL;
+				goto free_wqe;
+			}
+			wqe->opcode = usiw_wr_atomic;
+			wqe->atomic_opcode = rdmap_atomic_fetchadd;
+			wqe->atomic_add_swap = wr->wr.atomic.compare_add;
+			wqe->remote_addr = wr->wr.atomic.remote_addr;
+			wqe->rkey = wr->wr.atomic.rkey;
 			break;
 		default:
 			ret = EOPNOTSUPP;
