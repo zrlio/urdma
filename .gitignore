@@ -4,6 +4,7 @@ config.h*
 config.log
 config.status
 configure
+include/kernel-abi
 libtool
 Makefile
 /Makefile.in

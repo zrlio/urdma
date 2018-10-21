@@ -39,7 +39,7 @@
 #include <infiniband/verbs.h>
 #include <infiniband/kern-abi.h>
 #include <infiniband/cmd_ioctl.h>
-#include <ccan/list.h>
+#include <ccan/list/list.h>
 #ifdef HAVE_CONFIG_H
 #include <config.h>
 #endif
