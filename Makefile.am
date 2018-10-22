@@ -198,6 +198,7 @@ src/urdmad/urdmad.service: src/urdmad/urdmad.service.in
 all-local: src/urdmad/urdmad.service
 
 MOSTLYCLEANFILES = src/urdmad/urdmad.service
+DISTCLEANFILES = include/kernel-abi/ib_user_verbs.h
 
 install-data-hook:
 	$(MKDIR_P) $(DESTDIR)$(prefix)/lib/systemd/user
