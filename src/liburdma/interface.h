@@ -137,7 +137,7 @@ struct usiw_recv_wqe {
 struct pending_datagram_info {
 	uint64_t next_retransmit;
 	struct usiw_send_wqe *wqe;
-	struct read_response_state *readresp;
+	struct read_atomic_response_state *readresp;
 	uint16_t transmit_count;
 	uint16_t ddp_length;
 	uint32_t ddp_raw_cksum;
@@ -155,6 +155,7 @@ enum usiw_send_opcode {
 	usiw_wr_send = 0,
 	usiw_wr_write = 1,
 	usiw_wr_read = 2,
+	usiw_wr_atomic = 3,
 };
 
 enum {
@@ -167,6 +168,9 @@ struct usiw_send_wqe {
 	void *wr_context;
 	struct ee_state *remote_ep;
 	uint64_t remote_addr;
+	uint64_t atomic_add_swap;
+	uint64_t atomic_compare;
+	uint8_t atomic_opcode;
 	uint32_t rkey;
 	uint32_t flags;
 	struct list_node active;
@@ -242,6 +246,7 @@ struct ee_state {
 
 	/* RX TRP state */
 	uint32_t recv_ack_psn;
+	/* This tracks both READ and atomic responses */
 	struct binheap *recv_rresp_last_psn;
 
 	uint32_t trp_flags;
@@ -256,14 +261,32 @@ struct ee_state {
 	struct rte_ring *rx_queue;
 };
 
-struct read_response_state {
+struct read_atomic_response_state {
 	char *vaddr;
-	uint32_t msg_size;
 	uint32_t sink_stag; /* network byte order */
-	uint64_t sink_offset; /* host byte order */
 	bool active;
-	struct ee_state *sink_ep;
+	enum {
+		read_response,
+		atomic_response,
+	} type;
 	struct list_node qp_entry;
+	struct ee_state *sink_ep;
+
+	union {
+		struct {
+			uint32_t msg_size;
+			uint64_t sink_offset; /* host byte order */
+		} read;
+		struct {
+			unsigned int opcode;
+			uint32_t req_id;
+			uint64_t add_swap;
+			uint64_t add_swap_mask;
+			uint64_t compare;
+			uint64_t compare_mask;
+			bool done;
+		} atomic;
+	};
 };
 
 enum {
@@ -299,7 +322,7 @@ struct usiw_qp {
 	uint64_t timer_last;
 	struct usiw_recv_wqe_queue rq0;
 
-	struct read_response_state *readresp_store;
+	struct read_atomic_response_state *readresp_store;
 	uint32_t readresp_head_msn;
 	uint8_t ord_active;
 
@@ -367,6 +390,7 @@ struct usiw_device {
 	struct rte_mempool *tx_ddp_mempool;
 	struct rte_mempool *tx_hdr_mempool;
 	struct urdmad_queue_range *queue_ranges;
+	struct usiw_driver *driver;
 	uint16_t portid;
 	uint16_t max_qp;
 	uint64_t flags;
@@ -386,6 +410,7 @@ struct usiw_driver {
 	uint32_t lcore_mask[RTE_MAX_LCORE / 32];
 	uint16_t device_count;
 	uint16_t *max_qp;
+	pthread_mutex_t *rdma_atomic_mutex;
 };
 
 /** Starts the progress thread. */

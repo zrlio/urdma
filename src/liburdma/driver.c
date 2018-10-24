@@ -232,6 +232,7 @@ usiw_driver_init(int portid)
 
 	dev->urdmad_fd = driver->urdmad_fd;
 	dev->max_qp = driver->max_qp[dev->portid];
+	dev->driver = driver;
 
 	return &dev->vdev.device;
 } /* usiw_driver_init */
@@ -410,13 +411,15 @@ do_hello(void)
 	struct urdmad_sock_hello_req req;
 	struct urdmad_sock_hello_resp *resp;
 	struct pollfd poll_list;
+	uint32_t lid;
 	int i;
 	ssize_t ret;
 	int resp_size;
 
 	memset(&req, 0, sizeof(req));
 	req.hdr.opcode = rte_cpu_to_be_32(urdma_sock_hello_req);
-	req.req_lcore_count = rte_cpu_to_be_32(1);
+	req.proto_version = URDMA_SOCK_PROTO_VERSION;
+	req.req_lcore_count = rte_cpu_to_be_16(1);
 	ret = send(driver->urdmad_fd, &req, sizeof(req), 0);
 	if (ret != sizeof(req)) {
 		return -1;
@@ -438,10 +441,14 @@ do_hello(void)
 		return -1;
 	}
 
+	if (resp->proto_version != URDMA_SOCK_PROTO_VERSION)
+		return -1;
 	for (i = 0; i < RTE_DIM(resp->lcore_mask); i++) {
 		driver->lcore_mask[i] = rte_be_to_cpu_32(resp->lcore_mask[i]);
 	}
 	driver->device_count = rte_be_to_cpu_16(resp->device_count);
+	driver->rdma_atomic_mutex = (void *)(uintptr_t)rte_be_to_cpu_64(
+				resp->rdma_atomic_mutex_addr);
 	driver->max_qp = malloc(driver->device_count * sizeof(*driver->max_qp));
 	if (!driver->max_qp) {
 		return -1;

@@ -50,6 +50,8 @@
 
 #include <rte_ether.h>
 
+#define URDMA_SOCK_PROTO_VERSION 1
+
 /** Internal state machine of the queue pair. */
 enum urdma_qp_state {
 	usiw_qp_unbound = 0,
@@ -134,16 +136,25 @@ struct urdmad_sock_qp_msg {
 
 struct urdmad_sock_hello_req {
 	struct urdmad_sock_msg hdr;
-	uint32_t req_lcore_count;
+	uint8_t proto_version;
+	uint8_t reserved9;
+	uint16_t req_lcore_count;
 };
+static_assert(offsetof(struct urdmad_sock_hello_req, reserved9) == 9,
+		"hello_req reserved9 field is at wrong offset");
 
 struct urdmad_sock_hello_resp {
 	struct urdmad_sock_msg hdr;
-	uint16_t max_lcore;
+	uint8_t proto_version;
+	uint8_t max_lcore;
 	uint16_t device_count;
+	uint32_t reserved12;
+	uint64_t rdma_atomic_mutex_addr;
 	uint32_t lcore_mask[RTE_MAX_LCORE / 32];
 	uint16_t max_qp[];
 };
+static_assert(offsetof(struct urdmad_sock_hello_resp, reserved12) == 12,
+		"reserved12 field is at wrong offset");
 
 union urdmad_sock_any_msg {
 	struct urdmad_sock_msg hdr;
