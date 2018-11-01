@@ -37,7 +37,7 @@
 
 #include <linux/types.h>
 #include <assert.h>
-#include <ccan/container_of.h>
+#include <ccan/container_of/container_of.h>
 
 #include <rdma/ib_user_verbs.h>
 #include <kernel-abi/ib_user_verbs.h>

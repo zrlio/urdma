@@ -15,6 +15,7 @@ Requirements
  - json-c
  - uthash (included in Fedora, Ubuntu, openSUSE, and EPEL for RHEL
    repositories)
+ - Python 2.7 (for build system)
 
 Setup instructions
 ------------------

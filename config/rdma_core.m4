@@ -44,13 +44,13 @@ AC_DEFUN([_URDMA_FUNC_VERBS_INIT_AND_ALLOC_CONTEXT],
 AC_CACHE_CHECK([number of arguments verbs_init_and_alloc_context takes],
 	[dpdk_cv_func_verbs_init_and_alloc_context],
 	[old_CPPFLAGS="${CPPFLAGS}"
-	CPPFLAGS="-I${srcdir} -I${srcdir}/rdma-core/${ibverbs_pabi_version} ${CPPFLAGS}"
+	CPPFLAGS="-I${srcdir} -I${srcdir}/rdma-core/${ibverbs_pabi_version} -Iinclude -I${srcdir}/rdma-core/${ibverbs_pabi_version}/rdma ${CPPFLAGS}"
 	AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <infiniband/driver.h>]],
 					 [verbs_init_and_alloc_context@{:@@:}@;])],
 	[[# No-argument case is invalid and means we didn't find a prototype]]
 	[dpdk_cv_func_verbs_init_and_alloc_context=no],
 	[AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <infiniband/driver.h>]],
-					 [[struct foo { struct verbs_context bar; } *baz; verbs_init_and_alloc_context@{:@NULL, NULL, baz, bar, 0@:}@;]])],
+					 [[struct foo { struct verbs_context bar; } *baz; verbs_init_and_alloc_context@{:@NULL, 0, baz, bar, 0@:}@;]])],
 	[dpdk_cv_func_verbs_init_and_alloc_context=5],
 	[AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <infiniband/driver.h>]],
 					 [[struct foo { struct verbs_context bar; } *baz; verbs_init_and_alloc_context@{:@NULL, NULL, baz, bar@:}@;]])],
@@ -94,6 +94,13 @@ AC_DEFINE_UNQUOTED([IBVERBS_PABI_VERSION], [${ibverbs_pabi_version}],
 		   [Define to rdma-core private ABI version])
 AC_SUBST([ibverbs_pabi_version])
 
+if test $ibverbs_pabi_version -ge 18; then
+	mkdir -p include/kernel-abi
+	${srcdir}/config/make_abi_structs.py \
+		${srcdir}/rdma-core/${ibverbs_pabi_version}/rdma/ib_user_verbs.h \
+		include/kernel-abi/ib_user_verbs.h
+	CPPFLAGS="${CPPFLAGS} -Iinclude"
+fi
 if test $ibverbs_pabi_version -ge 17; then
 	_URDMA_FUNC_VERBS_INIT_AND_ALLOC_CONTEXT
 fi

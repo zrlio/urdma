@@ -44,7 +44,8 @@ AM_CFLAGS = $(EXTRA_CFLAGS) \
 	    -fno-strict-aliasing \
 	    -fvisibility=hidden
 
-EXTRA_DIST = gpl-2.0.txt config/version.sh src/urdmad/urdmad.service.in
+EXTRA_DIST = gpl-2.0.txt config/version.sh src/urdmad/urdmad.service.in \
+	     config/make_abi_structs.py
 include_HEADERS = include/urdma_kabi.h \
 		include/urdmad_private.h \
 		include/proto.h \
@@ -68,8 +69,14 @@ lib_LTLIBRARIES = src/liburdma/liburdma.la
 EXTRA_src_liburdma_liburdma_la_SOURCES = \
 	rdma-core/17/infiniband/kern-abi.h \
 	rdma-core/17/infiniband/driver.h \
+	rdma-core/18/infiniband/cmd_ioctl.h \
 	rdma-core/18/infiniband/kern-abi.h \
-	rdma-core/18/infiniband/driver.h
+	rdma-core/18/infiniband/driver.h \
+	rdma-core/18/rdma/rdma_user_ioctl_cmds.h \
+	rdma-core/18/rdma/rdma_user_ioctl.h \
+	rdma-core/18/rdma/hfi/hfi1_ioctl.h \
+	rdma-core/18/rdma/ib_user_mad.h \
+	rdma-core/18/rdma/ib_user_verbs.h
 src_liburdma_liburdma_la_SOURCES = \
 	src/liburdma/driver.c \
 	src/liburdma/interface.c \
@@ -191,6 +198,7 @@ src/urdmad/urdmad.service: src/urdmad/urdmad.service.in
 all-local: src/urdmad/urdmad.service
 
 MOSTLYCLEANFILES = src/urdmad/urdmad.service
+DISTCLEANFILES = include/kernel-abi/ib_user_verbs.h
 
 install-data-hook:
 	$(MKDIR_P) $(DESTDIR)$(prefix)/lib/systemd/user
