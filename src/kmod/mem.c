@@ -338,5 +338,7 @@ struct dma_map_ops usiw_dma_generic_ops = {
 #ifdef HAVE_DMA_MAP_OPS_SET_DMA_MASK
 	.set_dma_mask		= siw_dma_generic_set_mask,
 #endif
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 18, 0)
 	.is_phys		= 1
+#endif
 };
