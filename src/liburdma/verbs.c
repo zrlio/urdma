@@ -539,8 +539,8 @@ usiw_create_cq(struct ibv_context *context, int size,
 
 	cq->cq_id = resp.priv.cq_id;
 	snprintf(name, RTE_RING_NAMESIZE, "cq%" PRIu32 "_ready_ring", cq->cq_id);
-	cq->cqe_ring = rte_malloc(NULL, rte_ring_get_memsize(size + 1),
-			socket_id);
+	cq->cqe_ring = rte_malloc_socket(NULL, rte_ring_get_memsize(size + 1),
+			RTE_CACHE_LINE_SIZE, socket_id);
 	if (!cq->cqe_ring) {
 		errno = rte_errno;
 		ibv_cmd_destroy_cq(&cq->ib_cq);
@@ -556,8 +556,8 @@ usiw_create_cq(struct ibv_context *context, int size,
 		return NULL;
 	}
 	snprintf(name, RTE_RING_NAMESIZE, "cq%" PRIu32 "_empty_ring", cq->cq_id);
-	cq->free_ring = rte_malloc(NULL, rte_ring_get_memsize(size + 1),
-			socket_id);
+	cq->free_ring = rte_malloc_socket(NULL, rte_ring_get_memsize(size + 1),
+			RTE_CACHE_LINE_SIZE, socket_id);
 	if (!cq->cqe_ring) {
 		errno = rte_errno;
 		rte_free(cq->cqe_ring);
