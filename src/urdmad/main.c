@@ -1000,6 +1000,11 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 	mbuf_size = RTE_PKTMBUF_HEADROOM + port_config->mtu
 		+ ETHER_HDR_LEN + ETHER_CRC_LEN + urdma_vlan_space;
 
+	/* Some NICs (e.g. ixgbe) need at least 2KB buffer to RX standard
+	 * Ethernet frame without splitting it into multiple segments. */
+	mbuf_size = mbuf_size > RTE_MBUF_DEFAULT_BUF_SIZE ?
+		mbuf_size : RTE_MBUF_DEFAULT_BUF_SIZE;
+
 	snprintf(name, RTE_MEMPOOL_NAMESIZE,
 			"port_%u_rx_mempool", iface->portid);
 	RTE_LOG(DEBUG, USER1, "create rx mempool for port %" PRIu16 " with %u mbufs of size %zu\n",
