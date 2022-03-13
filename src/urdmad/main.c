@@ -101,6 +101,7 @@ static void init_core_mask(void)
 	{
 		if (!lcore_config[i].detected)
 		{
+			RTE_LOG(INFO, USER1, "%u cores available\n", core_avail);
 			return;
 		}
 		else if (config->lcore_role[i] == ROLE_OFF)
@@ -109,7 +110,6 @@ static void init_core_mask(void)
 			core_avail++;
 		}
 	}
-	RTE_LOG(INFO, USER1, "%u cores available\n", core_avail);
 } /* init_core_mask */
 
 /** Reserve count lcores for the given process.  Expects out_mask to be a
