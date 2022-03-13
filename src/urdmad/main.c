@@ -97,18 +97,20 @@ static void init_core_mask(void)
 	unsigned int i;
 
 	config = rte_eal_get_configuration();
-	for (i = 0; i < RTE_MAX_LCORE; ++i) {
-		if (!lcore_config[i].detected) {
+	for (i = 0; i < RTE_MAX_LCORE; ++i)
+	{
+		if (!lcore_config[i].detected)
+		{
 			return;
-		} else if (config->lcore_role[i] == ROLE_OFF) {
-			core_mask[i >> core_mask_shift]
-						|= 1 << (i & core_mask_mask);
+		}
+		else if (config->lcore_role[i] == ROLE_OFF)
+		{
+			core_mask[i >> core_mask_shift] |= 1 << (i & core_mask_mask);
 			core_avail++;
 		}
 	}
 	RTE_LOG(INFO, USER1, "%u cores available\n", core_avail);
 } /* init_core_mask */
-
 
 /** Reserve count lcores for the given process.  Expects out_mask to be a
  * zero-initialized bitmask that can hold RTE_MAX_LCORE bits; i.e., an array
@@ -121,12 +123,15 @@ static bool reserve_cores(unsigned int count, uint32_t *out_mask)
 
 	RTE_LOG(DEBUG, USER1, "requesting %u cores; %u cores available\n",
 			count, core_avail);
-	if (count > core_avail) {
+	if (count > core_avail)
+	{
 		return false;
 	}
 
-	for (i = 0, j = 0; i < count; ++i) {
-		while (!core_mask[j]) {
+	for (i = 0, j = 0; i < count; ++i)
+	{
+		while (!core_mask[j])
+		{
 			j++;
 			assert(j < RTE_MAX_LCORE / 32);
 		}
@@ -139,7 +144,6 @@ static bool reserve_cores(unsigned int count, uint32_t *out_mask)
 	return true;
 } /* reserve_cores */
 
-
 /** Returns count lcores from the given process.  Expects in_mask to be a
  * bitmask that can hold RTE_MAX_LCORE bits; i.e., an array with at least
  * (RTE_MAX_LCORE / 32) uint32_t elements, where each lcore being returned is
@@ -149,9 +153,11 @@ static void return_lcores(uint32_t *in_mask)
 	uint32_t tmp, bit;
 	unsigned int i;
 
-	for (i = 0; i < RTE_MAX_LCORE / (8 * sizeof(*in_mask)); ++i) {
+	for (i = 0; i < RTE_MAX_LCORE / (8 * sizeof(*in_mask)); ++i)
+	{
 		tmp = in_mask[i];
-		while (tmp) {
+		while (tmp)
+		{
 			core_avail++;
 			bit = 1 << rte_bsf32(tmp);
 			tmp &= ~bit;
@@ -160,18 +166,21 @@ static void return_lcores(uint32_t *in_mask)
 	}
 } /* return_lcores */
 
-
 static void
 return_qp(struct usiw_port *dev, struct urdmad_qp *qp)
 {
-	enum { mbuf_count = 4 };
+	enum
+	{
+		mbuf_count = 4
+	};
 	struct rte_mbuf *mbuf[mbuf_count];
 	int ret, count;
 
 	list_del(&qp->urdmad__entry);
 	list_add_tail(&dev->avail_qp, &qp->urdmad__entry);
 
-	if (dev->flags & port_5tuple) {
+	if (dev->flags & port_5tuple)
+	{
 		struct rte_eth_ntuple_filter ntuple;
 		memset(&ntuple, 0, sizeof(ntuple));
 		ntuple.flags = RTE_5TUPLE_FLAGS;
@@ -185,14 +194,17 @@ return_qp(struct usiw_port *dev, struct urdmad_qp *qp)
 		ntuple.queue = qp->rx_queue;
 
 		ret = rte_eth_dev_filter_ctrl(dev->portid,
-				RTE_ETH_FILTER_NTUPLE, RTE_ETH_FILTER_DELETE,
-				&ntuple);
+									  RTE_ETH_FILTER_NTUPLE, RTE_ETH_FILTER_DELETE,
+									  &ntuple);
 
-		if (ret) {
+		if (ret)
+		{
 			RTE_LOG(WARNING, USER1, "Could not delete 5tuple filter for qp %" PRIu32 ": %s\n",
 					qp->qp_id, rte_strerror(-ret));
 		}
-	} else if (dev->flags & port_2tuple) {
+	}
+	else if (dev->flags & port_2tuple)
+	{
 		struct rte_eth_ntuple_filter ntuple;
 		memset(&ntuple, 0, sizeof(ntuple));
 		ntuple.flags = RTE_2TUPLE_FLAGS;
@@ -204,15 +216,18 @@ return_qp(struct usiw_port *dev, struct urdmad_qp *qp)
 		ntuple.queue = qp->rx_queue;
 
 		ret = rte_eth_dev_filter_ctrl(dev->portid,
-				RTE_ETH_FILTER_NTUPLE, RTE_ETH_FILTER_DELETE,
-				&ntuple);
+									  RTE_ETH_FILTER_NTUPLE, RTE_ETH_FILTER_DELETE,
+									  &ntuple);
 
-		if (ret != 0) {
+		if (ret != 0)
+		{
 			RTE_LOG(CRIT, USER1, "Could not delete 2tuple UDP filter for qp %" PRIu32 ": %s\n",
 					qp->qp_id, rte_strerror(-ret));
 			return;
 		}
-	} else if (dev->flags & port_fdir) {
+	}
+	else if (dev->flags & port_fdir)
+	{
 		struct rte_eth_fdir_filter fdirf;
 		memset(&fdirf, 0, sizeof(fdirf));
 		fdirf.input.flow_type = RTE_ETH_FLOW_NONFRAG_IPV4_UDP;
@@ -223,10 +238,11 @@ return_qp(struct usiw_port *dev, struct urdmad_qp *qp)
 		fdirf.action.rx_queue = qp->rx_queue;
 		fdirf.input.flow.udp4_flow.dst_port = qp->local_udp_port;
 		ret = rte_eth_dev_filter_ctrl(dev->portid,
-				RTE_ETH_FILTER_FDIR, RTE_ETH_FILTER_DELETE,
-				&fdirf);
+									  RTE_ETH_FILTER_FDIR, RTE_ETH_FILTER_DELETE,
+									  &fdirf);
 
-		if (ret) {
+		if (ret)
+		{
 			RTE_LOG(DEBUG, USER1, "Could not delete fdir filter for qp %" PRIu32 ": %s\n",
 					qp->qp_id, rte_strerror(-ret));
 		}
@@ -234,33 +250,36 @@ return_qp(struct usiw_port *dev, struct urdmad_qp *qp)
 
 	/* Drain the queue of any outstanding messages. */
 	count = 0;
-	do {
+	do
+	{
 		ret = rte_eth_rx_burst(dev->portid, qp->rx_queue,
-				mbuf, mbuf_count);
+							   mbuf, mbuf_count);
 		count += ret;
 	} while (ret > 0);
-	if (count > 0) {
+	if (count > 0)
+	{
 		RTE_LOG(INFO, USER1, "Drained %d packets from qp %" PRIu32 "\n",
 				count, qp->qp_id);
 	}
 
 	ret = rte_eth_dev_rx_queue_stop(dev->portid, qp->rx_queue);
-	if (ret < 0 && ret != -ENOTSUP) {
+	if (ret < 0 && ret != -ENOTSUP)
+	{
 		RTE_LOG(INFO, USER1, "Disable RX queue %u failed: %s\n",
 				qp->rx_queue, rte_strerror(-ret));
 	}
 
 	ret = rte_eth_dev_tx_queue_stop(dev->portid, qp->tx_queue);
-	if (ret < 0 && ret != -ENOTSUP) {
+	if (ret < 0 && ret != -ENOTSUP)
+	{
 		RTE_LOG(INFO, USER1, "Disable RX queue %u failed: %s\n",
 				qp->tx_queue, rte_strerror(-ret));
 	}
 } /* return_qp */
 
-
 static int
 add_2tuple_filter(unsigned int portid, unsigned int dest_udp_port,
-		unsigned int rx_queue)
+				  unsigned int rx_queue)
 {
 	struct rte_eth_ntuple_filter ntuple;
 	memset(&ntuple, 0, sizeof(ntuple));
@@ -273,19 +292,18 @@ add_2tuple_filter(unsigned int portid, unsigned int dest_udp_port,
 	ntuple.queue = rx_queue;
 
 	RTE_LOG(DEBUG, USER1, "ntuple: assign rx queue %" PRIu16 ": UDP port %" PRIu16 "\n",
-				ntuple.queue,
-				rte_be_to_cpu_16(dest_udp_port));
+			ntuple.queue,
+			rte_be_to_cpu_16(dest_udp_port));
 	return rte_eth_dev_filter_ctrl(portid,
-			RTE_ETH_FILTER_NTUPLE, RTE_ETH_FILTER_ADD,
-			&ntuple);
+								   RTE_ETH_FILTER_NTUPLE, RTE_ETH_FILTER_ADD,
+								   &ntuple);
 } /* add_2tuple_filter */
-
 
 /* Perfoms connection setup as part of the connection established event. This
  * function takes the conn_event_lock and releases it before exiting. */
 static int
 do_setup_qp(struct urdma_qp_connected_event *event, struct usiw_port *dev,
-		struct urdmad_qp *qp)
+			struct urdmad_qp *qp)
 {
 	struct rte_eth_rxq_info rxq_info;
 	struct rte_eth_txq_info txq_info;
@@ -302,7 +320,8 @@ do_setup_qp(struct urdma_qp_connected_event *event, struct usiw_port *dev,
 	qp->remote_ipv4_addr = event->dst_ipv4;
 	qp->ord_max = event->ord_max;
 	qp->ird_max = event->ird_max;
-	switch (dev->mtu) {
+	switch (dev->mtu)
+	{
 	case 9000:
 		qp->mtu = 8192;
 		break;
@@ -310,29 +329,38 @@ do_setup_qp(struct urdma_qp_connected_event *event, struct usiw_port *dev,
 		qp->mtu = 1024;
 	}
 	ret = rte_eth_rx_queue_info_get(event->urdmad_dev_id,
-			event->urdmad_qp_id, &rxq_info);
-	if (ret < 0) {
+									event->urdmad_qp_id, &rxq_info);
+	if (ret < 0)
+	{
 		qp->rx_desc_count = dev->rx_desc_count;
-	} else {
+	}
+	else
+	{
 		qp->rx_desc_count = rxq_info.nb_desc;
 	}
 	ret = rte_eth_tx_queue_info_get(event->urdmad_dev_id,
-			event->urdmad_qp_id, &txq_info);
-	if (ret < 0) {
+									event->urdmad_qp_id, &txq_info);
+	if (ret < 0)
+	{
 		qp->tx_desc_count = dev->tx_desc_count;
-	} else {
+	}
+	else
+	{
 		qp->tx_desc_count = txq_info.nb_desc;
 	}
 	qp->rx_burst_size = dev->rx_burst_size;
-	if (qp->rx_burst_size > qp->rx_desc_count + 1) {
+	if (qp->rx_burst_size > qp->rx_desc_count + 1)
+	{
 		qp->rx_burst_size = qp->rx_desc_count + 1;
 	}
 	qp->tx_burst_size = dev->tx_burst_size;
-	if (qp->tx_burst_size > dev->tx_desc_count) {
+	if (qp->tx_burst_size > dev->tx_desc_count)
+	{
 		qp->tx_burst_size = dev->tx_desc_count;
 	}
 	memcpy(&qp->remote_ether_addr, event->dst_ether, ETHER_ADDR_LEN);
-	if (dev->flags & port_5tuple) {
+	if (dev->flags & port_5tuple)
+	{
 		struct rte_eth_ntuple_filter ntuple;
 		memset(&ntuple, 0, sizeof(ntuple));
 		ntuple.flags = RTE_5TUPLE_FLAGS;
@@ -346,32 +374,39 @@ do_setup_qp(struct urdma_qp_connected_event *event, struct usiw_port *dev,
 		ntuple.queue = qp->rx_queue;
 
 		RTE_LOG(DEBUG, USER1, "ntuple: assign rx queue %" PRIu16 ": IP address %" PRIx32 ", UDP port %" PRIu16 "\n",
-					ntuple.queue,
-					rte_be_to_cpu_32(dev->ipv4_addr),
-					rte_be_to_cpu_16(event->src_port));
+				ntuple.queue,
+				rte_be_to_cpu_32(dev->ipv4_addr),
+				rte_be_to_cpu_16(event->src_port));
 		ret = rte_eth_dev_filter_ctrl(dev->portid,
-				RTE_ETH_FILTER_NTUPLE, RTE_ETH_FILTER_ADD,
-				&ntuple);
-		if (ret == -ENOTSUP) {
+									  RTE_ETH_FILTER_NTUPLE, RTE_ETH_FILTER_ADD,
+									  &ntuple);
+		if (ret == -ENOTSUP)
+		{
 			dev->flags = (dev->flags & ~port_5tuple) | port_2tuple;
 			ret = add_2tuple_filter(dev->portid,
-						qp->local_udp_port,
-						qp->rx_queue);
+									qp->local_udp_port,
+									qp->rx_queue);
 		}
-		if (ret != 0) {
+		if (ret != 0)
+		{
 			RTE_LOG(CRIT, USER1, "Could not add ntuple UDP filter: %s\n",
 					rte_strerror(-ret));
 			goto unlock;
 		}
-	} else if (dev->flags & port_2tuple) {
+	}
+	else if (dev->flags & port_2tuple)
+	{
 		ret = add_2tuple_filter(dev->portid, qp->local_udp_port,
-				qp->rx_queue);
-		if (ret != 0) {
+								qp->rx_queue);
+		if (ret != 0)
+		{
 			RTE_LOG(CRIT, USER1, "Could not add 2tuple UDP filter: %s\n",
 					rte_strerror(-ret));
 			goto unlock;
 		}
-	} else if (dev->flags & port_fdir) {
+	}
+	else if (dev->flags & port_fdir)
+	{
 		struct rte_eth_fdir_filter fdirf;
 		memset(&fdirf, 0, sizeof(fdirf));
 		fdirf.input.flow_type = RTE_ETH_FLOW_NONFRAG_IPV4_UDP;
@@ -382,12 +417,13 @@ do_setup_qp(struct urdma_qp_connected_event *event, struct usiw_port *dev,
 		fdirf.action.rx_queue = event->rxq;
 		fdirf.input.flow.udp4_flow.dst_port = event->src_port;
 		RTE_LOG(DEBUG, USER1, "fdir: assign rx queue %d: IP address %" PRIx32 ", UDP port %" PRIu16 "\n",
-					fdirf.action.rx_queue,
-					rte_be_to_cpu_32(dev->ipv4_addr),
-					rte_be_to_cpu_16(event->src_port));
+				fdirf.action.rx_queue,
+				rte_be_to_cpu_32(dev->ipv4_addr),
+				rte_be_to_cpu_16(event->src_port));
 		ret = rte_eth_dev_filter_ctrl(dev->portid, RTE_ETH_FILTER_FDIR,
-				RTE_ETH_FILTER_ADD, &fdirf);
-		if (ret != 0) {
+									  RTE_ETH_FILTER_ADD, &fdirf);
+		if (ret != 0)
+		{
 			RTE_LOG(CRIT, USER1, "Could not add fdir UDP filter: %s\n",
 					rte_strerror(-ret));
 			goto unlock;
@@ -396,14 +432,16 @@ do_setup_qp(struct urdma_qp_connected_event *event, struct usiw_port *dev,
 
 	/* Start the queues now that we have bound to an interface */
 	ret = rte_eth_dev_rx_queue_start(event->urdmad_dev_id, event->rxq);
-	if (ret < 0 && ret != -ENOTSUP) {
+	if (ret < 0 && ret != -ENOTSUP)
+	{
 		RTE_LOG(DEBUG, USER1, "Enable RX queue %u failed: %s\n",
 				event->rxq, rte_strerror(-ret));
 		goto unlock;
 	}
 
 	ret = rte_eth_dev_tx_queue_start(event->urdmad_dev_id, event->txq);
-	if (ret < 0 && ret != -ENOTSUP) {
+	if (ret < 0 && ret != -ENOTSUP)
+	{
 		RTE_LOG(DEBUG, USER1, "Enable RX queue %u failed: %s\n",
 				event->txq, rte_strerror(-ret));
 		goto unlock;
@@ -417,7 +455,6 @@ unlock:
 	return ret;
 } /* setup_qp */
 
-
 static void
 handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 {
@@ -427,7 +464,8 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 	ssize_t ret;
 
 	if (WARN_ONCE(count < sizeof(*event),
-			"Read only %zd/%zu bytes\n", count, sizeof(*event))) {
+				  "Read only %zd/%zu bytes\n", count, sizeof(*event)))
+	{
 		return;
 	}
 
@@ -438,23 +476,26 @@ handle_qp_connected_event(struct urdma_qp_connected_event *event, size_t count)
 	dev = &driver->ports[event->urdmad_dev_id];
 	qp = &dev->qp[event->urdmad_qp_id];
 	ret = do_setup_qp(event, dev, qp);
-	if (ret) {
+	if (ret)
+	{
 		return;
 	}
 	rtr_event.event_type = SIW_EVENT_QP_RTR;
 	rtr_event.kmod_qp_id = event->kmod_qp_id;
 	ret = write(driver->chardev.fd, &rtr_event, sizeof(rtr_event));
 	if (WARN_ONCE(ret < 0, "Error writing event file: %s\n",
-							strerror(errno))) {
+				  strerror(errno)))
+	{
 		return;
-	} else if (WARN_ONCE((size_t)ret < sizeof(rtr_event),
-			"Wrote only %zd/%zu bytes\n", ret, sizeof(rtr_event))) {
+	}
+	else if (WARN_ONCE((size_t)ret < sizeof(rtr_event),
+					   "Wrote only %zd/%zu bytes\n", ret, sizeof(rtr_event)))
+	{
 		return;
 	}
 	RTE_LOG(DEBUG, USER1, "Post RTR event for queue pair %" PRIu32 "; tx_queue=%" PRIu16 " rx_queue=%" PRIu16 "\n",
 			event->kmod_qp_id, event->txq, event->rxq);
-}	/* handle_qp_connected_event */
-
+} /* handle_qp_connected_event */
 
 static void
 chardev_data_ready(struct urdma_fd *fd)
@@ -463,23 +504,25 @@ chardev_data_ready(struct urdma_fd *fd)
 	ssize_t ret;
 
 	ret = read(fd->fd, &event, sizeof(event));
-	if (ret < 0 && errno == EAGAIN) {
+	if (ret < 0 && errno == EAGAIN)
+	{
 		return;
 	}
 	if (WARN_ONCE(ret < 0, "Error reading event file: %s\n",
-							strerror(errno))) {
+				  strerror(errno)))
+	{
 		return;
 	}
 
 	if (WARN_ONCE(event.event_type != SIW_EVENT_QP_CONNECTED,
-			"Received unexpected event_type %d from kernel\n",
-			event.event_type)) {
+				  "Received unexpected event_type %d from kernel\n",
+				  event.event_type))
+	{
 		return;
 	}
 
 	handle_qp_connected_event(&event, ret);
 } /* chardev_data_ready */
-
 
 static int
 send_create_qp_resp(struct urdma_process *process, struct urdmad_qp *qp)
@@ -492,16 +535,20 @@ send_create_qp_resp(struct urdma_process *process, struct urdmad_qp *qp)
 	msg.hdr.qp_id = rte_cpu_to_be_16(qp->qp_id);
 	msg.ptr = rte_cpu_to_be_64((uintptr_t)qp);
 	ret = send(process->fd.fd, &msg, sizeof(msg), 0);
-	if (ret < 0) {
+	if (ret < 0)
+	{
 		return ret;
-	} else if (ret == sizeof(msg)) {
+	}
+	else if (ret == sizeof(msg))
+	{
 		return 0;
-	} else {
+	}
+	else
+	{
 		errno = EMSGSIZE;
 		return -1;
 	}
 } /* send_create_qp_resp */
-
 
 static int
 handle_hello(struct urdma_process *process, struct urdmad_sock_hello_req *req)
@@ -511,19 +558,21 @@ handle_hello(struct urdma_process *process, struct urdmad_sock_hello_req *req)
 	size_t resp_size;
 	int i;
 
-	if (req->proto_version != URDMA_SOCK_PROTO_VERSION) {
+	if (req->proto_version != URDMA_SOCK_PROTO_VERSION)
+	{
 		RTE_LOG(ERR, USER1,
-			"[fd=%d] Socket protocol version mismatch: expected %" PRIu8 "; client sent %" PRIu8 "\n",
-			process->fd.fd, URDMA_SOCK_PROTO_VERSION,
-			req->proto_version);
+				"[fd=%d] Socket protocol version mismatch: expected %" PRIu8 "; client sent %" PRIu8 "\n",
+				process->fd.fd, URDMA_SOCK_PROTO_VERSION,
+				req->proto_version);
 		return -1;
 	}
 
 	if (!reserve_cores(rte_cpu_to_be_16(req->req_lcore_count),
-				process->core_mask)) {
+					   process->core_mask))
+	{
 		RTE_LOG(ERR, USER1,
-			"[fd=%d] Not enough lcores for client; %" PRIu16 " requested\n",
-			process->fd.fd, rte_be_to_cpu_16(req->req_lcore_count));
+				"[fd=%d] Not enough lcores for client; %" PRIu16 " requested\n",
+				process->fd.fd, rte_be_to_cpu_16(req->req_lcore_count));
 		return -1;
 	}
 
@@ -536,18 +585,25 @@ handle_hello(struct urdma_process *process, struct urdmad_sock_hello_req *req)
 	resp->device_count = rte_cpu_to_be_16(driver->port_count);
 	resp->rdma_atomic_mutex_addr =
 		rte_cpu_to_be_64((uintptr_t)rdma_atomic_mutex);
-	for (i = 0; i < RTE_DIM(resp->lcore_mask); i++) {
+	for (i = 0; i < RTE_DIM(resp->lcore_mask); i++)
+	{
 		resp->lcore_mask[i] = rte_cpu_to_be_32(process->core_mask[i]);
 	}
-	for (i = 0; i < driver->port_count; ++i) {
+	for (i = 0; i < driver->port_count; ++i)
+	{
 		resp->max_qp[i] = rte_cpu_to_be_16(driver->ports[i].max_qp);
 	}
 	ret = send(process->fd.fd, resp, resp_size, 0);
-	if (ret < 0) {
+	if (ret < 0)
+	{
 		return ret;
-	} else if (ret == resp_size) {
+	}
+	else if (ret == resp_size)
+	{
 		return 0;
-	} else {
+	}
+	else
+	{
 		errno = EMSGSIZE;
 		return -1;
 	}
@@ -555,12 +611,10 @@ handle_hello(struct urdma_process *process, struct urdmad_sock_hello_req *req)
 	return 0;
 } /* handle_hello */
 
-
 static void
 process_data_ready(struct urdma_fd *process_fd)
 {
-	struct urdma_process *process
-		= container_of(process_fd, struct urdma_process, fd);
+	struct urdma_process *process = container_of(process_fd, struct urdma_process, fd);
 	struct usiw_port *port;
 	union urdmad_sock_any_msg msg;
 	struct urdmad_qp *qp, *next;
@@ -568,9 +622,11 @@ process_data_ready(struct urdma_fd *process_fd)
 	ssize_t ret;
 
 	ret = recv(process->fd.fd, &msg, sizeof(msg), 0);
-	if (ret < sizeof(struct urdmad_sock_msg)) {
+	if (ret < sizeof(struct urdmad_sock_msg))
+	{
 		RTE_LOG(DEBUG, USER1, "EOF or error on fd %d\n", process->fd.fd);
-		list_for_each_safe(&process->owned_qps, qp, next, urdmad__entry) {
+		list_for_each_safe(&process->owned_qps, qp, next, urdmad__entry)
+		{
 			RTE_LOG(DEBUG, USER1, "Return QP %" PRIu16 " to pool\n",
 					qp->qp_id);
 			return_qp(&driver->ports[qp->dev_id], qp);
@@ -579,10 +635,12 @@ process_data_ready(struct urdma_fd *process_fd)
 		goto err;
 	}
 
-	switch (rte_be_to_cpu_32(msg.hdr.opcode)) {
+	switch (rte_be_to_cpu_32(msg.hdr.opcode))
+	{
 	case urdma_sock_create_qp_req:
 		dev_id = rte_be_to_cpu_16(msg.hdr.dev_id);
-		if (dev_id > driver->port_count) {
+		if (dev_id > driver->port_count)
+		{
 			goto err;
 		}
 		port = &driver->ports[dev_id];
@@ -592,7 +650,8 @@ process_data_ready(struct urdma_fd *process_fd)
 				dev_id, process->fd.fd, qp->qp_id);
 		list_add_tail(&process->owned_qps, &qp->urdmad__entry);
 		ret = send_create_qp_resp(process, qp);
-		if (ret < 0) {
+		if (ret < 0)
+		{
 			goto err;
 		}
 		break;
@@ -601,8 +660,8 @@ process_data_ready(struct urdma_fd *process_fd)
 		qp_id = rte_be_to_cpu_16(msg.hdr.qp_id);
 		RTE_LOG(DEBUG, USER1, "DESTROY QP qp_id=%" PRIu16 " dev_id=%" PRIu16 " on fd %d\n",
 				qp_id, dev_id, process->fd.fd);
-		if (dev_id > driver->port_count
-				|| qp_id > driver->ports[dev_id].max_qp) {
+		if (dev_id > driver->port_count || qp_id > driver->ports[dev_id].max_qp)
+		{
 			goto err;
 		}
 		port = &driver->ports[dev_id];
@@ -611,7 +670,8 @@ process_data_ready(struct urdma_fd *process_fd)
 		break;
 	case urdma_sock_hello_req:
 		fprintf(stderr, "HELLO on fd %d\n", process->fd.fd);
-		if (handle_hello(process, &msg.hello_req) < 0) {
+		if (handle_hello(process, &msg.hello_req) < 0)
+		{
 			goto err;
 		}
 		break;
@@ -630,7 +690,6 @@ err:
 	free(process);
 } /* process_data_ready */
 
-
 static int
 epoll_add(int epoll_fd, struct urdma_fd *fd, int events)
 {
@@ -642,26 +701,28 @@ epoll_add(int epoll_fd, struct urdma_fd *fd, int events)
 	return epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd->fd, &event);
 } /* epoll_add */
 
-
 static void
 listen_data_ready(struct urdma_fd *listen_fd)
 {
 	struct urdma_process *proc;
 
 	proc = malloc(sizeof(*proc));
-	if (!proc) {
+	if (!proc)
+	{
 		return;
 	}
 
 	proc->fd.fd = accept4(listen_fd->fd, NULL, NULL,
-			SOCK_NONBLOCK|SOCK_CLOEXEC);
-	if (proc->fd.fd < 0) {
+						  SOCK_NONBLOCK | SOCK_CLOEXEC);
+	if (proc->fd.fd < 0)
+	{
 		return;
 	}
 	proc->fd.data_ready = &process_data_ready;
-	if (epoll_add(driver->epoll_fd, &proc->fd, EPOLLIN) < 0) {
+	if (epoll_add(driver->epoll_fd, &proc->fd, EPOLLIN) < 0)
+	{
 		rte_exit(EXIT_FAILURE, "Could not add socket to epoll set: %s\n",
-				strerror(errno));
+				 strerror(errno));
 	}
 	list_head_init(&proc->owned_qps);
 	/* This assumes that core_mask is an array member, not a pointer to an
@@ -669,7 +730,6 @@ listen_data_ready(struct urdma_fd *listen_fd)
 	memset(proc->core_mask, 0, sizeof(proc->core_mask));
 	list_add_tail(&driver->processes, &proc->entry);
 } /* listen_data_ready */
-
 
 static void
 timer_data_ready(struct urdma_fd *fd)
@@ -681,27 +741,29 @@ timer_data_ready(struct urdma_fd *fd)
 
 	errno = EMSGSIZE;
 	ret = read(fd->fd, &event_count, sizeof(event_count));
-	if (ret < sizeof(event_count)) {
+	if (ret < sizeof(event_count))
+	{
 		rte_exit(EXIT_FAILURE, "Error disarming timer: %s\n", strerror(errno));
 	}
 
-	for (i = 0; i < driver->port_count; i++) {
+	for (i = 0; i < driver->port_count; i++)
+	{
 		ret = rte_eth_stats_get(driver->ports[i].portid, &stats);
-		if (ret) {
+		if (ret)
+		{
 			continue;
 		}
 
-		if (stats.imissed || stats.ierrors || stats.oerrors
-							|| stats.rx_nombuf) {
+		if (stats.imissed || stats.ierrors || stats.oerrors || stats.rx_nombuf)
+		{
 			RTE_LOG(NOTICE, USER1,
-				"port %u imissed=%" PRIu64 " ierrors=%" PRIu64 " oerrors=%" PRIu64 " rx_nombuf=%" PRIu64 "\n",
-				driver->ports[i].portid, stats.imissed,
-				stats.ierrors, stats.oerrors, stats.rx_nombuf);
+					"port %u imissed=%" PRIu64 " ierrors=%" PRIu64 " oerrors=%" PRIu64 " rx_nombuf=%" PRIu64 "\n",
+					driver->ports[i].portid, stats.imissed,
+					stats.ierrors, stats.oerrors, stats.rx_nombuf);
 		}
 		rte_eth_stats_reset(driver->ports[i].portid);
 	}
 } /* timer_data_ready */
-
 
 static void
 do_poll(int timeout)
@@ -710,23 +772,26 @@ do_poll(int timeout)
 	struct urdma_fd *fd;
 	int ret;
 
-	if (timeout) {
+	if (timeout)
+	{
 		ret = epoll_wait(driver->epoll_fd, &event, 1, timeout);
-		if (ret > 0) {
+		if (ret > 0)
+		{
 			fd = event.data.ptr;
 			fd->data_ready(fd);
-		} else if (WARN_ONCE(ret < 0,
-				"Error polling event file for reading: %s\n",
-							strerror(errno))) {
+		}
+		else if (WARN_ONCE(ret < 0,
+						   "Error polling event file for reading: %s\n",
+						   strerror(errno)))
+		{
 			return;
 		}
 	}
 } /* do_poll */
 
-
 static int
 kni_process_burst(struct usiw_port *port,
-		struct rte_mbuf **rxmbuf, int count)
+				  struct rte_mbuf **rxmbuf, int count)
 {
 
 	/* TODO: Re-add code to forward packets to slave processes correctly */
@@ -740,7 +805,6 @@ kni_process_burst(struct usiw_port *port,
 	return rte_kni_tx_burst(port->kni, rxmbuf, count);
 } /* kni_process_burst */
 
-
 static void
 do_xchg_packets(struct usiw_port *port)
 {
@@ -748,8 +812,9 @@ do_xchg_packets(struct usiw_port *port)
 	unsigned int rcount, scount;
 
 	rcount = rte_kni_rx_burst(port->kni,
-			rxmbuf, port->rx_burst_size);
-	if (rcount) {
+							  rxmbuf, port->rx_burst_size);
+	if (rcount)
+	{
 #ifdef DEBUG_PACKET_HEADERS
 		int i;
 		RTE_LOG(DEBUG, USER1, "port %d: send %d packets\n",
@@ -758,30 +823,34 @@ do_xchg_packets(struct usiw_port *port)
 			rte_pktmbuf_dump(stderr, rxmbuf[i], 128);
 #endif
 		scount = rte_eth_tx_burst(port->portid, 0,
-			rxmbuf, rcount);
-		if (scount < rcount) {
+								  rxmbuf, rcount);
+		if (scount < rcount)
+		{
 			RTE_LOG(WARNING, USER1, "rte_eth_tx_burst only %d of %d packets\n",
 					scount, rcount);
-			for (; scount < rcount; scount++) {
+			for (; scount < rcount; scount++)
+			{
 				rte_pktmbuf_free(rxmbuf[scount]);
 			}
 		}
 	}
 
 	rcount = rte_eth_rx_burst(port->portid, 0,
-				rxmbuf, port->rx_burst_size);
-	if (rcount) {
+							  rxmbuf, port->rx_burst_size);
+	if (rcount)
+	{
 		scount = kni_process_burst(port, rxmbuf, rcount);
-		if (scount < rcount) {
+		if (scount < rcount)
+		{
 			RTE_LOG(WARNING, USER1, "rte_kni_tx_burst only %d of %d packets\n",
 					scount, rcount);
-			for (; scount < rcount; scount++) {
+			for (; scount < rcount; scount++)
+			{
 				rte_pktmbuf_free(rxmbuf[scount]);
 			}
 		}
 	}
 } /* do_xchng_packets */
-
 
 static int
 event_loop(void *arg)
@@ -789,12 +858,15 @@ event_loop(void *arg)
 	struct usiw_port *port;
 	int portid, ret;
 
-	while (1) {
+	while (1)
+	{
 		do_poll(1);
-		for (portid = 0; portid < driver->port_count; ++portid) {
+		for (portid = 0; portid < driver->port_count; ++portid)
+		{
 			port = &driver->ports[portid];
 			ret = rte_kni_handle_request(port->kni);
-			if (ret) {
+			if (ret)
+			{
 				break;
 			}
 
@@ -805,7 +877,6 @@ event_loop(void *arg)
 	return EXIT_FAILURE;
 }
 
-
 static void
 setup_base_filters(struct usiw_port *iface)
 {
@@ -814,30 +885,25 @@ setup_base_filters(struct usiw_port *iface)
 
 	memset(&filter_info, 0, sizeof(filter_info));
 	filter_info.info_type = RTE_ETH_FDIR_FILTER_INPUT_SET_SELECT;
-	filter_info.info.input_set_conf.flow_type
-				= RTE_ETH_FLOW_NONFRAG_IPV4_UDP;
+	filter_info.info.input_set_conf.flow_type = RTE_ETH_FLOW_NONFRAG_IPV4_UDP;
 	filter_info.info.input_set_conf.inset_size = 2;
-	filter_info.info.input_set_conf.field[0]
-				= RTE_ETH_INPUT_SET_L3_DST_IP4;
-	filter_info.info.input_set_conf.field[1]
-				= RTE_ETH_INPUT_SET_L4_UDP_DST_PORT;
+	filter_info.info.input_set_conf.field[0] = RTE_ETH_INPUT_SET_L3_DST_IP4;
+	filter_info.info.input_set_conf.field[1] = RTE_ETH_INPUT_SET_L4_UDP_DST_PORT;
 	filter_info.info.input_set_conf.op = RTE_ETH_INPUT_SET_SELECT;
 	retval = rte_eth_dev_filter_ctrl(iface->portid, RTE_ETH_FILTER_FDIR,
-			RTE_ETH_FILTER_SET, &filter_info);
-	if (retval != 0) {
+									 RTE_ETH_FILTER_SET, &filter_info);
+	if (retval != 0)
+	{
 		RTE_LOG(WARNING, USER1, "Could not set fdir filter info on port %" PRIu16 ": %s\n",
 				iface->portid, strerror(-retval));
 	}
 } /* setup_base_filters */
 
-
 static void
 usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 {
-	static const uint32_t rx_checksum_offloads
-		= DEV_RX_OFFLOAD_UDP_CKSUM|DEV_RX_OFFLOAD_IPV4_CKSUM;
-	static const uint32_t tx_checksum_offloads
-		= DEV_TX_OFFLOAD_UDP_CKSUM|DEV_TX_OFFLOAD_IPV4_CKSUM;
+	static const uint32_t rx_checksum_offloads = DEV_RX_OFFLOAD_UDP_CKSUM | DEV_RX_OFFLOAD_IPV4_CKSUM;
+	static const uint32_t tx_checksum_offloads = DEV_TX_OFFLOAD_UDP_CKSUM | DEV_TX_OFFLOAD_IPV4_CKSUM;
 
 	char name[RTE_MEMPOOL_NAMESIZE];
 	struct rte_eth_txconf txconf;
@@ -854,40 +920,43 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 
 	memset(&port_conf, 0, sizeof(port_conf));
 	iface->flags = 0;
-	port_conf.rxmode.max_rx_pkt_len
-			= port_config->mtu + ETHER_HDR_LEN + ETHER_CRC_LEN;
+	port_conf.rxmode.max_rx_pkt_len = port_config->mtu + ETHER_HDR_LEN + ETHER_CRC_LEN;
 	port_conf.rxmode.jumbo_frame = !!(port_config->mtu > 1500);
-	if ((iface->dev_info.tx_offload_capa & tx_checksum_offloads)
-			== tx_checksum_offloads) {
+	if ((iface->dev_info.tx_offload_capa & tx_checksum_offloads) == tx_checksum_offloads)
+	{
 		iface->flags |= port_checksum_offload;
 	}
-	if ((iface->dev_info.rx_offload_capa & rx_checksum_offloads)
-			== rx_checksum_offloads) {
+	if ((iface->dev_info.rx_offload_capa & rx_checksum_offloads) == rx_checksum_offloads)
+	{
 		port_conf.rxmode.hw_ip_checksum = 1;
 	}
 	if (rte_eth_dev_filter_supported(iface->portid,
-						RTE_ETH_FILTER_NTUPLE) == 0) {
+									 RTE_ETH_FILTER_NTUPLE) == 0)
+	{
 		/* ntuple can be 5tuple or 2tuple; we assume 5tuple and then
 		 * fall back to 2tuple if 5tuple fails */
 		iface->flags |= port_5tuple;
 		RTE_LOG(DEBUG, USER1,
-			"port %" PRIu16 " supports ntuple filters\n",
-			iface->portid);
+				"port %" PRIu16 " supports ntuple filters\n",
+				iface->portid);
 		port_conf.fdir_conf.mode = RTE_FDIR_MODE_NONE;
-	} else if (rte_eth_dev_filter_supported(iface->portid,
-						RTE_ETH_FILTER_FDIR) == 0) {
+	}
+	else if (rte_eth_dev_filter_supported(iface->portid,
+										  RTE_ETH_FILTER_FDIR) == 0)
+	{
 		iface->flags |= port_fdir;
 		port_conf.fdir_conf.mode = RTE_FDIR_MODE_PERFECT;
 		port_conf.fdir_conf.pballoc = RTE_FDIR_PBALLOC_64K;
 		port_conf.fdir_conf.mask.ipv4_mask.src_ip = IPv4(0, 0, 0, 0);
-		port_conf.fdir_conf.mask.ipv4_mask.dst_ip
-						= IPv4(255, 255, 255, 255);
+		port_conf.fdir_conf.mask.ipv4_mask.dst_ip = IPv4(255, 255, 255, 255);
 		port_conf.fdir_conf.mask.src_port_mask = 0;
 		port_conf.fdir_conf.mask.dst_port_mask = UINT16_MAX;
-	} else {
+	}
+	else
+	{
 		RTE_LOG(NOTICE, USER1,
-			"port %" PRIu16 " does not support Flow Director\n",
-			iface->portid);
+				"port %" PRIu16 " does not support Flow Director\n",
+				iface->portid);
 		port_conf.fdir_conf.mode = RTE_FDIR_MODE_NONE;
 	}
 
@@ -895,99 +964,122 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 	 * now, with 1 reserved for urdmad ARP/CM usage.  Note that at least
 	 * i40e reserves queues for VMDq and makes them unavailable for general
 	 * use, so we must subtract those queues from the available queues. */
-	if (iface->dev_info.max_vmdq_pools > 0
-			&& iface->dev_info.vmdq_queue_base > 0) {
+	if (iface->dev_info.max_vmdq_pools > 0 && iface->dev_info.vmdq_queue_base > 0)
+	{
 		RTE_LOG(INFO, USER1,
-			"port %" PRIu16 " reserves %" PRIu16 " queues for VMDq\n",
-			iface->portid, iface->dev_info.vmdq_queue_num);
+				"port %" PRIu16 " reserves %" PRIu16 " queues for VMDq\n",
+				iface->portid, iface->dev_info.vmdq_queue_num);
 		iface->dev_info.max_rx_queues -= iface->dev_info.vmdq_queue_num;
 		iface->dev_info.max_tx_queues -= iface->dev_info.vmdq_queue_num;
 	}
 	iface->max_qp = port_config->max_qp > 0 ? port_config->max_qp
-		: RTE_MIN(iface->dev_info.max_rx_queues,
-					iface->dev_info.max_tx_queues);
-	if (iface->max_qp >= iface->dev_info.max_rx_queues) {
+											: RTE_MIN(iface->dev_info.max_rx_queues,
+													  iface->dev_info.max_tx_queues);
+	if (iface->max_qp >= iface->dev_info.max_rx_queues)
+	{
 		rte_exit(EXIT_FAILURE,
-			 "port %" PRIu16 " configured max_qp %" PRIu16 " > max_rx_queues %" PRIu16 "\n",
-			 iface->portid, iface->max_qp,
-			 iface->dev_info.max_rx_queues - 1);
+				 "port %" PRIu16 " configured max_qp %" PRIu16 " > max_rx_queues %" PRIu16 "\n",
+				 iface->portid, iface->max_qp,
+				 iface->dev_info.max_rx_queues - 1);
 	}
-	if (iface->max_qp >= iface->dev_info.max_tx_queues) {
+	if (iface->max_qp >= iface->dev_info.max_tx_queues)
+	{
 		rte_exit(EXIT_FAILURE,
-			 "port %" PRIu16 " configured max_qp %" PRIu16 " > max_tx_queues %" PRIu16 "\n",
-			 iface->portid, iface->max_qp,
-			 iface->dev_info.max_tx_queues - 1);
+				 "port %" PRIu16 " configured max_qp %" PRIu16 " > max_tx_queues %" PRIu16 "\n",
+				 iface->portid, iface->max_qp,
+				 iface->dev_info.max_tx_queues - 1);
 	}
 	fprintf(stderr, "port %" PRIu16 " max_qp %" PRIu16 "\n",
 			iface->portid, iface->max_qp);
 
 	/* TODO: Auto-tuning of rx_desc_count and tx_desc_count */
-	if (port_config->rx_desc_count == UINT_MAX) {
+	if (port_config->rx_desc_count == UINT_MAX)
+	{
 		iface->rx_desc_count = iface->dev_info.rx_desc_lim.nb_min;
-	} else if (port_config->rx_desc_count > iface->dev_info.rx_desc_lim.nb_max) {
+	}
+	else if (port_config->rx_desc_count > iface->dev_info.rx_desc_lim.nb_max)
+	{
 		rte_exit(EXIT_FAILURE,
-			 "port %" PRIu16 " configured rx_desc_count %" PRIu16 " > rx_desc_lim.nb_max %" PRIu16 "\n",
-			 iface->portid, iface->rx_desc_count,
-			 iface->dev_info.rx_desc_lim.nb_max);
-	} else if (port_config->rx_desc_count < iface->dev_info.rx_desc_lim.nb_min) {
+				 "port %" PRIu16 " configured rx_desc_count %" PRIu16 " > rx_desc_lim.nb_max %" PRIu16 "\n",
+				 iface->portid, iface->rx_desc_count,
+				 iface->dev_info.rx_desc_lim.nb_max);
+	}
+	else if (port_config->rx_desc_count < iface->dev_info.rx_desc_lim.nb_min)
+	{
 		rte_exit(EXIT_FAILURE,
-			 "port %" PRIu16 " configured rx_desc_count %" PRIu16 " < rx_desc_lim.nb_min %" PRIu16 "\n",
-			 iface->portid, iface->rx_desc_count,
-			 iface->dev_info.rx_desc_lim.nb_min);
-	} else if (port_config->rx_desc_count % iface->dev_info.rx_desc_lim.nb_align) {
+				 "port %" PRIu16 " configured rx_desc_count %" PRIu16 " < rx_desc_lim.nb_min %" PRIu16 "\n",
+				 iface->portid, iface->rx_desc_count,
+				 iface->dev_info.rx_desc_lim.nb_min);
+	}
+	else if (port_config->rx_desc_count % iface->dev_info.rx_desc_lim.nb_align)
+	{
 		rte_exit(EXIT_FAILURE,
-			 "port %" PRIu16 " configured rx_desc_count %" PRIu16 " does not match alignment %" PRIu16 "\n",
-			 iface->portid, iface->rx_desc_count,
-			 iface->dev_info.rx_desc_lim.nb_align);
-	} else {
+				 "port %" PRIu16 " configured rx_desc_count %" PRIu16 " does not match alignment %" PRIu16 "\n",
+				 iface->portid, iface->rx_desc_count,
+				 iface->dev_info.rx_desc_lim.nb_align);
+	}
+	else
+	{
 		iface->rx_desc_count = port_config->rx_desc_count;
 	}
-	if (port_config->tx_desc_count == UINT_MAX) {
+	if (port_config->tx_desc_count == UINT_MAX)
+	{
 		iface->tx_desc_count = iface->dev_info.tx_desc_lim.nb_min;
-	} else if (port_config->tx_desc_count > iface->dev_info.tx_desc_lim.nb_max) {
+	}
+	else if (port_config->tx_desc_count > iface->dev_info.tx_desc_lim.nb_max)
+	{
 		rte_exit(EXIT_FAILURE,
-			 "port %" PRIu16 " configured tx_desc_count %" PRIu16 " > tx_desc_lim.nb_max %" PRIu16 "\n",
-			 iface->portid, iface->tx_desc_count,
-			 iface->dev_info.tx_desc_lim.nb_max);
-	} else if (port_config->tx_desc_count < iface->dev_info.tx_desc_lim.nb_min) {
+				 "port %" PRIu16 " configured tx_desc_count %" PRIu16 " > tx_desc_lim.nb_max %" PRIu16 "\n",
+				 iface->portid, iface->tx_desc_count,
+				 iface->dev_info.tx_desc_lim.nb_max);
+	}
+	else if (port_config->tx_desc_count < iface->dev_info.tx_desc_lim.nb_min)
+	{
 		rte_exit(EXIT_FAILURE,
-			 "port %" PRIu16 " configured tx_desc_count %" PRIu16 " < tx_desc_lim.nb_min %" PRIu16 "\n",
-			 iface->portid, iface->tx_desc_count,
-			 iface->dev_info.tx_desc_lim.nb_min);
-	} else if (port_config->tx_desc_count % iface->dev_info.tx_desc_lim.nb_align) {
+				 "port %" PRIu16 " configured tx_desc_count %" PRIu16 " < tx_desc_lim.nb_min %" PRIu16 "\n",
+				 iface->portid, iface->tx_desc_count,
+				 iface->dev_info.tx_desc_lim.nb_min);
+	}
+	else if (port_config->tx_desc_count % iface->dev_info.tx_desc_lim.nb_align)
+	{
 		rte_exit(EXIT_FAILURE,
-			 "port %" PRIu16 " configured tx_desc_count %" PRIu16 " does not match alignment %" PRIu16 "\n",
-			 iface->portid, iface->tx_desc_count,
-			 iface->dev_info.tx_desc_lim.nb_align);
-	} else {
+				 "port %" PRIu16 " configured tx_desc_count %" PRIu16 " does not match alignment %" PRIu16 "\n",
+				 iface->portid, iface->tx_desc_count,
+				 iface->dev_info.tx_desc_lim.nb_align);
+	}
+	else
+	{
 		iface->tx_desc_count = port_config->tx_desc_count;
 	}
 	iface->rx_burst_size = port_config->rx_burst_size;
 	iface->tx_burst_size = port_config->tx_burst_size;
 	fprintf(stderr,
-		"port %" PRIu16 " tx_desc_count %" PRIu16 " rx_desc_count %" PRIu16 " rx_burst_size %" PRIu16 " tx_burst_size %" PRIu16 "\n",
-		iface->portid, iface->tx_desc_count,
-		iface->rx_desc_count, iface->rx_burst_size,
-		iface->tx_burst_size);
+			"port %" PRIu16 " tx_desc_count %" PRIu16 " rx_desc_count %" PRIu16 " rx_burst_size %" PRIu16 " tx_burst_size %" PRIu16 "\n",
+			iface->portid, iface->tx_desc_count,
+			iface->rx_desc_count, iface->rx_burst_size,
+			iface->tx_burst_size);
 
 	list_head_init(&iface->avail_qp);
 
 	iface->qp = rte_calloc("urdma_qp", iface->max_qp + 1,
-			sizeof(*iface->qp), 0);
-	if (!iface->qp) {
+						   sizeof(*iface->qp), 0);
+	if (!iface->qp)
+	{
 		rte_exit(EXIT_FAILURE, "Cannot allocate QP array: %s\n",
-				rte_strerror(rte_errno));
+				 rte_strerror(rte_errno));
 	}
-	for (q = 1; q <= iface->max_qp; ++q) {
+	for (q = 1; q <= iface->max_qp; ++q)
+	{
 		iface->qp[q].qp_id = q;
 		iface->qp[q].tx_queue = q;
 		iface->qp[q].rx_queue = q;
 		atomic_init(&iface->qp[q].conn_state, 0);
 		retval = pthread_mutex_init(&iface->qp[q].conn_event_lock,
-					    &pshared_mutexattr);
-		if (retval) {
+									&pshared_mutexattr);
+		if (retval)
+		{
 			rte_exit(EXIT_FAILURE, "Cannot create mutex: %s\n",
-				rte_strerror(rte_errno));
+					 rte_strerror(rte_errno));
 		}
 		list_add_tail(&iface->avail_qp, &iface->qp[q].urdmad__entry);
 	}
@@ -997,125 +1089,130 @@ usiw_port_init(struct usiw_port *iface, struct usiw_port_config *port_config)
 	 * incoming packets. Note that the MTU as set by urdma and DPDK does
 	 * *not* include the Ethernet header, CRC, or VLAN tag, but the drivers
 	 * require space for these in the receive buffer. */
-	mbuf_size = RTE_PKTMBUF_HEADROOM + port_config->mtu
-		+ ETHER_HDR_LEN + ETHER_CRC_LEN + urdma_vlan_space;
+	mbuf_size = RTE_PKTMBUF_HEADROOM + port_config->mtu + ETHER_HDR_LEN + ETHER_CRC_LEN + urdma_vlan_space;
 
 	snprintf(name, RTE_MEMPOOL_NAMESIZE,
-			"port_%u_rx_mempool", iface->portid);
+			 "port_%u_rx_mempool", iface->portid);
 	RTE_LOG(DEBUG, USER1, "create rx mempool for port %" PRIu16 " with %u mbufs of size %zu\n",
-				iface->portid,
-				2 * iface->max_qp * iface->rx_desc_count,
-				mbuf_size);
+			iface->portid,
+			2 * iface->max_qp * iface->rx_desc_count,
+			mbuf_size);
 	iface->rx_mempool = rte_pktmbuf_pool_create(name,
-		2 * iface->max_qp * iface->rx_desc_count,
-		0, 0, mbuf_size, socket_id);
+												2 * iface->max_qp * iface->rx_desc_count,
+												0, 0, mbuf_size, socket_id);
 	if (iface->rx_mempool == NULL)
 		rte_exit(EXIT_FAILURE, "Cannot create rx mempool for port %" PRIu16 " with %u mbufs: %s\n",
-				iface->portid,
-				2 * iface->max_qp * iface->rx_desc_count,
-				rte_strerror(rte_errno));
+				 iface->portid,
+				 2 * iface->max_qp * iface->rx_desc_count,
+				 rte_strerror(rte_errno));
 
 	snprintf(name, RTE_MEMPOOL_NAMESIZE,
-			"port_%u_tx_mempool", iface->portid);
+			 "port_%u_tx_mempool", iface->portid);
 	RTE_LOG(DEBUG, USER1, "create tx mempool for port %" PRIu16 " with %u mbufs of size %zu plus %u bytes private data\n",
-				iface->portid,
-				2 * iface->max_qp * iface->rx_desc_count,
-				mbuf_size, PENDING_DATAGRAM_INFO_SIZE);
+			iface->portid,
+			2 * iface->max_qp * iface->rx_desc_count,
+			mbuf_size, PENDING_DATAGRAM_INFO_SIZE);
 	iface->tx_ddp_mempool = rte_pktmbuf_pool_create(name,
-		2 * iface->max_qp * iface->tx_desc_count,
-		0, PENDING_DATAGRAM_INFO_SIZE, mbuf_size, socket_id);
+													2 * iface->max_qp * iface->tx_desc_count,
+													0, PENDING_DATAGRAM_INFO_SIZE, mbuf_size, socket_id);
 	if (iface->tx_ddp_mempool == NULL)
 		rte_exit(EXIT_FAILURE, "Cannot create tx mempool for port %" PRIu16 " with %u mbufs: %s\n",
-				iface->portid,
-				2 * iface->max_qp * iface->tx_desc_count,
-				rte_strerror(rte_errno));
+				 iface->portid,
+				 2 * iface->max_qp * iface->tx_desc_count,
+				 rte_strerror(rte_errno));
 
 	/* FIXME: make these actually separate */
 	iface->tx_hdr_mempool = iface->tx_ddp_mempool;
 
 	/* Configure the Ethernet device. */
 	retval = rte_eth_dev_configure(iface->portid, iface->max_qp + 1,
-			iface->max_qp + 1, &port_conf);
-	if (retval != 0) {
+								   iface->max_qp + 1, &port_conf);
+	if (retval != 0)
+	{
 		rte_exit(EXIT_FAILURE,
-			"Cannot configure port %" PRIu16 " with max_qp %" PRIu16 ": %s\n",
-			iface->portid, iface->max_qp,
-			rte_strerror(-retval));
+				 "Cannot configure port %" PRIu16 " with max_qp %" PRIu16 ": %s\n",
+				 iface->portid, iface->max_qp,
+				 rte_strerror(-retval));
 	}
 
 	rte_eth_promiscuous_disable(iface->portid);
 
 	/* Set up control RX queue */
 	retval = rte_eth_rx_queue_setup(iface->portid, 0, iface->rx_desc_count,
-			socket_id, NULL, iface->rx_mempool);
+									socket_id, NULL, iface->rx_mempool);
 	if (retval < 0)
 		rte_exit(EXIT_FAILURE,
-			"Cannot setup port %" PRIu16 " rx queue 0: %s\n",
-			iface->portid, rte_strerror(-retval));
+				 "Cannot setup port %" PRIu16 " rx queue 0: %s\n",
+				 iface->portid, rte_strerror(-retval));
 
 	/* Data RX queue startup is deferred */
 	memcpy(&rxconf, &iface->dev_info.default_rxconf, sizeof(rxconf));
 	rxconf.rx_deferred_start = 1;
-	for (q = 1; q <= iface->max_qp; q++) {
+	for (q = 1; q <= iface->max_qp; q++)
+	{
 		retval = rte_eth_rx_queue_setup(iface->portid, q,
-				iface->rx_desc_count, socket_id, &rxconf,
-				iface->rx_mempool);
-		if (retval < 0) {
+										iface->rx_desc_count, socket_id, &rxconf,
+										iface->rx_mempool);
+		if (retval < 0)
+		{
 			rte_exit(EXIT_FAILURE,
-				"Cannot setup port %" PRIu16 " rx queue %" PRIu16 ": %s\n",
-				iface->portid, q, rte_strerror(-retval));
+					 "Cannot setup port %" PRIu16 " rx queue %" PRIu16 ": %s\n",
+					 iface->portid, q, rte_strerror(-retval));
 		}
 	}
 
 	/* Set up control TX queue */
 	memcpy(&txconf, &iface->dev_info.default_txconf, sizeof(txconf));
-	txconf.txq_flags &= ~(ETH_TXQ_FLAGS_NOMULTSEGS|ETH_TXQ_FLAGS_NOREFCOUNT
-				|ETH_TXQ_FLAGS_NOMULTMEMP);
-	if (iface->flags & port_checksum_offload) {
+	txconf.txq_flags &= ~(ETH_TXQ_FLAGS_NOMULTSEGS | ETH_TXQ_FLAGS_NOREFCOUNT | ETH_TXQ_FLAGS_NOMULTMEMP);
+	if (iface->flags & port_checksum_offload)
+	{
 		txconf.txq_flags &= ~ETH_TXQ_FLAGS_NOXSUMUDP;
 	}
 	retval = rte_eth_tx_queue_setup(iface->portid, 0, iface->tx_desc_count,
-			socket_id, &txconf);
+									socket_id, &txconf);
 	if (retval < 0)
 		rte_exit(EXIT_FAILURE,
-			"Cannot setup port %" PRIu16 " tx queue 0: %s\n",
-			iface->portid, rte_strerror(-retval));
+				 "Cannot setup port %" PRIu16 " tx queue 0: %s\n",
+				 iface->portid, rte_strerror(-retval));
 
 	/* Defer startup of data TX queues */
 	txconf.tx_deferred_start = 1;
-	for (q = 1; q <= iface->max_qp; q++) {
+	for (q = 1; q <= iface->max_qp; q++)
+	{
 		retval = rte_eth_tx_queue_setup(iface->portid, q,
-				iface->tx_desc_count, socket_id, &txconf);
+										iface->tx_desc_count, socket_id, &txconf);
 		if (retval < 0)
 			rte_exit(EXIT_FAILURE,
-				"Cannot setup port %" PRIu16 " tx queue %" PRIu16 ": %s\n",
-				iface->portid, q, rte_strerror(-retval));
+					 "Cannot setup port %" PRIu16 " tx queue %" PRIu16 ": %s\n",
+					 iface->portid, q, rte_strerror(-retval));
 	}
 
-	if (iface->flags & port_fdir) {
+	if (iface->flags & port_fdir)
+	{
 		setup_base_filters(iface);
 	}
 
 	retval = usiw_port_setup_kni(iface);
-	if (retval < 0) {
+	if (retval < 0)
+	{
 		rte_exit(EXIT_FAILURE, "Could not set port %u KNI interface: %s\n",
-				iface->portid, strerror(-retval));
+				 iface->portid, strerror(-retval));
 	}
 
 	retval = rte_eth_dev_set_mtu(iface->portid, port_config->mtu);
-	if (retval < 0) {
+	if (retval < 0)
+	{
 		rte_exit(EXIT_FAILURE, "Could not set port %u MTU to %u: %s\n",
-				iface->portid, port_config->mtu,
-				strerror(-retval));
+				 iface->portid, port_config->mtu,
+				 strerror(-retval));
 	}
 	iface->mtu = port_config->mtu;
 
 	retval = rte_eth_dev_start(iface->portid);
 	if (retval < 0)
 		rte_exit(EXIT_FAILURE, "Could not start port %u: %s\n",
-				iface->portid, strerror(-retval));
+				 iface->portid, strerror(-retval));
 } /* usiw_port_init */
-
 
 static void
 setup_socket(const char *path)
@@ -1123,50 +1220,56 @@ setup_socket(const char *path)
 	struct sockaddr_un addr;
 	int flags;
 
-	if (strlen(path) >= sizeof(addr.sun_path) - 1) {
+	if (strlen(path) >= sizeof(addr.sun_path) - 1)
+	{
 		rte_exit(EXIT_FAILURE, "Invalid socket path %s: too long\n",
-				path);
+				 path);
 	}
 	addr.sun_family = AF_UNIX;
 	strncpy(addr.sun_path, path, sizeof(addr.sun_path));
 
-	if (unlink(path) < 0 && errno != ENOENT) {
+	if (unlink(path) < 0 && errno != ENOENT)
+	{
 		rte_exit(EXIT_FAILURE, "Could not unlink previous socket %s: %s\n",
-				path, strerror(errno));
+				 path, strerror(errno));
 	}
 
 	driver->listen.fd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
-	if (driver->listen.fd < 0) {
+	if (driver->listen.fd < 0)
+	{
 		rte_exit(EXIT_FAILURE, "Could not open socket %s: %s\n",
-				path, strerror(errno));
+				 path, strerror(errno));
 	}
 
 	flags = fcntl(driver->listen.fd, F_GETFL);
 	if (flags == -1 || fcntl(driver->listen.fd, F_SETFL,
-						flags | O_NONBLOCK)) {
+							 flags | O_NONBLOCK))
+	{
 		rte_exit(EXIT_FAILURE, "Could not make socket non-blocking: %s\n",
-				strerror(errno));
+				 strerror(errno));
 	}
 
 	if (bind(driver->listen.fd, (struct sockaddr *)&addr,
-				sizeof(addr)) < 0) {
+			 sizeof(addr)) < 0)
+	{
 		rte_exit(EXIT_FAILURE, "Could not bind socket %s: %s\n",
-				path, strerror(errno));
+				 path, strerror(errno));
 	}
 
 	list_head_init(&driver->processes);
-	if (listen(driver->listen.fd, 16) < 0) {
+	if (listen(driver->listen.fd, 16) < 0)
+	{
 		rte_exit(EXIT_FAILURE, "Could not listen on socket %s: %s\n",
-				path, strerror(errno));
+				 path, strerror(errno));
 	}
 
 	driver->listen.data_ready = &listen_data_ready;
-	if (epoll_add(driver->epoll_fd, &driver->listen, EPOLLIN) < 0) {
+	if (epoll_add(driver->epoll_fd, &driver->listen, EPOLLIN) < 0)
+	{
 		rte_exit(EXIT_FAILURE, "Could not add socket to epoll set: %s\n",
-				strerror(errno));
+				 strerror(errno));
 	}
 } /* setup_socket */
-
 
 static void
 setup_timer(int interval_ms)
@@ -1174,27 +1277,29 @@ setup_timer(int interval_ms)
 	struct itimerspec tv;
 
 	driver->timer.fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
-	if (driver->timer.fd < 0) {
+	if (driver->timer.fd < 0)
+	{
 		rte_exit(EXIT_FAILURE, "Could not open timer fd: %s\n",
-				strerror(errno));
+				 strerror(errno));
 	}
 
 	tv.it_interval.tv_sec = interval_ms / 1000;
 	tv.it_interval.tv_nsec = (interval_ms % 1000) * 1000000;
 	memcpy(&tv.it_value, &tv.it_interval, sizeof(tv.it_value));
 
-	if (timerfd_settime(driver->timer.fd, 0, &tv, NULL) < 0) {
+	if (timerfd_settime(driver->timer.fd, 0, &tv, NULL) < 0)
+	{
 		rte_exit(EXIT_FAILURE, "Could not arm timer fd %d: %s\n",
-				driver->timer.fd, strerror(errno));
+				 driver->timer.fd, strerror(errno));
 	}
 
 	driver->timer.data_ready = &timer_data_ready;
-	if (epoll_add(driver->epoll_fd, &driver->timer, EPOLLIN) < 0) {
+	if (epoll_add(driver->epoll_fd, &driver->timer, EPOLLIN) < 0)
+	{
 		rte_exit(EXIT_FAILURE, "Could not add timer fd %d to epoll set: %s\n",
-				driver->timer.fd, strerror(errno));
+				 driver->timer.fd, strerror(errno));
 	}
 } /* setup_timer */
-
 
 static void
 do_init_driver(void)
@@ -1206,102 +1311,117 @@ do_init_driver(void)
 	int retval;
 
 	retval = urdma__config_file_open(&config);
-	if (retval < 0) {
+	if (retval < 0)
+	{
 		rte_exit(EXIT_FAILURE, "Could not open config file: %s\n",
-				strerror(errno));
+				 strerror(errno));
 	}
 
 	port_count = rte_eth_dev_count();
 
 	retval = urdma__config_file_get_ports(&config, &port_config);
-	if (retval <= 0) {
+	if (retval <= 0)
+	{
 		rte_exit(EXIT_FAILURE, "Could not parse config file: %s\n",
-				strerror(errno));
-	} else if (port_count < retval) {
+				 strerror(errno));
+	}
+	else if (port_count < retval)
+	{
 		rte_exit(EXIT_FAILURE, "Configuration expects %d devices but found only %d\n",
-				retval, port_count);
+				 retval, port_count);
 	}
 	port_count = retval;
 
 	sock_name = urdma__config_file_get_sock_name(&config);
-	if (!sock_name) {
+	if (!sock_name)
+	{
 		rte_exit(EXIT_FAILURE, "sock_name not found in configuration\n");
 	}
 
 	timer_ms = urdma__config_file_get_timer_interval(&config);
-	if (!timer_ms) {
+	if (!timer_ms)
+	{
 		timer_ms = 5000;
 	}
 
 	urdma__config_file_close(&config);
 
 	rdma_atomic_mutex = rte_malloc(NULL, sizeof(*rdma_atomic_mutex),
-			RTE_CACHE_LINE_SIZE);
+								   RTE_CACHE_LINE_SIZE);
 	if (!rdma_atomic_mutex)
 		rte_exit(EXIT_FAILURE, "Could not allocate atomic mutex: %s\n",
-				strerror(errno));
+				 strerror(errno));
 	retval = pthread_mutexattr_init(&pshared_mutexattr);
-	if (retval) {
+	if (retval)
+	{
 		rte_exit(EXIT_FAILURE,
-			"Cannot allocate mutex attribute object: %s\n",
-			rte_strerror(rte_errno));
+				 "Cannot allocate mutex attribute object: %s\n",
+				 rte_strerror(rte_errno));
 	}
 	retval = pthread_mutexattr_setpshared(&pshared_mutexattr,
-					      PTHREAD_PROCESS_SHARED);
-	if (retval) {
+										  PTHREAD_PROCESS_SHARED);
+	if (retval)
+	{
 		rte_exit(EXIT_FAILURE,
-			"Cannot enable process shared mutex attribute: %s\n",
-			rte_strerror(rte_errno));
+				 "Cannot enable process shared mutex attribute: %s\n",
+				 rte_strerror(rte_errno));
 	}
 	retval = pthread_mutex_init(rdma_atomic_mutex, &pshared_mutexattr);
-	if (retval) {
+	if (retval)
+	{
 		rte_exit(EXIT_FAILURE,
-			"Cannot initialize global RDMA atomic mutex: %s\n",
-			rte_strerror(rte_errno));
+				 "Cannot initialize global RDMA atomic mutex: %s\n",
+				 rte_strerror(rte_errno));
 	}
 
-	driver = calloc(1, sizeof(*driver)
-			+ port_count * sizeof(struct usiw_port));
-	if (!driver) {
+	driver = calloc(1, sizeof(*driver) + port_count * sizeof(struct usiw_port));
+	if (!driver)
+	{
 		rte_exit(EXIT_FAILURE, "Could not allocate main driver structure: %s\n",
-				strerror(errno));
+				 strerror(errno));
 	}
 	driver->port_count = port_count;
 	driver->epoll_fd = epoll_create(EPOLL_CLOEXEC);
-	if (driver->epoll_fd < 0) {
+	if (driver->epoll_fd < 0)
+	{
 		rte_exit(EXIT_FAILURE, "Could not open epoll fd: %s\n",
-				strerror(errno));
+				 strerror(errno));
 	}
 	setup_timer(timer_ms);
 	setup_socket(sock_name);
 	free(sock_name);
 	driver->chardev.data_ready = &chardev_data_ready;
-	driver->chardev.fd = open("/dev/urdma", O_RDWR|O_NONBLOCK);
-	if (driver->chardev.fd < 0) {
+	driver->chardev.fd = open("/dev/urdma", O_RDWR | O_NONBLOCK);
+	if (driver->chardev.fd < 0)
+	{
 		rte_exit(EXIT_FAILURE, "Could not open urdma char device: %s\n",
-				strerror(errno));
+				 strerror(errno));
 	}
-	if (epoll_add(driver->epoll_fd, &driver->chardev, EPOLLIN) < 0) {
+	if (epoll_add(driver->epoll_fd, &driver->chardev, EPOLLIN) < 0)
+	{
 		rte_exit(EXIT_FAILURE, "Could not add urdma char device to epoll set: %s\n",
-				strerror(errno));
+				 strerror(errno));
 	}
 	rte_kni_init(driver->port_count);
 
 	driver->progress_lcore = 1;
-	for (i = 0; i < driver->port_count; ++i) {
-		switch (port_config[i].id_type) {
+	for (i = 0; i < driver->port_count; ++i)
+	{
+		switch (port_config[i].id_type)
+		{
 		case urdma_port_id_index:
 			portid = i;
 			break;
 		case urdma_port_id_pci:
 			portid = lookup_ethdev_by_pci_addr(
-						&port_config[i].pci_address);
-			if (portid < 0) {
+				&port_config[i].pci_address);
+			if (portid < 0)
+			{
 				rte_exit(EXIT_FAILURE, "No DPDK ethdev with PCI address " PCI_PRI_FMT "\n",
-					port_config[i].pci_address.domain,
-					port_config[i].pci_address.bus,
-					port_config[i].pci_address.devid,
-					port_config[i].pci_address.function);
+						 port_config[i].pci_address.domain,
+						 port_config[i].pci_address.bus,
+						 port_config[i].pci_address.devid,
+						 port_config[i].pci_address.function);
 			}
 			RTE_LOG(DEBUG, USER1, "Resolve PCI address " PCI_PRI_FMT " to portid %d\n",
 					port_config[i].pci_address.domain,
@@ -1315,7 +1435,7 @@ do_init_driver(void)
 		}
 		driver->ports[i].portid = portid;
 		rte_eth_macaddr_get(portid,
-				&driver->ports[i].ether_addr);
+							&driver->ports[i].ether_addr);
 		rte_eth_dev_info_get(portid, &driver->ports[i].dev_info);
 
 		usiw_port_init(&driver->ports[i], &port_config[i]);
@@ -1324,33 +1444,33 @@ do_init_driver(void)
 	/* FIXME: cannot free driver beyond this point since it is being
 	 * accessed by the event_loop */
 	retval = usiw_driver_setup_netlink(driver);
-	if (retval < 0) {
+	if (retval < 0)
+	{
 		rte_exit(EXIT_FAILURE, "Could not setup KNI context: %s\n",
-					strerror(-retval));
+				 strerror(-retval));
 	}
-	for (i = 0; i < driver->port_count; i++) {
+	for (i = 0; i < driver->port_count; i++)
+	{
 		retval = usiw_set_ipv4_addr(driver, &driver->ports[i],
-				&port_config[i]);
-		if (retval < 0) {
+									&port_config[i]);
+		if (retval < 0)
+		{
 			rte_exit(EXIT_FAILURE, "Could not set port %u IPv4 address: %s\n",
-					i, strerror(-retval));
+					 i, strerror(-retval));
 		}
 	}
 	free(port_config);
 } /* do_init_driver */
 
-
 static void usage(const char *argv0)
 {
 	printf("  %-20s%s\n", "--systemd",
-			"Assume we are running from systemd");
+		   "Assume we are running from systemd");
 	printf("%22cDump log messages to stderr but not syslog\n", ' ');
 	fflush(stdout);
 } /* usage */
 
-
-int
-main(int argc, char *argv[])
+int main(int argc, char *argv[])
 {
 	char **arg;
 
@@ -1362,15 +1482,18 @@ main(int argc, char *argv[])
 	 * We do require CAP_NET_ADMIN but there should be minimal risk from
 	 * making ourselves dumpable, compared to requiring root priviliges to
 	 * run */
-	if (prctl(PR_SET_DUMPABLE, 1, 0, 0, 0) < 0) {
+	if (prctl(PR_SET_DUMPABLE, 1, 0, 0, 0) < 0)
+	{
 		perror("WARNING: set dumpable flag failed; DPDK may not initialize properly");
 	}
 
 	/* Scan command line for --systemd option. We can't use getopt_long()
 	 * because we must know about this argument *before* we call
 	 * rte_eal_init(), which consumes most command line arguments. */
-	for (arg = argv; *arg != NULL; ++arg) {
-		if (!strcmp(*arg, "--systemd")) {
+	for (arg = argv; *arg != NULL; ++arg)
+	{
+		if (!strcmp(*arg, "--systemd"))
+		{
 			/* If we are running under systemd, stderr is
 			 * automatically logged to the systemd journal and thus
 			 * also logging to syslog (which DPDK does by default)
