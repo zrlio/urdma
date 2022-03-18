@@ -77,23 +77,21 @@
 
 static struct usiw_driver *driver;
 
-int
-driver_add_context(struct usiw_context *ctx)
+int driver_add_context(struct usiw_context *ctx)
 {
 	int i, ret;
 	ret = rte_ring_enqueue(driver->new_ctxs, ctx->h);
-	for (i = 0; ret == -ENOBUFS && i < 1000; ++i) {
+	for (i = 0; ret == -ENOBUFS && i < 1000; ++i)
+	{
 		ret = rte_ring_enqueue(driver->new_ctxs, ctx->h);
 	}
 	return ret;
 } /* driver_add_context */
 
-void
-start_progress_thread(void)
+void start_progress_thread(void)
 {
 	sem_post(&driver->go);
 } /* start_progress_thread */
-
 
 static int
 setup_nl_sock(void)
@@ -107,11 +105,11 @@ setup_nl_sock(void)
 		goto free_socket;
 
 	rv = rtnl_link_alloc_cache(driver->sock,
-			AF_UNSPEC, &driver->link_cache);
+							   AF_UNSPEC, &driver->link_cache);
 	if (rv)
 		goto free_socket;
 	rv = rtnl_addr_alloc_cache(driver->sock,
-			&driver->addr_cache);
+							   &driver->addr_cache);
 	if (rv)
 		goto free_link_cache;
 
@@ -125,7 +123,6 @@ free_socket:
 	return -1;
 } /* setup_netlink */
 
-
 static int
 get_ipv4addr(int portid, uint32_t *result)
 {
@@ -137,15 +134,18 @@ get_ipv4addr(int portid, uint32_t *result)
 	int ifindex;
 	int rv = -1;
 
-	if (!driver->sock) {
-		if (setup_nl_sock()) {
+	if (!driver->sock)
+	{
+		if (setup_nl_sock())
+		{
 			return -1;
 		}
 	}
 
 	snprintf(kni_name, RTE_KNI_NAMESIZE, "kni%u", portid);
 	link = rtnl_link_get_by_name(driver->link_cache, kni_name);
-	if (!link) {
+	if (!link)
+	{
 		return -1;
 	}
 	ifindex = rtnl_link_get_ifindex(link);
@@ -156,7 +156,8 @@ get_ipv4addr(int portid, uint32_t *result)
 	 * with this interface index, which effectively gets us every IP address
 	 * assigned to this interface. */
 	hints = rtnl_addr_alloc();
-	if (!hints) {
+	if (!hints)
+	{
 		fprintf(stderr, "Could not allocate network address hints\n");
 		return -1;
 	}
@@ -165,7 +166,8 @@ get_ipv4addr(int portid, uint32_t *result)
 	subset = nl_cache_subset(driver->addr_cache, (struct nl_object *)hints);
 	rtnl_addr_put(hints);
 	addr = (struct rtnl_addr *)nl_cache_get_first(subset);
-	if (!addr) {
+	if (!addr)
+	{
 		goto free_hints;
 	}
 
@@ -179,44 +181,46 @@ free_hints:
 	return rv;
 } /* get_ipaddr */
 
-
 static struct ibv_device *
 usiw_driver_init(int portid)
 {
-	static const uint32_t tx_checksum_offloads
-		= DEV_TX_OFFLOAD_UDP_CKSUM|DEV_TX_OFFLOAD_IPV4_CKSUM;
+	static const uint32_t tx_checksum_offloads = DEV_TX_OFFLOAD_UDP_CKSUM | DEV_TX_OFFLOAD_IPV4_CKSUM;
 
 	struct usiw_device *dev;
 	struct rte_eth_dev_info info;
 	char name[RTE_MEMPOOL_NAMESIZE];
 
 	dev = calloc(1, sizeof(*dev));
-	if (!dev) {
+	if (!dev)
+	{
 		errno = ENOMEM;
 		return NULL;
 	}
 
 	dev->portid = portid;
 	rte_eth_macaddr_get(dev->portid, &dev->ether_addr);
-	if (get_ipv4addr(dev->portid, &dev->ipv4_addr)) {
+	if (get_ipv4addr(dev->portid, &dev->ipv4_addr))
+	{
 		free(dev);
 		errno = ENOENT;
 		return NULL;
 	}
 	rte_eth_dev_info_get(dev->portid, &info);
 
-	if ((info.tx_offload_capa & tx_checksum_offloads)
-						== tx_checksum_offloads) {
+	if ((info.tx_offload_capa & tx_checksum_offloads) == tx_checksum_offloads)
+	{
 		dev->flags |= port_checksum_offload;
 	}
 	if (rte_eth_dev_filter_supported(dev->portid,
-						RTE_ETH_FILTER_FDIR) == 0) {
+									 RTE_ETH_FILTER_FDIR) == 0)
+	{
 		dev->flags |= port_fdir;
 	}
 
 	snprintf(name, RTE_MEMPOOL_NAMESIZE, "port_%u_rx_mempool", portid);
 	dev->rx_mempool = rte_mempool_lookup(name);
-	if (!dev->rx_mempool) {
+	if (!dev->rx_mempool)
+	{
 		free(dev);
 		errno = ENOENT;
 		return NULL;
@@ -224,7 +228,8 @@ usiw_driver_init(int portid)
 
 	snprintf(name, RTE_MEMPOOL_NAMESIZE, "port_%u_tx_mempool", portid);
 	dev->tx_ddp_mempool = dev->tx_hdr_mempool = rte_mempool_lookup(name);
-	if (!dev->tx_ddp_mempool) {
+	if (!dev->tx_ddp_mempool)
+	{
 		free(dev);
 		errno = ENOENT;
 		return NULL;
@@ -236,7 +241,6 @@ usiw_driver_init(int portid)
 
 	return &dev->vdev.device;
 } /* usiw_driver_init */
-
 
 static int
 open_socket(int family, int socktype, int proto)
@@ -270,14 +274,14 @@ close_fd:
 	return ret;
 } /* open_socket */
 
-
 static int
 setup_socket(const char *sock_name)
 {
 	struct sockaddr_un addr;
 	int fd, ret;
 
-	if (strlen(sock_name) >= sizeof(addr.sun_path) - 1) {
+	if (strlen(sock_name) >= sizeof(addr.sun_path) - 1)
+	{
 		fprintf(stderr, "Invalid socket path %s: too long\n",
 				sock_name);
 		errno = EINVAL;
@@ -285,7 +289,8 @@ setup_socket(const char *sock_name)
 	}
 
 	fd = open_socket(AF_UNIX, SOCK_SEQPACKET, 0);
-	if (fd < 0) {
+	if (fd < 0)
+	{
 		fprintf(stderr, "Could not create socket: %s\n",
 				strerror(errno));
 		return fd;
@@ -294,8 +299,10 @@ setup_socket(const char *sock_name)
 	addr.sun_family = AF_UNIX;
 	strncpy(addr.sun_path, sock_name, sizeof(addr.sun_path));
 	ret = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
-	if (ret < 0) {
-		if (getenv("IBV_SHOW_WARNINGS")) {
+	if (ret < 0)
+	{
+		if (getenv("IBV_SHOW_WARNINGS"))
+		{
 			fprintf(stderr, "Could not connect to %s: %s\n",
 					addr.sun_path, strerror(errno));
 		}
@@ -309,16 +316,15 @@ err:
 	return -1;
 } /* setup_socket */
 
-
 static void
 free_arg_list(int argc, char **argv)
 {
-	for (int i = 0; i < argc; ++i) {
+	for (int i = 0; i < argc; ++i)
+	{
 		free(argv[i]);
 	}
 	free(argv);
 } /* free_arg_list */
-
 
 /** Parses the config file and fills in sock_name with the name of the socket to
  * use, and eal_argv with the user-requested argument, in addition to the
@@ -334,14 +340,16 @@ do_config(char **sock_name, int *eal_argc, char ***eal_argv)
 	int ret;
 
 	ret = urdma__config_file_open(&config);
-	if (ret < 0) {
+	if (ret < 0)
+	{
 		fprintf(stderr, "Could not read config file: %s\n",
 				strerror(errno));
 		goto out;
 	}
 
 	*sock_name = urdma__config_file_get_sock_name(&config);
-	if (!*sock_name) {
+	if (!*sock_name)
+	{
 		fprintf(stderr, "Could not parse socket name from config file: %s\n",
 				strerror(errno));
 		goto close_config;
@@ -363,31 +371,38 @@ do_config(char **sock_name, int *eal_argc, char ***eal_argv)
 	 */
 	*eal_argc = urdma__config_file_get_eal_args(&config, NULL);
 	*eal_argv = calloc(*eal_argc + 6, sizeof(**eal_argv));
-	if (!(*eal_argv)) {
+	if (!(*eal_argv))
+	{
 		goto free_sock_name;
 	}
 
-	if (urdma__config_file_get_eal_args(&config, *eal_argv) < 0) {
+	if (urdma__config_file_get_eal_args(&config, *eal_argv) < 0)
+	{
 		fprintf(stderr, "Could not parse EAL arguments from config file: %s\n",
 				strerror(errno));
 		goto free_eal_args;
 	}
-	if (!((*eal_argv)[*eal_argc] = strdup("--proc-type=secondary"))) {
+	if (!((*eal_argv)[*eal_argc] = strdup("--proc-type=secondary")))
+	{
 		goto free_eal_args;
 	}
 	(*eal_argc)++;
-	if (!((*eal_argv)[*eal_argc] = strdup("--file-prefix"))) {
+	if (!((*eal_argv)[*eal_argc] = strdup("--file-prefix")))
+	{
 		goto free_eal_args;
 	}
 	(*eal_argc)++;
-	if (!((*eal_argv)[*eal_argc] = malloc(hostnamesize))) {
+	if (!((*eal_argv)[*eal_argc] = malloc(hostnamesize)))
+	{
 		goto free_eal_args;
 	}
-	if (gethostname((*eal_argv)[*eal_argc], hostnamesize)) {
+	if (gethostname((*eal_argv)[*eal_argc], hostnamesize))
+	{
 		goto free_eal_args;
 	}
 	(*eal_argc)++;
-	if (!((*eal_argv)[*eal_argc] = strdup("-c"))) {
+	if (!((*eal_argv)[*eal_argc] = strdup("-c")))
+	{
 		goto free_eal_args;
 	}
 	*eal_argc += 2;
@@ -403,7 +418,6 @@ close_config:
 out:
 	return result;
 } /* do_config */
-
 
 static int
 do_hello(void)
@@ -421,45 +435,51 @@ do_hello(void)
 	req.proto_version = URDMA_SOCK_PROTO_VERSION;
 	req.req_lcore_count = rte_cpu_to_be_16(1);
 	ret = send(driver->urdmad_fd, &req, sizeof(req), 0);
-	if (ret != sizeof(req)) {
+	if (ret != sizeof(req))
+	{
 		return -1;
 	}
 	poll_list.fd = driver->urdmad_fd;
 	poll_list.events = POLLIN;
 	poll_list.revents = 0;
 	ret = poll(&poll_list, 1, -1);
-	if (ret < 0) {
+	if (ret < 0)
+	{
 		return -1;
 	}
 	ret = ioctl(driver->urdmad_fd, FIONREAD, &resp_size);
-	if (ret < 0 || resp_size < sizeof(*resp)) {
+	if (ret < 0 || resp_size < sizeof(*resp))
+	{
 		return -1;
 	}
 	resp = alloca(resp_size);
 	ret = recv(driver->urdmad_fd, resp, resp_size, 0);
-	if (ret != resp_size) {
+	if (ret != resp_size)
+	{
 		return -1;
 	}
 
 	if (resp->proto_version != URDMA_SOCK_PROTO_VERSION)
 		return -1;
-	for (i = 0; i < RTE_DIM(resp->lcore_mask); i++) {
+	for (i = 0; i < RTE_DIM(resp->lcore_mask); i++)
+	{
 		driver->lcore_mask[i] = rte_be_to_cpu_32(resp->lcore_mask[i]);
 	}
 	driver->device_count = rte_be_to_cpu_16(resp->device_count);
 	driver->rdma_atomic_mutex = (void *)(uintptr_t)rte_be_to_cpu_64(
-				resp->rdma_atomic_mutex_addr);
+		resp->rdma_atomic_mutex_addr);
 	driver->max_qp = malloc(driver->device_count * sizeof(*driver->max_qp));
-	if (!driver->max_qp) {
+	if (!driver->max_qp)
+	{
 		return -1;
 	}
-	for (i = 0; i < driver->device_count; i++) {
+	for (i = 0; i < driver->device_count; i++)
+	{
 		driver->max_qp[i] = rte_be_to_cpu_16(resp->max_qp[i]);
 	}
 
 	return 0;
 } /* do_hello */
-
 
 /** Formats the coremask as a hexadecimal string.  Array size is the number of
  * uint32_t elements in coremask. */
@@ -472,12 +492,14 @@ format_coremask(uint32_t *coremask, size_t array_size)
 
 	/* "0xabcdabcdabcdabcd" */
 	p = result = malloc(width * array_size + 3);
-	if (!result) {
+	if (!result)
+	{
 		return NULL;
 	}
 	*(p++) = '0';
 	*(p++) = 'x';
-	for (i = array_size - 1; i >= 0; i--) {
+	for (i = array_size - 1; i >= 0; i--)
+	{
 		snprintf(p, width + 1, "%0*" PRIx32, (int)width, coremask[i]);
 		p += width;
 	}
@@ -485,7 +507,6 @@ format_coremask(uint32_t *coremask, size_t array_size)
 
 	return result;
 } /* format_coremask */
-
 
 /** Initialize the DPDK in a separate thread; this way we do not affect the
  * affinity of the user thread which first calls ibv_get_device_list, whether
@@ -498,7 +519,8 @@ our_eal_master_thread(void *sem)
 	char *sock_name;
 	int eal_argc, ret;
 
-	if (!do_config(&sock_name, &eal_argc, &eal_argv)) {
+	if (!do_config(&sock_name, &eal_argc, &eal_argv))
+	{
 		/* driver will be NULL either because this previously failed or
 		 * because it is a global variable which is initialized from 0'd
 		 * memory, so it is safe to call free() on it regardless */
@@ -506,7 +528,7 @@ our_eal_master_thread(void *sem)
 	}
 
 	driver = calloc(1, sizeof(*driver) + rte_ring_get_memsize(
-							NEW_CTX_MAX + 1));
+											 NEW_CTX_MAX + 1));
 	if (!driver)
 		goto err;
 	list_head_init(&driver->ctxs);
@@ -515,13 +537,16 @@ our_eal_master_thread(void *sem)
 	if (driver->urdmad_fd < 0)
 		goto err;
 	free(sock_name);
-	if (do_hello() < 0) {
+	if (do_hello() < 0)
+	{
 		fprintf(stderr, "Could not setup socket: %s\n",
 				strerror(errno));
 		goto close_fd;
 	}
 	eal_argv[eal_argc - 1] = format_coremask(driver->lcore_mask,
-						 RTE_DIM(driver->lcore_mask));
+											 RTE_DIM(driver->lcore_mask));
+
+	RTE_LOG(INFO, USER1, "COREMASK = %s\n", eal_argv[eal_argc - 1]);
 
 	/* Send log messages to stderr instead of syslog */
 	rte_openlog_stream(stderr);
@@ -541,19 +566,22 @@ our_eal_master_thread(void *sem)
 	 * completely safe, we make a copy of the argument list, and free all
 	 * elements of the copy before freeing the argument list itself. */
 	argv_copy = malloc(eal_argc * sizeof(*eal_argv));
-	if (argv_copy) {
+	if (argv_copy)
+	{
 		memcpy(argv_copy, eal_argv, eal_argc * sizeof(*eal_argv));
 	}
 	rte_eal_init(eal_argc, eal_argv);
-	if (argv_copy) {
+	if (argv_copy)
+	{
 		free_arg_list(eal_argc, argv_copy);
 	}
 	free(eal_argv);
 
 	driver->new_ctxs = (struct rte_ring *)(driver + 1);
 	ret = rte_ring_init(driver->new_ctxs, "new_ctx_ring", NEW_CTX_MAX + 1,
-			    RING_F_SC_DEQ);
-	if (ret < 0) {
+						RING_F_SC_DEQ);
+	if (ret < 0)
+	{
 		RTE_LOG(ERR, USER1, "cannot allocate new context ring: %s\n",
 				rte_strerror(ret));
 		goto close_fd;
@@ -566,7 +594,8 @@ our_eal_master_thread(void *sem)
 	if (sem_init(&driver->go, 0, 0))
 		goto free_ring;
 	ret = sem_post(sem);
-	if (ret) {
+	if (ret)
+	{
 		goto destroy_sem;
 	}
 	kni_loop(driver);
@@ -587,7 +616,6 @@ err:
 	return NULL;
 } /* our_eal_master_thread */
 
-
 static void
 do_init_driver(void)
 {
@@ -595,8 +623,10 @@ do_init_driver(void)
 	sem_t sem;
 	int ret;
 
-	if (sem_init(&sem, 0, 0)) {
-		if (getenv("IBV_SHOW_WARNINGS")) {
+	if (sem_init(&sem, 0, 0))
+	{
+		if (getenv("IBV_SHOW_WARNINGS"))
+		{
 			fprintf(stderr, "Could not initialize semaphore: %s\n",
 					strerror(errno));
 		}
@@ -604,29 +634,33 @@ do_init_driver(void)
 	}
 
 	ret = pthread_create(&thread, NULL, &our_eal_master_thread, &sem);
-	if (ret) {
-		if (getenv("IBV_SHOW_WARNINGS")) {
+	if (ret)
+	{
+		if (getenv("IBV_SHOW_WARNINGS"))
+		{
 			fprintf(stderr,
-				"Could not create urdma progress thread: %s\n",
-				strerror(ret));
+					"Could not create urdma progress thread: %s\n",
+					strerror(ret));
 		}
 		return;
 	}
 
-	do {
+	do
+	{
 		ret = sem_wait(&sem);
 	} while (ret < 0 && errno == EINTR);
-	if (ret < 0) {
-		if (getenv("IBV_SHOW_WARNINGS")) {
+	if (ret < 0)
+	{
+		if (getenv("IBV_SHOW_WARNINGS"))
+		{
 			fprintf(stderr,
-				"Error waiting on initialization semaphore: %s\n",
-				strerror(errno));
+					"Error waiting on initialization semaphore: %s\n",
+					strerror(errno));
 		}
 		return;
 	}
 	sem_destroy(&sem);
 }
-
 
 static struct verbs_device *
 urdma_device_alloc(struct verbs_sysfs_dev *sysfs_dev)
@@ -637,14 +671,15 @@ urdma_device_alloc(struct verbs_sysfs_dev *sysfs_dev)
 	int portid;
 
 	if (ibv_read_sysfs_file(sysfs_dev->sysfs_path, "ibdev",
-				value, sizeof value) < 0)
+							value, sizeof value) < 0)
 		return NULL;
 
 	if (sscanf(value, URDMA_DEV_PREFIX "%d", &portid) < 1)
 		return NULL;
 
 	pthread_once(&driver_init_once, &do_init_driver);
-	if (!driver) {
+	if (!driver)
+	{
 		/* driver initialization failed */
 		return NULL;
 	}
@@ -656,16 +691,14 @@ urdma_device_alloc(struct verbs_sysfs_dev *sysfs_dev)
 static void urdma_device_uninit(struct verbs_device *verbs_device)
 {
 	struct usiw_device *dev = container_of(verbs_device,
-		struct usiw_device, vdev);
+										   struct usiw_device, vdev);
 	free(dev);
 }
-
 
 static const struct verbs_match_ent hca_table[] = {
 	/* FIXME: urdma needs a more reliable way to detect the urdma device */
 	VERBS_NAME_MATCH("urdma", NULL),
 };
-
 
 struct verbs_device_ops urdma_device_ops = {
 	.name = "urdma",
