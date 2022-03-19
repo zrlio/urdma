@@ -96,23 +96,19 @@ static void init_core_mask(void)
 	struct rte_config *config;
 	unsigned int i;
 
-	memset(&core_mask[0], 0, sizeof(uint32_t));
-	memset(&core_mask[1], 0, sizeof(uint32_t));
-	memset(&core_mask[2], 0, sizeof(uint32_t));
-	memset(&core_mask[3], 0, sizeof(uint32_t));
-
-	/* 11111111 11111111 11111111 11110000 */
-	/* 00000000	00000000 00000000 11111111 */
-	/* 00000000	00000000 00000000 00000000 */
-	/* 00000000	00000000 00000000 00000000 */
-
 	config = rte_eal_get_configuration();
 	for (i = 0; i < RTE_MAX_LCORE; ++i)
 	{
 		if (!lcore_config[i].detected)
 		{
 			RTE_LOG(INFO, USER1, "%u cores available\n", core_avail);
-			RTE_LOG(INFO, USER1, "COREMASK = %u.%u.%u.%u\n", core_mask[0], core_mask[1], core_mask[2], core_mask[3]);
+			RTE_LOG(INFO, USER1, "COREMASK = %u.%u.%u.%u\n", core_mask[3], core_mask[2], core_mask[1], core_mask[0]);
+			// E.g. coremask after calling urdmad with taskset 0xf in a machine with 40 cores
+			// and with RTE_MAX_LCORE=128
+			/* 00000000	00000000 00000000 00000000 */
+			/* 00000000	00000000 00000000 00000000 */
+			/* 00000000	00000000 00000000 11111111 */
+			/* 11111111 11111111 11111111 11110000 */
 			return;
 		}
 		else if (config->lcore_role[i] == ROLE_OFF)
@@ -1525,6 +1521,7 @@ int main(int argc, char *argv[])
 	 * EAL configuration by not calling rte_eal_init() before calling into
 	 * a verbs function, allowing us to work with unmodified verbs
 	 * applications. */
+
 	rte_eal_init(argc, argv);
 
 	init_core_mask();

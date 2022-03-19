@@ -546,7 +546,7 @@ our_eal_master_thread(void *sem)
 	eal_argv[eal_argc - 1] = format_coremask(driver->lcore_mask,
 											 RTE_DIM(driver->lcore_mask));
 
-	RTE_LOG(INFO, USER1, "COREMASK = %s\n", eal_argv[eal_argc - 1]);
+	RTE_LOG(DEBUG, USER1, "COREMASK = %s\n", eal_argv[eal_argc - 1]);
 
 	/* Send log messages to stderr instead of syslog */
 	rte_openlog_stream(stderr);
