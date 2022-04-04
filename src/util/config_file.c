@@ -272,7 +272,8 @@ get_arg_count(struct usiw_config *config, struct json_object **args)
 		return -EINVAL;
 	}
 
-	return json_object_object_length(*args) + 1;
+	// TODO: fix
+	return json_object_object_length(*args) + 4;
 } /* get_arg_count */
 
 
@@ -380,6 +381,11 @@ urdma__config_file_get_eal_args(struct usiw_config *config, char **argv)
 			goto free_args;
 		}
 	}
+	// TODO: fix
+	ret = asprintf(&argv[i++], "-d");
+	ret = asprintf(&argv[i++], "/usr/local/share/dpdk/x86_64-native-linuxapp-gcc/lib/librte_mempool_ring.so");
+	// ret = asprintf(&argv[i++], "--base-virtaddr");
+	// ret = asprintf(&argv[i++], "0x200000000");
 	argv[i] = NULL;
 
 	return i;

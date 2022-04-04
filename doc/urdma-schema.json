@@ -16,6 +16,10 @@
                 "log-level": {
                     "type": "number",
                     "description": "Maximum log level to display"
+                },
+                "d": {
+                    "type": "string",
+                    "description": "Dependencies"
                 }
             }
         },

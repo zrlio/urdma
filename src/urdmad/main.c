@@ -312,6 +312,7 @@ static int
 do_setup_qp(struct urdma_qp_connected_event *event, struct usiw_port *dev,
 			struct urdmad_qp *qp)
 {
+	RTE_LOG(DEBUG, EAL, "Do_setup_qp\n");
 	struct rte_eth_rxq_info rxq_info;
 	struct rte_eth_txq_info txq_info;
 	int ret;
@@ -455,6 +456,7 @@ do_setup_qp(struct urdma_qp_connected_event *event, struct usiw_port *dev,
 	}
 
 	atomic_store(&qp->conn_state, usiw_qp_connected);
+	RTE_LOG(DEBUG, EAL, "QP %d set tp CONNECTED\n", qp->qp_id);
 	ret = 0;
 
 unlock:

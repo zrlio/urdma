@@ -527,6 +527,12 @@ our_eal_master_thread(void *sem)
 		goto err;
 	}
 
+	// TODO: fix
+	// for(int i = 0; i < eal_argc; i++) {
+	// 	printf("%s ", eal_argv[i]);
+	// }
+	// printf("\n");
+
 	driver = calloc(1, sizeof(*driver) + rte_ring_get_memsize(
 											 NEW_CTX_MAX + 1));
 	if (!driver)

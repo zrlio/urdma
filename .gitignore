@@ -19,3 +19,4 @@ urdma*.tar*
 *.o
 *.o.d
 *.trs
+.vscode/settings.json

@@ -796,6 +796,8 @@ usiw_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 	size_t sz;
 	int retval;
 
+	RTE_LOG(DEBUG, USER1, "Starting QP creation\n");
+
 	if ((qp_init_attr->qp_type != IBV_QPT_UD
 				&& qp_init_attr->qp_type != IBV_QPT_RC)
 			|| qp_init_attr->cap.max_send_wr > MAX_SEND_WR

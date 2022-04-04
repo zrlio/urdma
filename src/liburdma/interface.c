@@ -344,6 +344,9 @@ flush_tx_queue(struct usiw_qp *qp)
 
 	begin = qp->txq;
 	do {
+		// if(qp->txq_end == begin) {
+		// 	return;
+		// }
 		ret = rte_eth_tx_burst(qp->dev->portid, qp->shm_qp->tx_queue,
 			begin, qp->txq_end - begin);
 		if (ret > 0) {
@@ -1742,6 +1745,8 @@ qp_shutdown(struct usiw_qp *qp)
 	struct ibv_qp_attr qp_attr;
 	struct ibv_modify_qp cmd;
 
+	RTE_LOG(DEBUG, USER1, "Shutdown QP %u\n", qp->shm_qp->qp_id);
+
 	pthread_mutex_lock(&qp->shm_qp->conn_event_lock);
 	send_trp_fin(qp);
 
@@ -1968,6 +1973,7 @@ sweep_unacked_packets(struct usiw_qp *qp, uint64_t now)
 						DDP_GET_L(rdmap->head.ddp_flags),
 						pending->readresp->read.msg_size);
 			}
+			RTE_LOG(DEBUG, USER1, "Shutdown QP %u\n", qp->shm_qp->qp_id);
 			atomic_store(&qp->shm_qp->conn_state, usiw_qp_error);
 			if (p == ep->tx_head) {
 				*ep->tx_head = NULL;
@@ -2487,6 +2493,10 @@ static void
 start_qp(struct usiw_qp *qp)
 {
 	unsigned int cur_state;
+	const char* urdma_qp_state_description[] = {"UNBOUND", "CONNECTED", "RUNNING", "SHUTDOWN", "ERROR"};
+
+	RTE_LOG(DEBUG, USER1, "Start QP\n");
+
 
 	pthread_mutex_lock(&qp->shm_qp->conn_event_lock);
 	qp->readresp_store = calloc(qp->shm_qp->ird_max,
@@ -2516,6 +2526,7 @@ start_qp(struct usiw_qp *qp)
 		goto free_tx_pending;
 	}
 
+	RTE_LOG(DEBUG, USER1, "Initializing the QP TXQ to contain %u structs of size %u\n", qp->shm_qp->tx_burst_size, sizeof(*qp->txq));
 	qp->txq = calloc(qp->shm_qp->tx_burst_size, sizeof(*qp->txq));
 	if (!qp->txq) {
 		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> Set up txq failed: %s\n",
@@ -2539,6 +2550,8 @@ start_qp(struct usiw_qp *qp)
 	atomic_compare_exchange_strong(&qp->shm_qp->conn_state, &cur_state,
 				       usiw_qp_running);
 	atomic_fetch_sub(&qp->ctx->qp_init_count, 1);
+	RTE_LOG(DEBUG, USER1, "Moving QP %u from %s to %s\n", qp->shm_qp->qp_id, urdma_qp_state_description[cur_state], urdma_qp_state_description[qp->shm_qp->conn_state]);
+
 	goto unlock;
 
 free_txq:
@@ -2589,6 +2602,7 @@ kni_loop(void *arg)
 				case usiw_qp_connected:
 					/* start_qp() transitions to
 					 * usiw_qp_running */
+					RTE_LOG(DEBUG, USER1, "kni_loop: start QP %d\n", qp->shm_qp->qp_id);
 					start_qp(qp);
 					if (atomic_load(&qp->shm_qp->conn_state)
 							== usiw_qp_error) {
@@ -2596,14 +2610,17 @@ kni_loop(void *arg)
 					}
 					/* fall-through */
 				case usiw_qp_running:
+					//RTE_LOG(DEBUG, USER1, "kni_loop: progress QP %d\n", qp->shm_qp->qp_id);
 					progress_qp(qp);
 					break;
 				case usiw_qp_shutdown:
+					RTE_LOG(DEBUG, USER1, "kni_loop: shutdown QP %d\n", qp->shm_qp->qp_id);
 					qp_shutdown(qp);
 					/* qp_shutdown() transitions to
 					 * usiw_qp_error */
 					/* fall-through */
 				case usiw_qp_error:
+					RTE_LOG(DEBUG, USER1, "kni_loop: error in QP %d\n", qp->shm_qp->qp_id);
 					list_del(&qp->ctx_entry);
 					if (atomic_fetch_sub(&qp->refcnt,
 								1) == 1) {
