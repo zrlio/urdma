@@ -66,9 +66,9 @@ struct rdmap_packet {
 	uint8_t ddp_flags; /* 0=Tagged 1=Last 7-6=DDP_Version */
 	uint8_t rdmap_info; /* 1-0=RDMAP_Version 7-4=Opcode */
 	uint32_t sink_stag;
-    uint32_t immediate; /* The immediate data */
+	uint32_t immediate; /* The immediate data */
 } __attribute__((__packed__));
-static_assert(sizeof(struct rdmap_packet) == 8, "unexpected sizeof(rdmap_packet)");
+static_assert(sizeof(struct rdmap_packet) == 10, "unexpected sizeof(rdmap_packet)");
 
 enum ddp_queue_number {
 	ddp_queue_send = 0,
@@ -87,7 +87,7 @@ struct rdmap_tagged_packet {
 	struct rdmap_packet head;
 	uint64_t offset;
 } __attribute__((__packed__));
-static_assert(sizeof(struct rdmap_tagged_packet) == 14, "unexpected sizeof(rdmap_tagged_packet)");
+static_assert(sizeof(struct rdmap_tagged_packet) == 18, "unexpected sizeof(rdmap_tagged_packet)");
 
 struct rdmap_untagged_packet {
 	struct rdmap_packet head;
@@ -95,7 +95,7 @@ struct rdmap_untagged_packet {
 	uint32_t msn; /* Message Sequence Number */
 	uint32_t mo; /* Message Offset */
 } __attribute__((__packed__));
-static_assert(sizeof(struct rdmap_untagged_packet) == 18, "unexpected sizeof(rdmap_untagged_packet)");
+static_assert(sizeof(struct rdmap_untagged_packet) == 22, "unexpected sizeof(rdmap_untagged_packet)");
 
 #define RDMAP_TAGGED_ALLOC_SIZE(len) (sizeof(struct rdmap_tagged_packet) + (len))
 #define RDMAP_UNTAGGED_ALLOC_SIZE(len) (sizeof(struct rdmap_untagged_packet) + (len))
@@ -107,7 +107,7 @@ struct rdmap_readreq_packet {
 	uint32_t source_stag;
 	uint64_t source_offset;
 } __attribute__((__packed__));
-static_assert(sizeof(struct rdmap_readreq_packet) == 42, "unexpected sizeof(rdmap_readreq_packet)");
+static_assert(sizeof(struct rdmap_readreq_packet) == 46, "unexpected sizeof(rdmap_readreq_packet)");
 
 struct rdmap_terminate_packet {
 	struct rdmap_untagged_packet untagged;
@@ -115,7 +115,7 @@ struct rdmap_terminate_packet {
 	uint8_t hdrct; /* bits: 0-M 1-D 2-R */
 	uint8_t reserved;
 } __attribute__((__packed__));
-static_assert(sizeof(struct rdmap_terminate_packet) == 22, "unexpected sizeof(rdmap_terminate_packet)");
+static_assert(sizeof(struct rdmap_terminate_packet) == 26, "unexpected sizeof(rdmap_terminate_packet)");
 
 struct rdmap_terminate_payload {
 	uint16_t ddp_seg_len;
@@ -133,14 +133,14 @@ struct rdmap_atomicreq_packet {
 	uint64_t compare_data;
 	uint64_t compare_mask;
 } __attribute__((__packed__));
-static_assert(sizeof(struct rdmap_atomicreq_packet) == 70, "unexpected sizeof(rdmap_atomicreq_packet)");
+static_assert(sizeof(struct rdmap_atomicreq_packet) == 74, "unexpected sizeof(rdmap_atomicreq_packet)");
 
 struct rdmap_atomicresp_packet {
 	struct rdmap_untagged_packet untagged;
 	uint32_t req_id;
 	uint64_t orig_value;
 } __attribute__((__packed__));
-static_assert(sizeof(struct rdmap_atomicresp_packet) == 30, "unexpected sizeof(rdmap_atomicresp_packet)");
+static_assert(sizeof(struct rdmap_atomicresp_packet) == 34, "unexpected sizeof(rdmap_atomicresp_packet)");
 
 enum rdmap_packet_type {
 	rdmap_opcode_rdma_write = 0,

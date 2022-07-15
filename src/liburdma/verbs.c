@@ -1165,7 +1165,7 @@ usiw_post_send(struct ibv_qp *ib_qp, struct ibv_send_wr *wr,
 			break;
 		case IBV_WR_SEND_WITH_IMM:
 			wqe->opcode = usiw_wr_send_with_imm;
-            wqe->imm_data = wr->imm_data;
+			wqe->imm_data = wr->imm_data;
 			if ((wr->send_flags & IBV_SEND_INLINE)
 					&& (ret = do_inline(qp, wqe, wr))!=0) {
 				goto errout;
@@ -1184,7 +1184,7 @@ usiw_post_send(struct ibv_qp *ib_qp, struct ibv_send_wr *wr,
 			wqe->opcode = usiw_wr_write_with_imm;
 			wqe->remote_addr = wr->wr.rdma.remote_addr;
 			wqe->rkey = wr->wr.rdma.rkey;
-            wqe->imm_data = wr->imm_data;
+			wqe->imm_data = wr->imm_data;
 			if ((wr->send_flags & IBV_SEND_INLINE)
 					&& (ret = do_inline(qp, wqe, wr))!=0) {
 				goto errout;
