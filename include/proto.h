@@ -155,8 +155,8 @@ enum rdmap_packet_type {
 	rdmap_opcode_imm_data_se = 9,
 	rdmap_opcode_atomic_request = 10,
 	rdmap_opcode_atomic_response = 11,
-    rdmap_opcode_rdma_write_with_imm = 12,
-    rdmap_opcode_rdma_send_with_imm = 13,
+	rdmap_opcode_rdma_write_with_imm = 12,
+	rdmap_opcode_send_with_imm = 13,
 };
 
 enum /*rdmap_hdrct*/ {

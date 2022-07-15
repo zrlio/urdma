@@ -898,7 +898,13 @@ do_rdmap_send(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 				- wqe->bytes_sent <= mtu)
 			? DDP_V1_UNTAGGED_LAST_DF
 			: DDP_V1_UNTAGGED_DF;
-		new_rdmap->head.rdmap_info = rdmap_opcode_send | RDMAP_V1;
+		if (wqe->opcode == usiw_wr_send_with_imm) {
+			new_rdmap->head.rdmap_info = rdmap_opcode_send_with_imm | RDMAP_V1;
+			new_rdmap->head.immediate = wqe->imm_data;
+		} else {
+			new_rdmap->head.rdmap_info = rdmap_opcode_send | RDMAP_V1;
+			new_rdmap->head.immediate = 0;
+		}
 		new_rdmap->head.sink_stag = rte_cpu_to_be_32(0);
 		new_rdmap->qn = rte_cpu_to_be_32(0);
 		new_rdmap->msn = rte_cpu_to_be_32(wqe->msn);
@@ -951,7 +957,13 @@ do_rdmap_write(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 				- wqe->bytes_sent <= mtu)
 			? DDP_V1_TAGGED_LAST_DF
 			: DDP_V1_TAGGED_DF;
-		new_rdmap->head.rdmap_info = RDMAP_V1 | rdmap_opcode_rdma_write;
+		if (wqe->opcode == usiw_wr_write_with_imm) {
+			new_rdmap->head.rdmap_info = rdmap_opcode_rdma_write_with_imm | RDMAP_V1;
+			new_rdmap->head.immediate = wqe->imm_data;
+		} else {
+			new_rdmap->head.rdmap_info = rdmap_opcode_rdma_write | RDMAP_V1;
+			new_rdmap->head.immediate = 0;
+		}
 		new_rdmap->head.sink_stag = rte_cpu_to_be_32(wqe->rkey);
 		new_rdmap->offset = rte_cpu_to_be_64(wqe->remote_addr
 				 + wqe->bytes_sent);
@@ -2292,9 +2304,11 @@ progress_send_wqe(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 
 	switch (wqe->opcode) {
 	case usiw_wr_send:
+	case usiw_wr_send_with_imm:
 		do_rdmap_send((struct usiw_qp *)qp, wqe);
 		break;
 	case usiw_wr_write:
+	case usiw_wr_write_with_imm:
 		do_rdmap_write((struct usiw_qp *)qp, wqe);
 		break;
 	case usiw_wr_read:

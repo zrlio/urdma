@@ -188,7 +188,7 @@ struct usiw_send_wqe {
 	size_t bytes_sent;
 	size_t bytes_acked;
 
-    uint32_t imm_data;
+	uint32_t imm_data;
 
 	size_t iov_count;
 	struct iovec iov[];
