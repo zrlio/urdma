@@ -763,8 +763,10 @@ get_ibv_send_wc_opcode(struct usiw_send_wqe *wqe)
 {
 	switch (wqe->opcode) {
 	case usiw_wr_send:
+	case usiw_wr_send_with_imm:
 		return IBV_WC_SEND;
 	case usiw_wr_write:
+	case usiw_wr_write_with_imm:
 		return IBV_WC_RDMA_WRITE;
 	case usiw_wr_read:
 		return IBV_WC_RDMA_READ;

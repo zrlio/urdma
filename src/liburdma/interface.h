@@ -118,6 +118,9 @@ struct usiw_wc {
 	enum ibv_wc_opcode opcode;
 	uint32_t byte_len;
 	uint32_t qp_num;
+
+	uint32_t wc_flags; // it can be 0 or IBV_WC_WITH_IMM
+	uint32_t imm_data; // valid when IBV_WC_WITH_IMM is set.
 };
 
 struct usiw_recv_wqe {
