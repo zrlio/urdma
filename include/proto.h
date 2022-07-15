@@ -66,8 +66,9 @@ struct rdmap_packet {
 	uint8_t ddp_flags; /* 0=Tagged 1=Last 7-6=DDP_Version */
 	uint8_t rdmap_info; /* 1-0=RDMAP_Version 7-4=Opcode */
 	uint32_t sink_stag;
+    uint32_t immediate; /* The immediate data */
 } __attribute__((__packed__));
-static_assert(sizeof(struct rdmap_packet) == 6, "unexpected sizeof(rdmap_packet)");
+static_assert(sizeof(struct rdmap_packet) == 8, "unexpected sizeof(rdmap_packet)");
 
 enum ddp_queue_number {
 	ddp_queue_send = 0,
@@ -154,6 +155,8 @@ enum rdmap_packet_type {
 	rdmap_opcode_imm_data_se = 9,
 	rdmap_opcode_atomic_request = 10,
 	rdmap_opcode_atomic_response = 11,
+    rdmap_opcode_rdma_write_with_imm = 12,
+    rdmap_opcode_rdma_send_with_imm = 13,
 };
 
 enum /*rdmap_hdrct*/ {
