@@ -751,6 +751,7 @@ post_recv_cqe(struct usiw_qp *qp, struct usiw_recv_wqe *wqe,
 	cqe->opcode = IBV_WC_RECV;
 	cqe->byte_len = wqe->input_size;
 	cqe->qp_num = qp->ib_qp.qp_num;
+	cqe->imm_data = wqe->imm_data;
 
 	qp_free_recv_wqe(qp, wqe);
 	finish_post_cqe(cq, cqe);
@@ -1284,6 +1285,8 @@ process_send(struct usiw_qp *qp, struct packet_context *orig)
 	if (wqe->recv_size == wqe->input_size) {
 		wqe->complete = true;
 	}
+
+	wqe->imm_data = rdmap->head.immediate;
 
 	/* Post completion, but only if there are no holes in the LLP packet
 	 * sequence. This ensures that even in the case of missing packets,
@@ -2264,13 +2267,14 @@ process_data_packet(struct usiw_qp *qp, struct rte_mbuf *mbuf)
 	}
 
 	if (DDP_GET_T(ctx.rdmap->ddp_flags)) {
-		return ddp_place_tagged_data(qp, &ctx);
+		return ddp_place_tagged_data(qp, &ctx); //TODO
 	} else {
 		switch (RDMAP_GET_OPCODE(ctx.rdmap->rdmap_info)) {
 			case rdmap_opcode_send:
 			case rdmap_opcode_send_inv:
 			case rdmap_opcode_send_se:
 			case rdmap_opcode_send_se_inv:
+			case rdmap_opcode_send_with_imm: //TODO
 				process_send(qp, &ctx);
 				break;
 			case rdmap_opcode_rdma_read_request:

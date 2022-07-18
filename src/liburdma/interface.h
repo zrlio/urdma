@@ -133,6 +133,8 @@ struct usiw_recv_wqe {
 	size_t recv_size;
 	size_t input_size;
 
+	uint32_t imm_data; // the immeidate data
+
 	size_t iov_count;
 	struct iovec iov[];
 };
