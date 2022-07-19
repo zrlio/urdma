@@ -2057,6 +2057,7 @@ ddp_place_tagged_data(struct usiw_qp *qp, struct packet_context *orig)
 	case rdmap_opcode_rdma_read_response:
 		process_rdma_read_response(qp, orig);
 		break;
+	case rdmap_opcode_rdma_write_with_imm:
 	default:
 		RTE_LOG(DEBUG, USER1, "<dev=%" PRIx16 " qp=%" PRIx16 "> received DDP tagged message with invalid opcode %" PRIx8 "\n",
 				qp->shm_qp->dev_id, qp->shm_qp->qp_id,
@@ -2274,7 +2275,7 @@ process_data_packet(struct usiw_qp *qp, struct rte_mbuf *mbuf)
 			case rdmap_opcode_send_inv:
 			case rdmap_opcode_send_se:
 			case rdmap_opcode_send_se_inv:
-			case rdmap_opcode_send_with_imm: //TODO
+			case rdmap_opcode_send_with_imm:
 				process_send(qp, &ctx);
 				break;
 			case rdmap_opcode_rdma_read_request:
