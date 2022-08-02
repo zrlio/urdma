@@ -620,7 +620,8 @@ convert_cqes(struct usiw_wc *cqe, int num_entries, struct ibv_wc *wc)
 		wc[x].opcode = cqe[x].opcode;
 		wc[x].byte_len = cqe[x].byte_len;
 		wc[x].qp_num = cqe[x].qp_num;
-		wc[x].wc_flags = 0;
+		wc[x].wc_flags = cqe[x].wc_flags;
+		wc[x].imm_data = cqe[x].imm_data;
 	}
 } /* convert_cqes */
 

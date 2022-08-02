@@ -752,6 +752,7 @@ post_recv_cqe(struct usiw_qp *qp, struct usiw_recv_wqe *wqe,
 	cqe->byte_len = wqe->input_size;
 	cqe->qp_num = qp->ib_qp.qp_num;
 	cqe->imm_data = wqe->imm_data;
+	cqe->wc_flags = IBV_WC_WITH_IMM;
 
 	qp_free_recv_wqe(qp, wqe);
 	finish_post_cqe(cq, cqe);
