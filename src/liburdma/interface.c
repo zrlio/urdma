@@ -1306,7 +1306,6 @@ process_send(struct usiw_qp *qp, struct packet_context *orig)
 		while (wqe && wqe->complete) {
 			rte_spinlock_lock(&qp->rq0.lock);
 			post_recv_cqe(qp, wqe, IBV_WC_SUCCESS);
-			printf("<=========> post a completion to cq with msn=%ul.\n", wqe->msn);
 			rte_spinlock_unlock(&qp->rq0.lock);
 			wqe = list_top(&qp->rq0.active_head, struct usiw_recv_wqe, active);
 		}
