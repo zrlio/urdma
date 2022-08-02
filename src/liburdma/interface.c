@@ -885,6 +885,10 @@ do_rdmap_send(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 	size_t payload_length;
 	uint16_t mtu = qp->shm_qp->mtu;
 
+	if (wqe->state != SEND_WQE_TRANSFER) {
+		return;
+	}
+
 	while ((wqe->bytes_sent < wqe->total_length || 
 		(wqe->bytes_sent == 0 && wqe->total_length == 0))
 			&& serial_less_32(wqe->remote_ep->send_next_psn,
