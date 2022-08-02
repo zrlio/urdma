@@ -885,7 +885,8 @@ do_rdmap_send(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 	size_t payload_length;
 	uint16_t mtu = qp->shm_qp->mtu;
 
-	while (wqe->bytes_sent < wqe->total_length
+	while ((wqe->bytes_sent < wqe->total_length || 
+		(wqe->bytes_sent == 0 && wqe->total_length == 0))
 			&& serial_less_32(wqe->remote_ep->send_next_psn,
 					wqe->remote_ep->send_max_psn)) {
 		sendmsg = rte_pktmbuf_alloc(qp->dev->tx_ddp_mempool);
@@ -910,14 +911,16 @@ do_rdmap_send(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 		new_rdmap->qn = rte_cpu_to_be_32(0);
 		new_rdmap->msn = rte_cpu_to_be_32(wqe->msn);
 		new_rdmap->mo = rte_cpu_to_be_32(wqe->bytes_sent);
-		if (wqe->flags & usiw_send_inline) {
-			memcpy(PAYLOAD_OF(new_rdmap),
-					(char *)wqe->iov + wqe->bytes_sent,
-					payload_length);
-		} else {
-			memcpy_from_iov(PAYLOAD_OF(new_rdmap), payload_length,
-					wqe->iov, wqe->iov_count,
-					wqe->bytes_sent);
+		if (payload_length > 0) {
+        		if (wqe->flags & usiw_send_inline) {
+        			memcpy(PAYLOAD_OF(new_rdmap),
+        					(char *)wqe->iov + wqe->bytes_sent,
+        					payload_length);
+        		} else {
+        			memcpy_from_iov(PAYLOAD_OF(new_rdmap), payload_length,
+        					wqe->iov, wqe->iov_count,
+        					wqe->bytes_sent);
+        		}
 		}
 
 		send_ddp_segment(qp, sendmsg, NULL, wqe, payload_length);
@@ -928,6 +931,10 @@ do_rdmap_send(struct usiw_qp *qp, struct usiw_send_wqe *wqe)
 				wqe->bytes_sent + payload_length);
 
 		wqe->bytes_sent += payload_length;
+
+		if(wqe->total_length == 0) {
+			break;
+		}
 	}
 
 	if (wqe->bytes_sent == wqe->total_length) {
@@ -1256,6 +1263,7 @@ process_send(struct usiw_qp *qp, struct packet_context *orig)
 					ddp_error_untagged_no_buffer);
 		}
 		return;
+	} else {
 	}
 
 	offset = rte_be_to_cpu_32(rdmap->mo);
@@ -1298,6 +1306,7 @@ process_send(struct usiw_qp *qp, struct packet_context *orig)
 		while (wqe && wqe->complete) {
 			rte_spinlock_lock(&qp->rq0.lock);
 			post_recv_cqe(qp, wqe, IBV_WC_SUCCESS);
+			printf("<=========> post a completion to cq with msn=%ul.\n", wqe->msn);
 			rte_spinlock_unlock(&qp->rq0.lock);
 			wqe = list_top(&qp->rq0.active_head, struct usiw_recv_wqe, active);
 		}
@@ -1877,7 +1886,7 @@ do_process_ack(struct usiw_qp *qp, struct usiw_send_wqe *wqe,
 	wqe->bytes_acked += pending->ddp_length;
 	assert(wqe->bytes_sent >= wqe->bytes_acked);
 
-	if ((wqe->opcode == usiw_wr_send || wqe->opcode == usiw_wr_write)
+	if ((wqe->opcode == usiw_wr_send || wqe->opcode == usiw_wr_write || wqe->opcode == usiw_wr_send_with_imm)
 			&& wqe->bytes_acked == wqe->total_length) {
 		assert(wqe->state == SEND_WQE_WAIT);
 		wqe->state = SEND_WQE_COMPLETE;
@@ -1936,6 +1945,7 @@ sweep_unacked_packets(struct usiw_qp *qp, uint64_t now)
 	for (count = 0; count < ep->tx_pending_size
 			&& (sendmsg = *ep->tx_head) != NULL; count++) {
 		pending = (struct pending_datagram_info *)(sendmsg + 1);
+
 		if (serial_less_32(pending->psn, ep->send_last_acked_psn)) {
 			/* Packet was acked */
 			if (pending->wqe) {
@@ -2271,11 +2281,11 @@ process_data_packet(struct usiw_qp *qp, struct rte_mbuf *mbuf)
 		return ddp_place_tagged_data(qp, &ctx); //TODO
 	} else {
 		switch (RDMAP_GET_OPCODE(ctx.rdmap->rdmap_info)) {
+			case rdmap_opcode_send_with_imm:
 			case rdmap_opcode_send:
 			case rdmap_opcode_send_inv:
 			case rdmap_opcode_send_se:
 			case rdmap_opcode_send_se_inv:
-			case rdmap_opcode_send_with_imm:
 				process_send(qp, &ctx);
 				break;
 			case rdmap_opcode_rdma_read_request:
@@ -2410,6 +2420,7 @@ progress_qp(struct usiw_qp *qp)
 	}
 
 	scount = 0;
+
 	list_for_each_safe(&qp->sq.active_head, send_wqe, next, active) {
 		if (list_next(&qp->sq.active_head, send_wqe, active)) {
 			rte_prefetch0(list_next(&qp->sq.active_head, send_wqe, active));
@@ -2426,6 +2437,7 @@ progress_qp(struct usiw_qp *qp)
 			assert(send_wqe->state == SEND_WQE_INIT);
 			send_wqe->state = SEND_WQE_TRANSFER;
 			switch (send_wqe->opcode) {
+				case usiw_wr_send_with_imm:
 				case usiw_wr_send:
 					send_wqe->msn = send_wqe->remote_ep
 							->next_send_msn++;
